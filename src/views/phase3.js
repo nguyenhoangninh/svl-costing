@@ -9,18 +9,44 @@ const esc = (s) => A.esc(s);
 const tabsHTML = (cur, tabs, attr) => `<div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" role="tab" class="tab ${id === cur ? 'on' : ''}" ${attr}="${id}" aria-selected="${id === cur}">${esc(label)}</button>`).join('')}</div>`;
 const colsOf = (fields, headers, types = {}, widths = {}) => fields.map((f, i) => ({ key: f, label: headers[i], type: types[f] || 'text', width: widths[f] || (types[f] === 'num' ? 140 : types[f] === 'qty' ? 100 : 120) }));
 
-export const PHASE3_BLOBS = ['fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'rwArchive'];
+export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'rwArchive'];
 export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
 export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist']);
 
 // ======================= derived =======================
 function snap(S, D4) {
   const d = S.d; const fl = D4 && D4.fl;
-  return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode };
+  return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode, dupKey: dupKey(S) };
 }
 const cfg = (S) => S.d.s5cfg || { mode: 'MONTHLY', tol: 1 };
-function freshness(S, D4) {
+/** Repeated sales lines of the period and how many still need a KEEP / EXCLUDE decision (F-03). */
+export function dupStatus(S) {
+  const groups = F5.duplicateGroups(S.d.salesDB ? S.d.salesDB.rows : [], S.period);
+  const dec = S.d.dupDecisions || {};
+  let pending = 0, excluded = 0;
+  for (const g of groups) for (const l of g) if (l.occ > 1) { const v = dec[l.key]; if (!v) pending++; else if (v === 'EXCLUDE') excluded++; }
+  return { groups, pending, excluded };
+}
+const dupKey = (S) => Object.entries(S.d.dupDecisions || {}).filter(([, v]) => v === 'EXCLUDE').map(([k]) => k).sort().join('|');
+/** Why STEP 5 is stale (F-01): any upstream step not CURRENT/PASS makes STEP 5 OUTDATED, not only a changed Step 4 run time. */
+function staleReason(S, D4, d3b) {
+  const r = S.d.step5; if (!r || !r.snap) return '';
+  if (D4 && D4.freshness !== 'CURRENT') return `STEP 4 ${D4.freshness}${P2.step4StaleReason(S, d3b) ? ' – ' + P2.step4StaleReason(S, d3b) : ''}`;
+  if (D4 && String(D4.controls.status).startsWith('BLOCK')) return `STEP 4 = ${D4.controls.status}`;
+  if (!D4 || !D4.fl) return 'STEP 4 chưa có kết quả';
+  const c = snap(S, D4), p = r.snap;
+  if (c.period !== p.period) return 'Kỳ khác';
+  if (c.step4RunAt !== p.step4RunAt) return 'STEP 4 đã chạy lại';
+  if (Math.abs(c.finalCost - p.finalCost) > 1) return 'Giá thành STEP 4 đã đổi (điều chỉnh 3B / rework hoàn thành)';
+  if (c.dbSavedAt !== p.dbSavedAt) return 'Sales Database đã lưu lại';
+  if (c.openValidatedAt !== p.openValidatedAt) return 'FG đầu kỳ đã validate lại';
+  if (c.mode !== p.mode) return 'Đổi chế độ FIFO';
+  if (dupKey(S) !== (p.dupKey || '')) return 'Quyết định dòng nghi trùng đã đổi';
+  return '';
+}
+function freshness(S, D4, d3b) {
   const r = S.d.step5; if (!r || !r.snap) return 'NOT RUN';
+  if (staleReason(S, D4, d3b)) return 'OUTDATED';
   const c = snap(S, D4), p = r.snap;
   const same = c.period === p.period && c.step4RunAt === p.step4RunAt && Math.abs(c.finalCost - p.finalCost) <= 1 && c.dbSavedAt === p.dbSavedAt && c.openValidatedAt === p.openValidatedAt && c.mode === p.mode;
   return same ? 'CURRENT' : 'OUTDATED';
@@ -30,12 +56,16 @@ const sumOf = (rows, f) => (rows || []).reduce((a, r) => a + num(r[f]), 0);
 export function derive(S, p2) {
   const d = S.d; const D4 = p2 ? p2.d4 : null; const fl = D4 ? D4.fl : null;
   const res = d.step5 && d.step5.period === S.period ? d.step5 : null;
-  const fresh = res ? freshness(S, D4) : 'NOT RUN';
+  const fresh = res ? freshness(S, D4, p2 ? p2.d3b : null) : 'NOT RUN';
+  const stale = res ? staleReason(S, D4, p2 ? p2.d3b : null) : '';
+  const dups = dupStatus(S);
   const hg = F5.historyGate(d.fgHistory, res, S.period);
   const recon = F5.step5Recon({ period: S.period, res, freshness: fresh, hist: d.fgHistory, histGate: d.fgHistory ? hg : null, gl: d.gl, fl, s4: d.step4, gate6: fl ? fl.gate6 : '' });
   const controls = step5Controls(S, { res, recon, hg, fl, fresh });
-  const closeReason = F5.closeBlockReason({ period: S.period, recon, histGate: d.fgHistory ? hg : null, res, register: d.register, closed: d.closed });
-  return { res, fresh, hg, recon, controls, closeReason };
+  let closeReason = F5.closeBlockReason({ period: S.period, recon, histGate: d.fgHistory ? hg : null, res, register: d.register, closed: d.closed });
+  if (res && stale && !(d.closed && d.closed.period === S.period)) closeReason = `STEP 5 OUTDATED: ${stale}. Chạy lại theo thứ tự STEP 4 → RUN FIFO → BUILD FG HISTORY.`;
+  if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
+  return { res, fresh, stale, dups, hg, recon, controls, closeReason };
 }
 
 /** 00_CONTROL_CENTER rows 119..136 — STEP 5 checkpoints. */
@@ -189,7 +219,8 @@ export function viewFIFO(el) {
       <button class="btn" data-act="s5-run" type="button">RUN FIFO COGS</button>
       <span class="muted">${res ? `Chạy ${A.fmtTs(res.runAt)} · ${res.runSeconds}s · ${A.pill(D5.fresh)}` : ''}</span>
     </div>
-    ${res && D5.fresh !== 'CURRENT' ? '<div class="alert review">Đầu vào đã thay đổi sau lần chạy gần nhất (STEP 4 / doanh thu / FG đầu kỳ / chế độ FIFO / rework hoàn thành). Chạy lại RUN FIFO COGS.</div>' : ''}
+    ${res && D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>STEP 5 OUTDATED:</b> ${esc(D5.stale)}. Chạy lại theo thứ tự (STEP 4 nếu cần) → RUN FIFO COGS → BUILD FG HISTORY.</div>` : ''}
+    ${D5.dups.pending ? `<div class="alert review">Còn <b>${D5.dups.pending}</b> dòng doanh thu nghi trùng trong kỳ chưa xác nhận – đang được tính FIFO như dòng thật (giống Excel). <a href="#sales">Xác nhận ở 4.1 → Nghi trùng</a>. Chưa xác nhận thì không đóng kỳ được.</div>` : ''}
     ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn FIFO (632)', T.cogsA, true)}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
     <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}</details>
@@ -256,7 +287,7 @@ export function doRunFIFO() {
   if (gate) { A.toast('FG Rework FIFO không chạy: ' + gate, 'block'); return; }
   const before = snap(S, D4);
   try {
-    const res = F5.runFIFO({ period: S.period, opening: d.fgOpen, caRows: fl.rows, salesRows: d.salesDB ? d.salesDB.rows : [], pmRows: d.pm ? d.pm.rows : [], fx: d.gl ? d.gl.fx : 0, overrides: d.fifoOverrides || {}, mode: conf.mode, tol: conf.tol,
+    const res = F5.runFIFO({ period: S.period, opening: d.fgOpen, caRows: fl.rows, salesRows: d.salesDB ? d.salesDB.rows : [], pmRows: d.pm ? d.pm.rows : [], fx: d.gl ? d.gl.fx : 0, overrides: d.fifoOverrides || {}, dupDecisions: d.dupDecisions || {}, mode: conf.mode, tol: conf.tol,
       step4: { current: D4.freshness, overall: fl.overall, finalCost: fl.totals.totalCost, qty: d.step4.totalQty } });
     let rwMsg = '';
     if (F5.reworkCount(d.register)) {

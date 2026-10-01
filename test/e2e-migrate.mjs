@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import path from 'node:path';
-const [, , base, wbPath, outDir] = process.argv;
+const [, , base0, wbPath, outDir] = process.argv;
+const base = base0 + '?sandbox=1';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
@@ -27,3 +28,4 @@ await page.goto(base + '#rework'); await page.waitForTimeout(500);
 console.log('rework sep:', (await page.textContent('main')).replace(/\s+/g, ' ').slice(0, 300));
 console.log('errors:', errors.join('\n') || 'none');
 await browser.close();
+if (errors.length) process.exit(1);

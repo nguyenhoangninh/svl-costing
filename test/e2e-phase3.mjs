@@ -1,7 +1,8 @@
 // Browser check for STEP 5 screens: migrate workbook → FIFO → history → close → roll forward.
 import { chromium } from 'playwright';
 import path from 'node:path';
-const [, , base, wbPath, outDir] = process.argv;
+const [, , base0, wbPath, outDir] = process.argv;
+const base = base0 + '?sandbox=1';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
@@ -26,13 +27,39 @@ console.log('FIFO:', await txt('.result'), '|', await txt('.kpis'));
 for (const t of ['detail', 'ledger', 'closing', 'sum', 'rw', 'xnt', 'rec', 'sales']) { await page.click(`[data-tab5="${t}"]`); await page.waitForTimeout(200); if (t === 'rw') await shot('33-rework.png'); }
 await page.click('[data-act=s5-run]'); await page.waitForTimeout(1500);
 console.log('FIFO rerun:', await txt('.result'), (await txt('main')).match(/Chạy \d.{0,60}/)?.[0]);
+await page.goto(base + '#sales'); await page.click('[data-tabs="dup"]'); await page.waitForTimeout(300); await shot('34a-dup.png');
+await page.click('[data-dupall="KEEP"]'); await page.waitForTimeout(300);
+console.log('dup:', (await txt('.alert')).slice(0, 160));
 await page.goto(base + '#close'); await page.waitForSelector('.result'); await shot('34-close.png');
 console.log('CLOSE:', await txt('.result'), '|', await txt('.kpis'));
+// F-01: upstream change after STEP 5 must make it OUTDATED and block the close
+await page.goto(base + '#gl'); await page.waitForSelector('#f-gl');
+const g627 = await page.inputValue('input[name=gl627]');
+await page.fill('input[name=gl627]', '26.300'); await page.click('#f-gl button[type=submit]'); await page.waitForTimeout(300);
+console.log('ambiguous number rejected:', (await page.textContent('#toasts')).includes('không rõ'));
+await page.fill('input[name=gl627]', String(+g627 + 1000)); await page.click('#f-gl button[type=submit]'); await page.waitForTimeout(500);
+await page.goto(base + '#close'); await page.waitForSelector('.result');
+console.log('after GL edit:', (await txt('main')).match(/Chưa đóng được:.{0,140}/)?.[0]);
+await page.goto(base + '#gl'); await page.fill('input[name=gl627]', g627); await page.click('#f-gl button[type=submit]'); await page.waitForTimeout(300);
+await page.goto(base + '#step4'); await page.click('[data-act=run-step4]'); await page.waitForTimeout(1500);
+await page.goto(base + '#step5'); await page.click('[data-act=s5-run]'); await page.waitForTimeout(1500);
+await page.goto(base + '#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-hist]'); await page.waitForTimeout(1200);
 await page.click('[data-act=s5-close]'); await page.waitForTimeout(1200);
 console.log('after close:', await txt('.result'));
 await shot('35-closed.png');
-await page.goto(base + '#step4'); await page.click('[data-act=run-step4]'); await page.waitForTimeout(500);
+// F-02: closed period is read-only everywhere
+await page.goto(base + '#gl'); await page.waitForSelector('#f-gl');
+console.log('closed: GL inputs disabled =', await page.isDisabled('input[name=gl627]'));
+await page.goto(base + '#p3b'); await page.click('[data-tab3b="input"]'); await page.waitForTimeout(300);
+console.log('closed: 3B editable cells =', await page.locator('#t3b td.ed input, #t3b td.ed select').count());
+await page.goto(base + '#step4'); await page.click('[data-act=run-step4]'); await page.waitForTimeout(300);
+console.log('closed: run step4 blocked =', (await page.textContent('#toasts')).includes('đã đóng'));
+await page.goto(base + '#close'); await page.click('[data-act=s5-reopen]'); await page.waitForTimeout(500);
+await page.goto(base + '#gl'); await page.waitForSelector('#f-gl');
+console.log('reopened: GL inputs disabled =', await page.isDisabled('input[name=gl627]'));
+await page.goto(base + '#close'); await page.click('[data-act=s5-close]'); await page.waitForTimeout(800);
+console.log('re-closed:', await txt('.result'));
 await page.evaluate(() => { window.prompt = () => '2026-09'; });
 await page.click('[data-act=new-period]'); await page.waitForTimeout(2000);
 await page.goto(base + '#fgopen'); await page.waitForSelector('.kpis');
@@ -48,3 +75,4 @@ await page.emulateMedia({ colorScheme: 'dark' }); await page.goto(base + '#step5
 await page.setViewportSize({ width: 390, height: 844 }); await page.goto(base + '#fgopen'); await page.waitForTimeout(400); await shot('38-mobile.png');
 console.log('errors:', errors.join('\n') || 'none');
 await browser.close();
+if (errors.length) process.exit(1);

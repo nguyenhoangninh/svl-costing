@@ -144,3 +144,42 @@ export function round(x, d = 2) {
   const f = 10 ** d;
   return Math.round(x * f) / f;
 }
+
+/**
+ * Number typed by a user (F-16). Accepts 1234.5 · 1234,5 · 1,234,567.89 · 1.234.567,89 · 15.506.701.812 · (123) · -1.5.
+ * A single separator followed by exactly 3 digits ("26.300", "1,500") is ambiguous and rejected instead of guessed.
+ * Returns {ok:true, value} (value null for blank) or {ok:false, error}.
+ */
+export function parseUserNumber(v) {
+  if (v === null || v === undefined) return { ok: true, value: null };
+  if (typeof v === 'number') return isFinite(v) ? { ok: true, value: v } : { ok: false, error: 'Số không hợp lệ' };
+  let s = String(v).trim().replace(/[\s ]/g, '');
+  if (s === '') return { ok: true, value: null };
+  const bad = { ok: false, error: `'${v}' không phải số hợp lệ` };
+  let neg = false;
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  if (s[0] === '-') { neg = !neg; s = s.slice(1); } else if (s[0] === '+') s = s.slice(1);
+  if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return bad;
+  const nd = (s.match(/\./g) || []).length, nc = (s.match(/,/g) || []).length;
+  let out;
+  if (nd && nc) {
+    const dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',', th = dec === '.' ? ',' : '.';
+    const parts = s.split(dec); if (parts.length !== 2 || !parts[1]) return bad;
+    const ip = parts[0].split(th);
+    if (!/^\d{1,3}$/.test(ip[0]) || ip.slice(1).some((x) => !/^\d{3}$/.test(x)) || /\D/.test(parts[1])) return bad;
+    out = ip.join('') + '.' + parts[1];
+  } else if (!nd && !nc) out = s;
+  else {
+    const sep = nd ? '.' : ',', n = nd || nc, parts = s.split(sep);
+    if (n > 1) {
+      if (!/^\d{1,3}$/.test(parts[0]) || parts.slice(1).some((x) => !/^\d{3}$/.test(x))) return bad;
+      out = parts.join('');
+    } else {
+      if (!parts[0] || !parts[1]) return bad;
+      if (parts[1].length === 3 && parts[0] !== '0') { const dd = parts[1].replace(/0+$/, ''); return { ok: false, error: `'${v}' không rõ là ${parts[0]}${parts[1]} hay ${parts[0]}${dd ? ',' + dd : ''} – nhập ${parts[0]}${parts[1]} (không dấu phân cách) hoặc ${parts[0]}${dd ? ',' + dd : ''}` }; }
+      out = parts[0] + '.' + parts[1];
+    }
+  }
+  const x = parseFloat(out);
+  return isFinite(x) ? { ok: true, value: neg ? -x : x } : bad;
+}

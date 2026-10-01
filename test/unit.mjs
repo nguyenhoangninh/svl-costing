@@ -1,0 +1,58 @@
+// Synthetic control tests (no private fixtures needed) — run in CI on every push / PR.
+import { parseUserNumber } from '../src/engine/util.js';
+import { validateSaveSales, salesCoverage } from '../src/engine/step4.js';
+import { buildFingerprint } from '../src/engine/step3b.js';
+import * as F5 from '../src/engine/step5.js';
+
+let n = 0, fail = 0;
+const eq = (label, got, want) => { n++; const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) { fail++; console.log(`✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); } };
+const ser = (y, m, d) => (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000;
+
+// ---- F-16 user number parsing
+for (const [s, v] of [['26300', 26300], ['1,5', 1.5], ['1.5', 1.5], ['15.506.701.812', 15506701812], ['15,506,701,812', 15506701812], ['1.234.567,89', 1234567.89], ['1,234,567.89', 1234567.89], ['(1.000.000)', -1000000], ['-0,125', -0.125], ['', null]]) eq(`parse ${s}`, parseUserNumber(s).value, v);
+for (const s of ['26.300', '1,500', 'abc', '1.2.3', '1,23,4']) eq(`reject ${s}`, parseUserNumber(s).ok, false);
+
+// ---- F-05 sales coverage by mode
+const P = '2026-10';
+eq('MONTHLY coverage = whole month', salesCoverage('MONTHLY', ser(2026, 10, 5), ser(2026, 10, 10), P), { from: ser(2026, 10, 1), to: ser(2026, 10, 31) });
+eq('YTD coverage = 1 Jan → period end', salesCoverage('YTD', ser(2026, 1, 3), ser(2026, 10, 20), P), { from: ser(2026, 1, 1), to: ser(2026, 10, 31) });
+const row = (d, inv, prod, qty, usd) => ({ invDate: d, customer: 'C', product: prod, prodName: 'N', fx: 25000, qty, unitPrice: usd / qty, amtUSD: usd, amtVND: usd * 25000, invNo: inv, lineNo: '', tranType: 'NORMAL SALE' });
+let db = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 10, 2), 'I1', 'A', 1, 10), row(ser(2026, 10, 5), 'I2', 'A', 2, 20), row(ser(2026, 10, 10), 'I3', 'A', 3, 30)] }, { rows: [] }, P).db;
+db = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 10, 5), 'I2', 'A', 2, 20), row(ser(2026, 10, 10), 'I3', 'A', 3, 30)] }, db, P).db;
+eq('T-05 removed early-month row disappears', db.rows.map((r) => r.invNo).sort(), ['I2', 'I3']);
+db = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 9, 20), 'S1', 'A', 1, 10)] }, db, P).db;
+eq('rows outside coverage kept', db.rows.map((r) => r.invNo).sort(), ['I2', 'I3', 'S1']);
+
+// ---- F-04 3B build fingerprint
+const inp = [{ code: 'M1', basisQty: -5, basisAmt: 100, option: '' }];
+const fp = buildFingerprint(inp, { rows: [] }, { runAt: 'a' }, { runAt: 'b' });
+eq('fp stable', buildFingerprint(JSON.parse(JSON.stringify(inp)), { rows: [] }, { runAt: 'a' }, { runAt: 'b' }), fp);
+eq('fp changes on basis edit', buildFingerprint([{ ...inp[0], basisAmt: 101 }], { rows: [] }, { runAt: 'a' }, { runAt: 'b' }) !== fp, true);
+eq('fp changes on ERP override', buildFingerprint(inp, { rows: [{ code: 'M1', override: 'O' }] }, { runAt: 'a' }, { runAt: 'b' }) !== fp, true);
+eq('fp ignores reviewer note', buildFingerprint([{ ...inp[0], note: 'x', reason: 'y' }], { rows: [] }, { runAt: 'a' }, { runAt: 'b' }), fp);
+
+// ---- F-03 duplicate sales lines + FIFO
+const P2 = '2026-08';
+const opening = { period: P2, status: 'LOADED', rows: [{ period: P2, srcPeriod: '2026-07', lid: 'OP-1', source: 'OPENING', pc: 'PC1', date: ser(2026, 7, 10), mo: 'MO', prod: 'A', name: 'A', loc: '', unit: 'PC', qty: 10, rm: 600, a622: 200, a627: 200, tot: 1000, price: 0, prov: 0, cons: '' }] };
+F5.validateOpeningFG(opening, P2);
+eq('opening validated', opening.status, 'VALIDATED');
+const sales = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 2, 20), row(ser(2026, 8, 5), 'X1', 'A', 2, 20), row(ser(2026, 8, 6), 'X2', 'A', 1, 10)] }, { rows: [] }, P2).db.rows;
+const groups = F5.duplicateGroups(sales, P2);
+eq('one duplicate group of 2', groups.map((g) => g.length), [2]);
+const ca = [{ pc: 'PC2', date: ser(2026, 8, 1), prod: 'A', name: 'A', qty: 5, totalRM: 300, t622: 100, t627: 100, totalCost: 500, statusText: '' }];
+const ctx = (dec) => ({ period: P2, opening, caRows: ca, salesRows: sales, pmRows: [], fx: 25000, overrides: {}, dupDecisions: dec, mode: 'MONTHLY', tol: 1, step4: { current: 'CURRENT', overall: 'PASS', finalCost: 500, qty: 5 } });
+const keep = F5.runFIFO(ctx({}));
+eq('KEEP: all 5 units sold, COGS 500', [keep.totals.cogsQ, Math.round(keep.totals.cogsA)], [5, 500]);
+const ex = F5.runFIFO(ctx({ [groups[0][1].key]: 'EXCLUDE' }));
+eq('EXCLUDE: duplicate not consumed', [ex.totals.cogsQ, Math.round(ex.totals.cogsA)], [3, 300]);
+eq('EXCLUDE: line marked NO COGS', ex.sales.find((s) => s.key === groups[0][1].key).fin, 'NO COGS');
+eq('FIFO oldest layer first', Math.round(keep.ledger.find((l) => l.lid === 'OP-1').remQ), 5);
+eq('roll-forward qty', keep.rec[8].status, 'PASS');
+
+// ---- STEP 4 must be CURRENT to run FIFO
+let threw = '';
+try { F5.runFIFO({ ...ctx({}), step4: { current: 'OUTDATED - RERUN REQUIRED', overall: 'PASS' } }); } catch (e) { threw = e.message; }
+eq('FIFO refuses stale STEP 4', threw.includes('CURRENT'), true);
+
+console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
+process.exit(fail ? 1 : 0);

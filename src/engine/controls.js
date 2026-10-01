@@ -105,7 +105,7 @@ export function step3bControls(x) {
   const builtAt = control ? control.builtAt : '', appliedAt = control ? control.appliedAt : '';
   const d84 = passC === 0 || approve === passC ? 'PASS' : blankDec > 0 ? 'REVIEW - DECISION MISSING' : approve === 0 ? 'REVIEW - NO ADJ (HOLD)' : 'REVIEW - PARTIAL APPROVE';
   const postedOK = rowsC.filter((r) => r.postCheck === 'POSTED PASS' || r.postCheck === '632 REGISTER READY').length;
-  const fresh = !builtAt ? 'NOT RUN' : step3 && builtAt < step3.runAt ? 'RERUN BUILD' : approve === 0 && !rowsC.some((r) => r.gate === 'READY TO POST') ? 'CURRENT' : (appliedAt || '') < builtAt ? 'RERUN APPLY' : 'CURRENT';
+  const fresh = !builtAt ? 'NOT RUN' : (step3 && builtAt < step3.runAt) || x.buildStale ? 'RERUN BUILD' : approve === 0 && !rowsC.some((r) => r.gate === 'READY TO POST') ? 'CURRENT' : (appliedAt || '') < builtAt ? 'RERUN APPLY' : 'CURRENT';
   const rows = [
     cp('01', 'Kỳ INPUT = kỳ báo cáo', period, step3 ? step3.period : '', '', step3 && step3.period === period ? 'PASS' : 'BLOCK', '03_WIP_DIRECT_ADJ_INPUT B2'),
     cp('02', 'Số vật tư trong INPUT', '> 0', inN, '', inN > 0 ? 'PASS' : 'NOT RUN', 'Vật tư WIP âm đưa vào INPUT'),

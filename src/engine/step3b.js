@@ -409,6 +409,17 @@ export function postedByLot(engDyn) {
   return m;
 }
 
+// ======================= build fingerprint (F-04) =======================
+/** Canonical fingerprint of what a BUILD (and the reviewer decisions on it) is based on: INPUT basis / option, ERP overrides, STEP 2/3 runs. */
+export function buildFingerprint(input, erpMap, step2, step3) {
+  const inp = (input || []).map((r) => [utxt(r.code), num(r.basisQty), num(r.basisAmt), utxt(r.option)].join('~')).sort().join('|');
+  const map = ((erpMap && erpMap.rows) || []).filter((r) => ttxt(r.override)).map((r) => utxt(r.code) + '=' + utxt(r.override)).sort().join('|');
+  const str = [inp, map, step2 ? step2.runAt : '', step3 ? step3.runAt : ''].join('#');
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = Math.imul(h2 ^ c, 2246822519) >>> 0; }
+  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+
 // ======================= full BUILD convenience =======================
 export function runBuild(state, ctx) {
   const { step3, step2, datasets, period } = ctx;
@@ -422,5 +433,6 @@ export function runBuild(state, ctx) {
   const control = buildControl(detail, inputD, state.control);
   // 632 rows that were RECORDED but are no longer approved -> keep only RECORDED rows (B2_ClearUnrecorded632)
   const reg632 = (state.reg632 || []).filter((r) => r.record === 'RECORDED');
+  control.fp = buildFingerprint(state.input, mapRes.map, step2, step3);
   return { erpMap: mapRes.map, engine, detail, control, reg632, mapMsg: mapRes.msg, builtAt: control.builtAt };
 }

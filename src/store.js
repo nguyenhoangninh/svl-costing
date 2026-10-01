@@ -3,7 +3,9 @@
 import { FIREBASE_CONFIG, ALLOWED_EMAILS, CLOUD_COLLECTION } from './config.js';
 
 // ---------------- IndexedDB ----------------
-const DB_NAME = 'svl-costing', DB_VER = 1;
+/** ?sandbox=1 → separate local database, cloud disabled (training / testing; never mixed with production data). */
+export const SANDBOX = typeof location !== 'undefined' && new URLSearchParams(location.search).has('sandbox');
+const DB_NAME = SANDBOX ? 'svl-costing-sandbox' : 'svl-costing', DB_VER = 1;
 let dbp = null;
 function db() {
   if (!dbp) dbp = new Promise((res, rej) => {
@@ -55,7 +57,7 @@ async function sha(str) {
 // ---------------- Firebase (lazy) ----------------
 const V = '10.12.2';
 let fb = null; // {app, auth, fs, mod}
-export const cloud = { enabled: !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey), user: null, ready: false, error: '', role: '', isOwner: false };
+export const cloud = { enabled: !SANDBOX && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey), user: null, ready: false, offline: false, error: '', role: '', isOwner: false };
 
 export async function initCloud(onUser) {
   if (!cloud.enabled) return;
@@ -81,8 +83,9 @@ export async function initCloud(onUser) {
       }
       cloud.user = u || null;
       onUser(cloud.user);
+      if (cloud.user) flushAudit();
     });
-  } catch (e) { cloud.error = 'Không kết nối được Firebase — đang chạy offline, dữ liệu chỉ lưu trên máy này.'; console.warn(e); cloud.ready = false; onUser(null); }
+  } catch (e) { cloud.offline = true; cloud.error = 'Không kết nối được Firebase — chỉ xem dữ liệu đã lưu trên máy này, không chỉnh sửa được cho đến khi kết nối lại.'; console.warn(e); cloud.ready = false; onUser(null); }
 }
 const allowed = (email) => !ALLOWED_EMAILS.length || ALLOWED_EMAILS.map((x) => x.toLowerCase()).includes(String(email || '').toLowerCase());
 export async function signIn() { await fb.A.signInWithPopup(fb.auth, new fb.A.GoogleAuthProvider()); }
@@ -104,8 +107,11 @@ async function loadRole(u) {
   cloud.isOwner = !r;
   cloud.role = r || 'admin';
 }
-export const canEdit = () => !cloud.user || cloud.role === 'admin' || cloud.role === 'editor';
-export const isAdmin = () => !!cloud.user && cloud.role === 'admin';
+/** With Firebase configured, editing requires a signed-in admin/editor (no anonymous local edits of production data). */
+export const canEdit = () => (cloud.enabled ? !!cloud.user && (cloud.role === 'admin' || cloud.role === 'editor') : true);
+export const isAdmin = () => (cloud.enabled ? !!cloud.user && cloud.role === 'admin' : true);
+/** Firebase configured and reachable, but nobody signed in → production data stays hidden. */
+export const needsSignIn = () => cloud.enabled && cloud.ready && !cloud.user;
 
 export async function getAccess() {
   const snap = await fb.F.getDoc(adoc());
@@ -121,34 +127,68 @@ export async function saveAccess(members) {
 const pdoc = (period) => fb.F.doc(fb.fs, CLOUD_COLLECTION, period);
 const cdoc = (period, id) => fb.F.doc(fb.fs, CLOUD_COLLECTION, period, 'chunks', id);
 const CHUNK = 700000;
+/** Chunk id of blob `name` part k. New saves use content-addressed keys (name@hash) so a save never overwrites
+ *  chunks that the committed manifest still points to; legacy manifests (no key) use name__k. */
+const chunkId = (name, m, k) => `${m.key || name}__${k}`;
 
-/** Upload changed blobs. blobs = {name: object}. manifest = existing cloud manifest {name:{hash,n}} */
-export async function cloudSave(period, blobs, summary, onProgress) {
-  if (!cloud.user) return null;
+export class ConflictError extends Error {
+  constructor(meta) {
+    super(`Kỳ này trên cloud đã được ${meta && meta.updatedBy ? meta.updatedBy : 'người khác'} cập nhật lúc ${meta && meta.updatedAt ? new Date(meta.updatedAt).toLocaleString('vi-VN') : '?'} (bản ${meta ? meta.rev || 0 : 0}). Không ghi đè – hãy tải bản cloud về rồi làm lại thay đổi.`);
+    this.name = 'ConflictError'; this.meta = meta;
+  }
+}
+
+/**
+ * Upload changed blobs with optimistic concurrency.
+ * baseRev = cloud revision this device last loaded/saved (null = never synced). The commit is a Firestore transaction that
+ * only succeeds while the cloud revision is still baseRev; otherwise ConflictError and nothing becomes visible.
+ */
+export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
+  if (!cloud.user) throw new Error('Chưa đăng nhập.');
   const F = fb.F;
   const snap = await F.getDoc(pdoc(period));
-  const old = snap.exists() ? snap.data().blobs || {} : {};
-  const manifest = { ...old };
+  const cur = snap.exists() ? snap.data() : null;
+  const curRev = cur ? cur.rev || 0 : 0;
+  if (cur && (baseRev === null || baseRev === undefined || curRev !== baseRev)) throw new ConflictError(cur);
+  const old = cur ? cur.blobs || {} : {};
+  const manifest = {}; const written = [];
   const names = Object.keys(blobs); let i = 0;
   for (const name of names) {
     i++;
     const json = JSON.stringify(blobs[name]);
     const hash = await sha(json);
-    if (old[name] && old[name].hash === hash) continue;
+    if (old[name] && old[name].hash === hash) { manifest[name] = old[name]; continue; }
     onProgress && onProgress(`Đang lưu ${name} (${i}/${names.length})…`);
     const b64 = toB64(await gzip(json));
     const n = Math.ceil(b64.length / CHUNK) || 1;
-    for (let k = 0; k < n; k++) await F.setDoc(cdoc(period, `${name}__${k}`), { d: b64.slice(k * CHUNK, (k + 1) * CHUNK) });
-    for (let k = n; k < (old[name] ? old[name].n : 0); k++) await F.deleteDoc(cdoc(period, `${name}__${k}`));
-    manifest[name] = { hash, n, size: json.length, savedAt: new Date().toISOString() };
+    const m = { key: `${name}@${hash}`, hash, n, size: json.length, savedAt: new Date().toISOString() };
+    for (let k = 0; k < n; k++) { await F.setDoc(cdoc(period, chunkId(name, m, k)), { d: b64.slice(k * CHUNK, (k + 1) * CHUNK) }); written.push(chunkId(name, m, k)); }
+    manifest[name] = m;
   }
-  for (const name of Object.keys(old)) if (!(name in blobs)) {
-    for (let k = 0; k < old[name].n; k++) await F.deleteDoc(cdoc(period, `${name}__${k}`));
-    delete manifest[name];
+  const meta = { period, rev: curRev + 1, blobs: manifest, summary: summary || {}, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
+  try {
+    await F.runTransaction(fb.fs, async (t) => {
+      const s2 = await t.get(pdoc(period));
+      const r2 = s2.exists() ? s2.data().rev || 0 : 0;
+      if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
+      t.set(pdoc(period), meta);
+    });
+  } catch (e) {
+    // nothing committed: remove the chunks this attempt wrote (best effort, admins only)
+    if (isAdmin()) for (const id of written) { if (!referenced(old, id)) await F.deleteDoc(cdoc(period, id)).catch(() => {}); }
+    throw e;
   }
-  const meta = { period, blobs: manifest, summary: summary || {}, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
-  await F.setDoc(pdoc(period), meta);
+  // committed: clean chunks that no manifest references any more (admins only; harmless leftovers otherwise)
+  if (isAdmin()) await sweepChunks(period, manifest).catch(() => {});
   return meta;
+}
+function referenced(manifest, id) {
+  for (const [name, m] of Object.entries(manifest || {})) for (let k = 0; k < m.n; k++) if (chunkId(name, m, k) === id) return true;
+  return false;
+}
+async function sweepChunks(period, manifest) {
+  const q = await fb.F.getDocs(fb.F.collection(fb.fs, CLOUD_COLLECTION, period, 'chunks'));
+  for (const d of q.docs) if (!referenced(manifest, d.id)) await fb.F.deleteDoc(d.ref);
 }
 
 export async function cloudMeta(period) {
@@ -164,8 +204,10 @@ export async function cloudLoad(period, onProgress) {
   for (const [name, m] of Object.entries(meta.blobs || {})) {
     onProgress && onProgress(`Đang tải ${name}…`);
     let b64 = '';
-    for (let k = 0; k < m.n; k++) { const s = await fb.F.getDoc(cdoc(period, `${name}__${k}`)); b64 += s.data().d; }
-    out[name] = JSON.parse(await gunzip(fromB64(b64)));
+    for (let k = 0; k < m.n; k++) { const s = await fb.F.getDoc(cdoc(period, chunkId(name, m, k))); if (!s.exists()) throw new Error(`Thiếu dữ liệu ${name} (phần ${k + 1}/${m.n}) trên cloud.`); b64 += s.data().d; }
+    const json = await gunzip(fromB64(b64));
+    if (m.hash && (await sha(json)) !== m.hash) throw new Error(`Dữ liệu ${name} trên cloud không khớp mã kiểm tra.`);
+    out[name] = JSON.parse(json);
   }
   return { meta, blobs: out };
 }
@@ -177,7 +219,39 @@ export async function cloudPeriods() {
 }
 
 export async function cloudDelete(period) {
+  if (!isAdmin()) throw new Error('Chỉ quản trị viên được xoá kỳ trên cloud.');
   const meta = await cloudMeta(period); if (!meta) return;
-  for (const [name, m] of Object.entries(meta.blobs || {})) for (let k = 0; k < m.n; k++) await fb.F.deleteDoc(cdoc(period, `${name}__${k}`));
+  await sweepChunks(period, {});
   await fb.F.deleteDoc(pdoc(period));
+}
+
+// ---------------- append-only audit trail (svl_costing_audit) ----------------
+const AUDIT = 'svl_costing_audit';
+let auditQueue = [];
+export function cloudAudit(evt) {
+  if (!cloud.enabled) return;
+  auditQueue.push(evt);
+  localSet('auditQueue', auditQueue).catch(() => {});
+  flushAudit();
+}
+let flushing = false;
+export async function flushAudit() {
+  if (flushing || !cloud.user || !fb) return;
+  flushing = true;
+  try {
+    if (!auditQueue.length) auditQueue = (await localGet('auditQueue')) || [];
+    while (auditQueue.length) {
+      const e = auditQueue[0];
+      await fb.F.addDoc(fb.F.collection(fb.fs, AUDIT), { ...e, by: cloud.user.email.toLowerCase(), role: cloud.role, serverAt: fb.F.serverTimestamp() });
+      auditQueue.shift();
+      await localSet('auditQueue', auditQueue);
+    }
+  } catch (e) { console.warn('audit flush', e); } finally { flushing = false; }
+}
+export async function cloudAuditList(period) {
+  if (!cloud.user) return [];
+  const F = fb.F;
+  const q = await F.getDocs(F.query(F.collection(fb.fs, AUDIT), F.where('period', '==', period), F.limit(1000)));
+  return q.docs.map((d) => { const x = d.data(); return { ...x, serverAt: x.serverAt && x.serverAt.toDate ? x.serverAt.toDate().toISOString() : x.at }; })
+    .sort((a, b) => String(b.serverAt).localeCompare(String(a.serverAt)));
 }

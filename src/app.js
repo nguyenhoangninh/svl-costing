@@ -1,5 +1,5 @@
 // SVL Costing Web — application shell (state, persistence, views)
-import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO } from './engine/util.js';
+import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO, parseUserNumber } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
 import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
@@ -49,44 +49,83 @@ async function loadLocal(period) {
   d.audit = d.audit || []; d.importLog = d.importLog || {}; d.soPrice = d.soPrice || []; d.manualPrice = d.manualPrice || []; d.directAdj = d.directAdj || [];
   return d;
 }
-async function saveLocal() {
-  const p = S.period; if (!p) return;
-  for (const b of S.dirty) {
-    if (b.startsWith('ds:')) { const k = b.slice(3); if (S.d.datasets[k]) await store.localSet(lk(p, b), S.d.datasets[k]); else await store.localDel(lk(p, b)); }
-    else if (S.d[b] === null || S.d[b] === undefined) await store.localDel(lk(p, b)); else await store.localSet(lk(p, b), S.d[b]);
+/** Persist the given blobs of one period (serialised through saveChain). */
+async function saveBlobs(p, data, list) {
+  for (const b of list) {
+    if (b.startsWith('ds:')) { const k = b.slice(3); if (data.datasets[k]) await store.localSet(lk(p, b), data.datasets[k]); else await store.localDel(lk(p, b)); }
+    else if (data[b] === null || data[b] === undefined) await store.localDel(lk(p, b)); else await store.localSet(lk(p, b), data[b]);
   }
   await store.localSet(lk(p, 'savedAt'), nowISO());
-  const list = new Set((await store.localGet('periods')) || []); list.add(p);
-  await store.localSet('periods', [...list].sort());
+  const set = new Set((await store.localGet('periods')) || []); set.add(p);
+  await store.localSet('periods', [...set].sort());
 }
-function allBlobs() {
+let saveChain = Promise.resolve();
+async function saveLocal() {
+  const p = S.period; if (!p) return;
+  const list = [...S.dirty]; S.dirty = new Set();
+  const data = S.d;
+  saveChain = saveChain.then(() => saveBlobs(p, data, list));
+  await saveChain;
+}
+function blobsOf(d) {
   const o = {};
-  for (const [k, v] of Object.entries(S.d.datasets)) o['ds:' + k] = v;
-  for (const b of BLOBS) if (S.d[b] !== null && S.d[b] !== undefined) o[b] = S.d[b];
+  for (const [k, v] of Object.entries(d.datasets)) o['ds:' + k] = v;
+  for (const b of BLOBS) if (d[b] !== null && d[b] !== undefined) o[b] = d[b];
   return o;
 }
+const allBlobs = () => blobsOf(S.d);
 let syncTimer = null;
+const CLOSED_OK = new Set(['closed', 'audit', 'rwArchive']);
+/**
+ * Persist mutated blobs of the open period. Each call captures its own dirty snapshot and saves are serialised, so a fast
+ * second edit can never be cleared before it is written (F-13). Mutations of a CLOSED period are refused (F-02).
+ */
 function markDirty(...blobs) {
-  blobs.forEach((b) => S.dirty.add(b));
-  saveLocal().then(() => { S.dirty.clear(); scheduleCloud(); }).catch((e) => toast('Lỗi lưu trên máy: ' + e.message, 'block'));
+  const p = S.period; if (!p) return;
+  if (isClosed() && blobs.some((b) => !CLOSED_OK.has(b))) {
+    toast(`Kỳ ${p} đã đóng – thay đổi KHÔNG được lưu. Quản trị viên mở lại kỳ ở màn hình 5.3 nếu cần sửa.`, 'block');
+    openPeriod(p); return;
+  }
+  const list = [...new Set(blobs)]; const data = S.d;
+  S.editSeq = (S.editSeq || 0) + 1;
+  saveChain = saveChain
+    .then(() => saveBlobs(p, data, list))
+    .then(async () => { if (store.cloud.enabled) await store.localSet(lk(p, 'unsynced'), true); if (p === S.period) scheduleCloud(); })
+    .catch((e) => toast('Lỗi lưu trên máy: ' + e.message, 'block'));
 }
 function scheduleCloud() {
   if (!store.cloud.user) { S.sync = 'local'; renderSync(); return; }
   if (!store.canEdit()) { S.sync = 'readonly'; renderSync(); return; }
   if (!S.period) { S.sync = 'synced'; renderSync(); return; }
+  if (S.sync === 'conflict') { renderSync(); return; }
   S.sync = 'pending'; renderSync();
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(pushCloud, 1500);
+  syncTimer = setTimeout(async () => { const r = await pushCloud(); if (!r.ok) toast((r.conflict ? 'Xung đột cloud: ' : 'Chưa lưu được lên cloud: ') + r.error, 'block'); }, 1500);
 }
+/** Returns {ok, meta} or {ok:false, error, conflict}. Never reports success unless the cloud commit is confirmed (F-09). */
 async function pushCloud() {
-  if (!store.cloud.user || !S.period || !store.canEdit()) return;
+  if (!store.cloud.user) return { ok: false, error: 'Chưa đăng nhập.' };
+  if (!S.period) return { ok: false, error: 'Chưa chọn kỳ.' };
+  if (!store.canEdit()) return { ok: false, error: 'Tài khoản chỉ có quyền xem.' };
+  const p = S.period, data = S.d, seq = S.editSeq || 0;
   try {
     S.sync = 'saving'; renderSync();
-    const meta = await store.cloudSave(S.period, allBlobs(), summaryForCloud(), (m) => { S.syncMsg = m; renderSync(); });
-    if (meta) await store.localSet(lk(S.period, 'cloudAt'), meta.updatedAt);
-    S.sync = 'synced'; S.syncMsg = '';
-  } catch (e) { S.sync = 'error'; S.syncMsg = e.message; }
-  renderSync();
+    await saveChain;
+    let baseRev = await store.localGet(lk(p, 'cloudRev'));
+    if (baseRev === undefined || baseRev === null) baseRev = (await store.localGet(lk(p, 'cloudAt'))) || null; // legacy device state
+    const blobs = blobsOf(data);
+    const meta = await store.cloudSave(p, blobs, summaryForCloud(), (m) => { S.syncMsg = m; renderSync(); }, baseRev);
+    await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
+    if ((S.editSeq || 0) === seq) await store.localDel(lk(p, 'unsynced'));
+    S.sync = (S.editSeq || 0) === seq ? 'synced' : 'pending'; S.syncMsg = '';
+    renderSync();
+    if (S.sync === 'pending') scheduleCloud();
+    return { ok: true, meta };
+  } catch (e) {
+    const conflict = e && e.name === 'ConflictError';
+    S.sync = conflict ? 'conflict' : 'error'; S.syncMsg = e.message || String(e); renderSync();
+    return { ok: false, error: S.syncMsg, conflict };
+  }
 }
 function summaryForCloud() {
   const st = statusAll();
@@ -95,25 +134,37 @@ function summaryForCloud() {
 }
 
 async function openPeriod(p, { preferCloud = false } = {}) {
+  await saveChain;
   S.period = p; S.d = await loadLocal(p);
   localStorage.setItem('svl.period', p);
+  if (S.sync === 'conflict') { S.sync = 'local'; S.syncMsg = ''; }
   if (store.cloud.user) {
     try {
       const meta = await store.cloudMeta(p);
+      const localRev = await store.localGet(lk(p, 'cloudRev'));
       const localCloudAt = await store.localGet(lk(p, 'cloudAt'));
+      const unsynced = !!(await store.localGet(lk(p, 'unsynced')));
       const localEmpty = !Object.keys(S.d.datasets).length && !S.d.opening;
-      if (meta && (preferCloud || localEmpty || (meta.updatedAt > (localCloudAt || '') && confirm(`Kỳ ${p} trên cloud mới hơn (cập nhật ${fmtTs(meta.updatedAt)} bởi ${meta.updatedBy}). Tải bản cloud về máy này?`)))) {
+      const cloudNewer = !!meta && (meta.rev ? meta.rev !== localRev : (meta.updatedAt > (localCloudAt || '')));
+      const ask = () => confirm(unsynced
+        ? `Kỳ ${p}: cả máy này và cloud đều có thay đổi.\nCloud: cập nhật ${fmtTs(meta.updatedAt)} bởi ${meta.updatedBy}.\n\nOK = tải bản cloud về (BỎ các thay đổi chưa đồng bộ trên máy này).\nHuỷ = giữ bản trên máy, không ghi đè cloud.`
+        : `Kỳ ${p} trên cloud mới hơn (cập nhật ${fmtTs(meta.updatedAt)} bởi ${meta.updatedBy}). Tải bản cloud về máy này?`);
+      if (meta && (preferCloud || (localEmpty && !unsynced) || (cloudNewer && ask()))) {
         await busy('Đang tải dữ liệu từ cloud…', async () => {
           const r = await store.cloudLoad(p, (m) => setBusy(m));
           const d = emptyData();
           for (const [k, v] of Object.entries(r.blobs)) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
           d.audit = d.audit || []; d.importLog = d.importLog || {}; d.soPrice = d.soPrice || []; d.manualPrice = d.manualPrice || []; d.directAdj = d.directAdj || [];
+          for (const k of await store.localKeys()) if (String(k).startsWith(`p/${p}/`)) await store.localDel(k);
+          await saveBlobs(p, d, Object.keys(blobsOf(d)));
           S.d = d;
-          S.dirty = new Set(Object.keys(allBlobs())); await saveLocal(); S.dirty.clear();
-          await store.localSet(lk(p, 'cloudAt'), r.meta.updatedAt);
+          await store.localSet(lk(p, 'cloudRev'), r.meta.rev || 0); await store.localSet(lk(p, 'cloudAt'), r.meta.updatedAt); await store.localDel(lk(p, 'unsynced'));
         });
         S.sync = 'synced';
-      }
+      } else if (meta && cloudNewer) {
+        S.sync = 'conflict'; S.syncMsg = 'Cloud có bản mới hơn bản trên máy – chưa tải về, thay đổi trên máy sẽ không được đẩy lên.';
+      } else if (unsynced && store.canEdit()) scheduleCloud();
+      else S.sync = meta ? 'synced' : 'local';
     } catch (e) { toast('Không đọc được cloud: ' + e.message, 'review'); }
   }
   await refreshPeriods();
@@ -136,8 +187,10 @@ async function refreshPeriods() {
 }
 
 function audit(action, detail) {
-  S.d.audit.unshift({ at: nowISO(), user: store.cloud.user ? store.cloud.user.email : 'thiết bị này', action, detail });
+  const e = { at: nowISO(), user: store.cloud.user ? store.cloud.user.email : 'thiết bị này', action, detail };
+  S.d.audit.unshift(e);
   if (S.d.audit.length > 500) S.d.audit.length = 500;
+  store.cloudAudit({ period: S.period, at: e.at, action, detail: String(detail ?? '').slice(0, 2000), app: APP_VERSION }); // append-only server copy (F-14)
 }
 
 // ======================= derived status =======================
@@ -161,10 +214,45 @@ function derivedNow() { const p2 = P2.derive(S); return { ...p2, d5: P3.derive(S
 // ======================= permissions =======================
 function guardEdit() {
   if (store.canEdit()) return true;
-  toast('Tài khoản của bạn chỉ có quyền xem. Nhờ quản trị viên cấp quyền Chỉnh sửa nếu cần.', 'review');
+  toast(store.cloud.enabled && !store.cloud.user ? 'Đăng nhập Google để chỉnh sửa dữ liệu.' : 'Tài khoản của bạn chỉ có quyền xem. Nhờ quản trị viên cấp quyền Chỉnh sửa nếu cần.', 'review');
   return false;
 }
+/** Central period lock (F-02): a CLOSED period has no mutation path until an admin reopens it. */
+const isClosed = () => !!(S.d && S.d.closed && S.d.closed.period === S.period);
+function guardPeriod() {
+  if (!isClosed()) return true;
+  toast(`Kỳ ${S.period} đã đóng (${fmtTs(S.d.closed.closedAt)} · ${S.d.closed.closedBy}) – chỉ xem. Quản trị viên mở lại kỳ ở màn hình 5.3 nếu cần sửa.`, 'review');
+  return false;
+}
+const guardMutate = () => guardEdit() && guardPeriod();
+const canEditPeriod = () => store.canEdit() && !isClosed();
 const WRITE_ACTS = new Set(['new-period', 'run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist', 's5-close', 's5-reopen']);
+
+/** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
+function parseNum(v, label) {
+  const r = parseUserNumber(v);
+  if (!r.ok) { toast(`${label ? label + ': ' : ''}${r.error}`, 'block'); return undefined; }
+  return r.value;
+}
+async function unsyncedPeriods() {
+  return (await store.localKeys()).filter((k) => typeof k === 'string' && /^p\/.+\/unsynced$/.test(k)).map((k) => k.split('/')[1]);
+}
+async function clearLocal(silent) {
+  if (!silent) {
+    const uns = await unsyncedPeriods();
+    if (!confirm(uns.length ? `Kỳ ${uns.join(', ')} còn thay đổi CHƯA đồng bộ lên cloud và sẽ MẤT. Vẫn xoá toàn bộ dữ liệu trên máy này?` : 'Xoá toàn bộ dữ liệu giá thành lưu trên máy này? Dữ liệu trên cloud không bị ảnh hưởng.')) return;
+  }
+  await saveChain;
+  for (const k of await store.localKeys()) if (typeof k === 'string' && (k.startsWith('p/') || k === 'periods')) await store.localDel(k);
+  localStorage.removeItem('svl.period');
+  S.period = ''; S.d = emptyData(); S.periods = [];
+  if (store.cloud.user) await refreshPeriods();
+  toast('Đã xoá dữ liệu trên máy này.', 'pass');
+  render();
+}
+window.addEventListener('beforeunload', (e) => {
+  if (store.cloud.user && ['pending', 'saving', 'error', 'conflict'].includes(S.sync)) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // ======================= UI helpers =======================
 function toast(msg, kind = 'info') {
@@ -180,8 +268,8 @@ const pill = (s) => `<span class="pill ${statusClass(s)}">${esc(s ?? '')}</span>
 const v = (x, t = 'num') => (typeof x === 'number' ? fmtCell(x, t) : esc(x ?? ''));
 function renderSync() {
   const el = $('#sync'); if (!el) return;
-  const map = { local: ['Chỉ lưu trên máy này', 's-info'], pending: ['Chờ đồng bộ…', 's-rerun'], saving: [S.syncMsg || 'Đang lưu lên cloud…', 's-rerun'], synced: ['Đã đồng bộ cloud', 's-pass'], readonly: ['Chỉ xem – không lưu thay đổi', 's-info'], error: ['Lỗi đồng bộ: ' + S.syncMsg, 's-block'] };
-  const [t, c] = map[S.sync] || map.local;
+  const map = { local: ['Chỉ lưu trên máy này', 's-info'], pending: ['Chờ đồng bộ…', 's-rerun'], saving: [S.syncMsg || 'Đang lưu lên cloud…', 's-rerun'], synced: ['Đã đồng bộ cloud', 's-pass'], readonly: ['Chỉ xem – không lưu thay đổi', 's-info'], error: ['Lỗi đồng bộ: ' + S.syncMsg, 's-block'], conflict: ['Xung đột cloud – ' + S.syncMsg, 's-block'] };
+  const [t, c] = store.SANDBOX ? ['SANDBOX – dữ liệu thử, không đồng bộ cloud', 's-review'] : map[S.sync] || map.local;
   el.className = `sync pill ${c}`; el.textContent = t; el.title = t;
 }
 function cpTable(rows) {
@@ -259,13 +347,21 @@ function renderShell() {
     <nav class="tools" aria-label="Công cụ">${TOOLS.map((t) => `<a href="#${t.id}" class="${S.view === t.id ? 'on' : ''}">${esc(t.label)}</a>`).join('')}</nav>
     <div class="ver">${esc(APP_VERSION)}</div>`;
   const u = store.cloud.user;
-  $('#account').innerHTML = !store.cloud.enabled ? '<span class="muted">Chế độ offline</span>'
+  $('#account').innerHTML = !store.cloud.enabled ? (store.SANDBOX ? '<span class="muted">Sandbox (thử nghiệm)</span>' : '<span class="muted">Chế độ offline</span>')
     : u ? `<span class="who" title="${esc(u.email)}">${esc(u.displayName || u.email)} · ${esc(store.ROLES[store.cloud.role] || '')}</span><button class="btn ghost sm" data-act="signout" type="button">Đăng xuất</button>`
       : `<button class="btn sm" data-act="signin" type="button" ${store.cloud.ready ? '' : 'disabled'}>Đăng nhập Google</button>`;
   renderSync();
 }
 
 function render() {
+  if (store.needsSignIn() || (store.cloud.enabled && !store.cloud.user && !store.cloud.offline)) {
+    $('#rail').innerHTML = `<div class="ver">${esc(APP_VERSION)}</div>`;
+    $('#account').innerHTML = `<button class="btn sm" data-act="signin" type="button" ${store.cloud.ready ? '' : 'disabled'}>Đăng nhập Google</button>`;
+    renderSync();
+    app().innerHTML = `<section class="page"><h1>Đăng nhập để dùng SVL Costing</h1><p class="lead">Dữ liệu giá thành chỉ hiển thị cho tài khoản đã được cấp quyền.</p>
+      <div class="card"><p>${store.cloud.ready ? 'Bấm <b>Đăng nhập Google</b> ở góc trên bên phải.' : 'Đang kết nối…'}</p>${store.cloud.error ? `<p class="err">${esc(store.cloud.error)}</p>` : ''}</div></section>`;
+    return;
+  }
   renderShell();
   const view = VIEWS[S.view] || VIEWS.cc;
   if (!S.period && S.view !== 'settings') { app().innerHTML = viewWelcome(); return; }
@@ -384,7 +480,7 @@ VIEWS.step1 = (el) => {
 };
 
 async function importERP(files) {
-  if (!guardEdit()) return;
+  if (!guardMutate()) return;
   const plan = planImport(files.map((f) => ({ name: f.name, lastModified: f.lastModified, file: f })), S.period);
   const planEl = $('#plan');
   if (plan.error) { planEl.innerHTML = `<div class="alert block"><b>Import bị chặn.</b> ${esc(plan.error)}</div>`; return; }
@@ -492,9 +588,9 @@ VIEWS.rework = (el) => {
   mountTable($('#t-rw'), {
     columns: cols, rows: reg.rows, filterKey: 'inputCheck', height: 520, totals: ['issueQty', 'erpRef', 'closingWIP', 'carryIn'],
     onExport: exportTable('03_FG_REWORK_INPUT', cols),
-    onEdit: !store.canEdit() ? undefined : (row, k, val) => {
+    onEdit: !canEditPeriod() ? undefined : (row, k, val) => {
       if (k === 'compDate') row[k] = val ? ((Date.UTC(+val.slice(0, 4), +val.slice(5, 7) - 1, +val.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000) : null;
-      else if (['compQty', 'scrapQty'].includes(k)) row[k] = val === '' ? null : num(val);
+      else if (['compQty', 'scrapQty'].includes(k)) { const v = parseNum(val, k); if (v === undefined) return; row[k] = v; }
       else row[k] = val;
       recheckRegisterRow(row);
       audit('2B REGISTER EDIT', `${row.rid} · ${k} = ${val}`);
@@ -531,7 +627,7 @@ VIEWS.opening = (el) => {
 const kpiN = (label, n) => `<div class="kpi"><span>${esc(label)}</span><b>${n === undefined || n === null ? '—' : typeof n === 'string' ? esc(n) : fmtNum(n)}</b></div>`;
 
 async function importOpening(file) {
-  if (!file || !guardEdit()) return;
+  if (!file || !guardMutate()) return;
   await busy(`Đang đọc ${file.name}…`, async () => {
     try {
       const buf = await file.arrayBuffer();
@@ -625,6 +721,16 @@ VIEWS.audit = (el) => {
   el.innerHTML = `<section class="page"><header class="ph"><div><h1>Nhật ký kỳ ${esc(S.period)}</h1><p class="lead">Mọi lần import, chạy bước và chỉnh sửa sổ rework.</p></div></header><div id="t-audit"></div></section>`;
   const cols = [{ key: 'at', label: 'Thời điểm', type: 'ts', width: 150 }, { key: 'user', label: 'Người dùng', width: 180 }, { key: 'action', label: 'Hành động', width: 280 }, { key: 'detail', label: 'Chi tiết', width: 520 }];
   mountTable($('#t-audit'), { columns: cols, rows: S.d.audit, height: 560, onExport: exportTable('AUDIT_LOG', cols) });
+  if (store.cloud.user) {
+    $('#t-audit').insertAdjacentHTML('beforebegin', '<div class="row"><button class="btn ghost" type="button" id="b-caudit">Xem nhật ký cloud (không sửa / xoá được)</button><span class="muted">Bảng dưới là nhật ký lưu cùng dữ liệu kỳ (500 dòng gần nhất).</span></div><div id="t-caudit"></div>');
+    $('#b-caudit').addEventListener('click', async () => {
+      try {
+        const rows = await store.cloudAuditList(S.period);
+        const c2 = [{ key: 'serverAt', label: 'Thời điểm (server)', type: 'ts', width: 160 }, { key: 'by', label: 'Người dùng', width: 200 }, { key: 'role', label: 'Vai trò', width: 80 }, { key: 'action', label: 'Hành động', width: 260 }, { key: 'detail', label: 'Chi tiết', width: 520 }, { key: 'app', label: 'Phiên bản', width: 200 }];
+        mountTable($('#t-caudit'), { columns: c2, rows, height: 420, onExport: exportTable('AUDIT_CLOUD', c2) });
+      } catch (e) { toast('Không đọc được nhật ký cloud: ' + e.message, 'block'); }
+    });
+  }
 };
 
 // ---------- settings / migration ----------
@@ -640,7 +746,8 @@ VIEWS.settings = (el) => {
         ${!c.enabled ? '<p>Chưa cấu hình Firebase — dữ liệu chỉ nằm trong trình duyệt này.</p>' : c.user ? `<p>Đăng nhập: <b>${esc(c.user.email)}</b> · vai trò <b>${esc(store.ROLES[c.role] || '')}</b>${c.isOwner ? ' (chủ sở hữu)' : ''}. ${store.canEdit() ? 'Mọi thay đổi được tự động lưu lên Firestore (đã nén).' : 'Bạn chỉ xem được dữ liệu, không lưu thay đổi lên cloud.'}</p><div class="row"><button class="btn ghost" data-act="push-cloud" type="button">Lưu kỳ này lên cloud ngay</button><button class="btn ghost" data-act="pull-cloud" type="button">Tải lại kỳ này từ cloud</button></div>` : `<p>Đăng nhập Google để lưu và mở dữ liệu trên mọi máy. ${c.error ? `<span class="err">${esc(c.error)}</span>` : ''}</p>`}
         <h2>Kỳ hiện có</h2><ul class="plist">${S.periods.map((p) => `<li><a href="#cc" data-act="goto-period" data-p="${p}">${p}</a>${p === S.period ? ' (đang mở)' : ''}</li>`).join('')}</ul>
         <div class="row"><button class="btn ghost" data-act="new-period" type="button">Tạo kỳ mới…</button><button class="btn ghost" data-act="export-all" type="button">Xuất kết quả kỳ ra Excel</button>
-        ${S.period ? `<button class="btn danger ghost" data-act="delete-period" type="button">Xoá kỳ ${esc(S.period)}…</button>` : ''}</div></div>
+        ${S.period && store.isAdmin() ? `<button class="btn danger ghost" data-act="delete-period" type="button">Xoá kỳ ${esc(S.period)}…</button>` : ''}
+        <button class="btn ghost" data-act="clear-local" type="button">Xoá dữ liệu trên máy này…</button></div></div>
     </div>
     ${store.isAdmin() ? `<div class="card" id="users"><h2>Người dùng &amp; phân quyền</h2><p class="muted">Đang tải danh sách…</p></div>` : ''}
     </section>`;
@@ -705,7 +812,10 @@ async function migrateWorkbook(file) {
       if (!cc) throw new Error('Không phải file SVL Costing Master (thiếu 00_CONTROL_CENTER).');
       const period = ttxt((cc[3] || [])[4]);
       if (!isPeriod(period)) throw new Error('Không đọc được kỳ báo cáo ở 00_CONTROL_CENTER!E4.');
+      const tgt = period === S.period ? S.d : await loadLocal(period);
+      if (tgt.closed && tgt.closed.period === period) throw new Error(`Kỳ ${period} trên web đã ĐÓNG – không ghi đè. Quản trị viên mở lại kỳ trước nếu thật sự cần.`);
       if (S.period !== period && !confirm(`File thuộc kỳ ${period}. Mở/ghi đè kỳ ${period} trên web?`)) return;
+      if (store.cloud.user) { const m = await store.cloudMeta(period); if (m) await store.localSet(lk(period, 'cloudRev'), m.rev || 0); } // overwrite of the cloud copy is explicit here
       if (S.period === period && (Object.keys(S.d.datasets).length) && !confirm(`Kỳ ${period} đã có dữ liệu trên web. Ghi đè bằng dữ liệu từ file?`)) return;
       S.period = period; S.d = emptyData();
       const statusByKey = {};
@@ -760,7 +870,7 @@ async function migrateWorkbook(file) {
         return `<tr><td>${esc(l)}</td><td class="r">${a === null || a === undefined ? '—' : fmtNum(a, Number.isInteger(a) ? 0 : 2)}</td><td class="r">${b === null || b === undefined ? "—" : fmtNum(b, Number.isInteger(b) ? 0 : 2)}</td><td class="r">${d === null ? '' : fmtNum(d, 2)}</td><td>${pill(d === null ? 'INFO' : Math.abs(d) < 1 ? 'PASS' : 'CHECK')}</td></tr>`;
       }).join('')}</tbody></table>${s3err ? `<div class="alert block">STEP 3: ${esc(s3err)}</div>` : ''}${p2msg ? `<div class="alert review">${esc(p2msg)}</div>` : ''}`;
       S.dirty = new Set(Object.keys(allBlobs()));
-      await saveLocal(); S.dirty.clear(); scheduleCloud();
+      await saveLocal(); if (store.cloud.enabled) await store.localSet(lk(period, 'unsynced'), true); scheduleCloud();
       await refreshPeriods();
       toast(`Đã nạp kỳ ${period} từ Excel.`, 'pass');
     } catch (e) { toast('Chuyển đổi lỗi: ' + e.message, 'block'); }
@@ -842,10 +952,18 @@ document.addEventListener('click', async (e) => {
   const act = a.dataset.act;
   if (a.tagName === 'A') e.preventDefault();
   if (WRITE_ACTS.has(act) && !guardEdit()) return;
-  if (P3.CLOSED_BLOCK.has(act) && S.d.closed && S.d.closed.period === S.period) { toast(`Kỳ ${S.period} đã đóng – không chạy lại được. Quản trị viên có thể mở lại kỳ ở màn hình 5.3.`, 'review'); return; }
+  if (P3.CLOSED_BLOCK.has(act) && isClosed()) { toast(`Kỳ ${S.period} đã đóng – không chạy lại được. Quản trị viên có thể mở lại kỳ ở màn hình 5.3.`, 'review'); return; }
   switch (act) {
     case 'signin': try { await store.signIn(); } catch (err) { toast('Đăng nhập lỗi: ' + err.message, 'block'); } break;
-    case 'signout': await store.signOut(); break;
+    case 'signout': {
+      const uns = await unsyncedPeriods();
+      const clear = confirm(uns.length
+        ? `CẢNH BÁO: kỳ ${uns.join(', ')} còn thay đổi CHƯA đồng bộ lên cloud.\n\nOK = vẫn xoá dữ liệu trên máy này khi đăng xuất (mất các thay đổi đó).\nHuỷ = đăng xuất nhưng giữ dữ liệu trên máy.`
+        : 'Xoá dữ liệu giá thành lưu trên máy này khi đăng xuất?\n(Nên chọn OK nếu là máy dùng chung. Dữ liệu trên cloud không bị ảnh hưởng.)');
+      await store.signOut();
+      if (clear) await clearLocal(true);
+      render(); break;
+    }
     case 'new-period': await newPeriod(); break;
     case 'run-step2': await busy('Đang chạy STEP 2…', async () => doStep2()); break;
     case 'run-step3': await busy('Đang chạy STEP 3…', async () => doStep3()); break;
@@ -866,7 +984,8 @@ document.addEventListener('click', async (e) => {
     }
     case 'view-ds': S.dsView = a.dataset.k; if (S.view !== 'data') location.hash = 'data'; else render(); break;
     case 'goto-period': await openPeriod(a.dataset.p); break;
-    case 'push-cloud': await pushCloud(); toast('Đã lưu lên cloud.', 'pass'); break;
+    case 'push-cloud': { const r = await pushCloud(); toast(r.ok ? `Đã lưu lên cloud (bản ${r.meta.rev}).` : (r.conflict ? 'KHÔNG ghi đè cloud: ' : 'Chưa lưu được lên cloud: ') + r.error, r.ok ? 'pass' : 'block'); break; }
+    case 'clear-local': await clearLocal(false); break;
     case 'pull-cloud': await openPeriod(S.period, { preferCloud: true }); break;
     case 'export-all': await exportAll(); break;
     case '3b-sync': P2.do3bSync(); render(); break;
@@ -884,10 +1003,13 @@ document.addEventListener('click', async (e) => {
     case 's5-close': P3.doClose(); render(); break;
     case 's5-reopen': P3.doReopen(); render(); break;
     case 'delete-period':
+      if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
+      if (isClosed() && !confirm(`Kỳ ${S.period} ĐÃ ĐÓNG. Xoá kỳ đã đóng sẽ mất số liệu đã khoá sổ. Chỉ tiếp tục khi đã lưu bản xuất Excel / bản sao. Tiếp tục?`)) break;
       if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${S.period}/`)) await store.localDel(k);
         await store.localSet('periods', ((await store.localGet('periods')) || []).filter((p) => p !== S.period));
-        if (store.cloud.user) await store.cloudDelete(S.period);
+        audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${S.period}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
+        if (store.cloud.user) { try { await store.cloudDelete(S.period); } catch (err) { toast('Không xoá được trên cloud: ' + err.message, 'block'); break; } }
         toast(`Đã xoá kỳ ${S.period}.`, 'pass');
         await refreshPeriods(); S.period = S.periods[0] || ''; if (S.period) await openPeriod(S.period); else render();
       }
@@ -903,8 +1025,8 @@ document.addEventListener('submit', async (e) => {
 });
 window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) || 'cc'; render(); });
 
-P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit, canEdit: () => store.canEdit(), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
-P3.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit, canEdit: () => store.canEdit(), isAdmin: () => store.isAdmin() || !store.cloud.user, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
+P3.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
 // ======================= boot =======================
 (async function boot() {
@@ -916,7 +1038,7 @@ P3.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, 
     store.initCloud(async (u) => {
       renderShell();
       accessDraft = null;
-      if (u) { await refreshPeriods(); if (S.period) await openPeriod(S.period); else if (S.periods[0]) await openPeriod(S.periods[0]); scheduleCloud(); }
+      if (u) { await refreshPeriods(); if (S.period) await openPeriod(S.period); else if (S.periods[0]) await openPeriod(S.periods[0]); }
       else if (store.cloud.error) toast(store.cloud.error, 'review');
       render();
     });

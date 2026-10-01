@@ -42,12 +42,28 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 Ứng dụng dùng project Firebase riêng **SVL-Costing** (`svl-costing`). Dữ liệu giá thành nằm trong **Firestore** và bắt buộc đăng nhập Google.
 
 1. Firebase Console → **Build → Firestore Database → Create database** (chọn vùng `asia-southeast1`, chế độ production).
-2. Firestore → **Rules**: dán nội dung `firestore.rules` → Publish.
+2. Firestore → **Rules**: dán nội dung `firestore.rules` → Publish (dán lại mỗi khi file này thay đổi).
 3. **Authentication → Sign-in method → Google → Enable**.
 4. **Authentication → Settings → Authorized domains → Add domain**: `nguyenhoangninh.github.io`.
 5. Trong rules, thay `YOUR_EMAIL@gmail.com` bằng email Google của chủ sở hữu (luôn có quyền Quản trị). Người dùng khác được thêm/xoá ngay trên web: **Kỳ, cloud & chuyển đổi → Người dùng & phân quyền** (Quản trị / Chỉnh sửa / Chỉ xem).
 
-Không đăng nhập (hoặc chưa bật Firestore) thì ứng dụng vẫn chạy đầy đủ, dữ liệu chỉ lưu trong trình duyệt (IndexedDB) của máy đó.
+Khi đã cấu hình Firebase, **phải đăng nhập** mới xem / sửa được dữ liệu. Muốn thử nghiệm không ảnh hưởng dữ liệu thật, mở `…/svl-costing/?sandbox=1`: dùng một cơ sở dữ liệu riêng trên máy, không đồng bộ cloud.
+
+## Kiểm soát (theo audit 01/10/2026)
+
+| Kiểm soát | Cách hoạt động |
+|---|---|
+| Chuỗi freshness (F-01) | STEP 4 OUTDATED khi STEP 2/3A cần chạy lại, input 3B đổi sau BUILD, Price Master chưa CURRENT hoặc FX/GL/phân bổ trực tiếp đổi. STEP 5 OUTDATED khi STEP 4 không CURRENT/PASS → không build history, không đóng kỳ. |
+| Khoá kỳ (F-02) | Kỳ đã đóng: mọi ô nhập, nút chạy, import đều bị khoá, kể cả ở tầng lưu dữ liệu. Chỉ Quản trị mở lại kỳ (bắt buộc ghi lý do). |
+| Dòng doanh thu lặp (F-03) | Dòng giống hệt nhau trong kỳ phải được xác nhận *Dòng thật* / *Trùng – loại* ở 4.1 → Nghi trùng trước khi đóng kỳ. |
+| Duyệt 3B (F-04) | BUILD lưu dấu vân tay INPUT + ERP map; đổi basis / phương án / override sau BUILD thì APPLY và STEP 4 bị chặn đến khi BUILD lại. |
+| Thay Sales DB (F-05) | MONTHLY thay cả tháng; YTD thay từ 01/01 đến hết kỳ giá thành. Có hộp xác nhận số dòng thay / thêm. |
+| Quyền (F-07, F-08) | Chưa đăng nhập: không thấy dữ liệu. Chỉ Quản trị xoá kỳ (rules + giao diện). |
+| Đồng bộ cloud (F-09, F-10, F-13) | Lưu cloud có số bản (rev) và chỉ ghi khi cloud chưa bị người khác cập nhật; ghi khối mới trước rồi mới chuyển danh mục → mất mạng giữa chừng không làm hỏng bản cloud. Chỉ báo "đã lưu" khi cloud xác nhận. |
+| Nhật ký bất biến (F-14) | Mỗi thao tác ghi thêm vào `svl_costing_audit` (không ai sửa / xoá được); xem ở *Nhật ký → Xem nhật ký cloud*. |
+| Máy dùng chung (F-15) | Khi đăng xuất được hỏi có xoá dữ liệu trên máy không; có nút *Xoá dữ liệu trên máy này*. |
+| Nhập số (F-16) | Ô số chấp nhận 26300, 1,5, 15.506.701.812, 1,234.56…; số mơ hồ như 26.300 bị hỏi lại. |
+| CI (F-12) | GitHub Actions kiểm tra cú pháp + bộ test kiểm soát tổng hợp (`test/unit.mjs`) mỗi lần đẩy code. Test đối chiếu Excel (`npm run test:golden`) chạy với dữ liệu thật ngoài repo. |
 
 ## Bảo mật dữ liệu
 

@@ -131,15 +131,39 @@ export function validateSaveSales(staging, salesDB, period) {
     r.saveStat = 'SAVED'; r.savedAt = saveAt;
     return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
   });
+  const cov = salesCoverage(mode, minInv, maxInv, period);
   const old = (salesDB && salesDB.rows) || [];
   let replaced = 0; const kept = [];
   for (const r of old) {
     const d = toSerial(r.invDate);
-    if (d !== null && minInv && maxInv && d >= minInv && d <= maxInv) replaced++; else kept.push(r);
+    if (d !== null && cov && d >= cov.from && d <= cov.to) replaced++; else kept.push(r);
   }
   staging.status = 'VALIDATED & SAVED - ADVISORY';
   const rows = kept.concat(newRows);
-  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, minInv, maxInv, mode } };
+  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
+}
+
+/**
+ * Date range of the Sales DB that a new file replaces (F-05). Defined by the mode, not by the first/last invoice actually present,
+ * so a transaction deleted at the edge of the source range disappears from the DB too.
+ * MONTHLY: whole calendar months spanned by the file. YTD: 1 Jan of the file's first year → max(last invoice, costing period end).
+ */
+export function salesCoverage(mode, minInv, maxInv, period) {
+  if (!minInv || !maxInv) return null;
+  const E = Date.UTC(1899, 11, 30);
+  const ser = (y, m, d) => (Date.UTC(y, m, d) - E) / 86400000;
+  const a = serialToYMD(minInv), b = serialToYMD(maxInv);
+  if (mode === 'MONTHLY') return { from: ser(a.y, a.m - 1, 1), to: ser(b.y, b.m, 0) };
+  return { from: ser(a.y, 0, 1), to: Math.max(maxInv, periodEndSerial(period)) };
+}
+/** What Validate & Save would do, for the confirmation dialog. */
+export function salesSavePreview(staging, salesDB, period) {
+  const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
+  let minInv = 0, maxInv = 0;
+  for (const r of staging.rows) { const d = toSerial(r.invDate); if (d === null) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
+  const cov = salesCoverage(mode, minInv, maxInv, period);
+  const replaced = cov ? ((salesDB && salesDB.rows) || []).filter((r) => { const d = toSerial(r.invDate); return d !== null && d >= cov.from && d <= cov.to; }).length : 0;
+  return { mode, from: cov ? cov.from : null, to: cov ? cov.to : null, replaced, inserted: staging.rows.length, kept: ((salesDB && salesDB.rows) || []).length - replaced };
 }
 
 // ======================= PRICE MASTER =======================

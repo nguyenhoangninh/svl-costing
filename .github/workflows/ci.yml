@@ -1,0 +1,16 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax check (all modules)
+        run: for f in $(find src -name '*.js') test/*.mjs; do node --check "$f" || exit 1; done
+      - name: Synthetic control tests
+        run: node test/unit.mjs

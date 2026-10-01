@@ -1,12 +1,13 @@
 // Browser check for Phase 2 screens after migrating the workbook.
 import { chromium } from 'playwright';
 import path from 'node:path';
-const [, , base, wbPath, outDir] = process.argv;
+const [, , base0, wbPath, outDir] = process.argv;
+const base = base0 + '?sandbox=1';
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('ERR_TUNNEL')) errors.push('console: ' + m.text()); });
 page.on('dialog', async (d) => { await d.accept(); });
 await page.goto(base + '#settings');
 await page.waitForSelector('#f-xlsm', { state: 'attached' });
@@ -48,3 +49,4 @@ await page.goto(base + '#sales'); await page.waitForSelector('.kpis');
 console.log('SALES sep:', await txt('.kpis'));
 console.log('errors:', errors.join('\n') || 'none');
 await browser.close();
+if (errors.length) process.exit(1);

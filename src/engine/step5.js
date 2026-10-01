@@ -218,16 +218,15 @@ export function runFIFO(ctx) {
 
   // sales lines
   const ovr = new Map(Object.entries(ctx.overrides || {}).map(([k, v]) => [k.toUpperCase(), utxt(v)]));
+  const excluded = new Set(Object.entries(ctx.dupDecisions || {}).filter(([, v]) => v === 'EXCLUDE').map(([k]) => k.toUpperCase()));
   const S = []; const keyCount = new Map(); const need = new Map(); const lines = new Map();
   let overridesUsed = 0, reviewLines = 0, sumEligQ = 0;
   (ctx.salesRows || []).forEach((r, idx) => {
     const d = dateVal(r.invDate); if (d === null || d < pStart || d > pEnd) return;
     const s = { seq: S.length + 1, date: d, prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
-    let base = s5t(r.txnKey);
-    if (!base) base = `${ymd(d)}|${s.inv}|${s.prod}|${vbFmt(s.qty, 4)}|${s.usd.toFixed(2)}`;
-    const ku = base.toUpperCase(); keyCount.set(ku, (keyCount.get(ku) || 0) + 1);
-    s.key = `${base}#${keyCount.get(ku)}`;
-    if (!s.prod && s.qty !== 0) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
+    s.key = lineKey(r, d, keyCount);
+    if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
+    else if (!s.prod && s.qty !== 0) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
     else if (!s.prod || s.qty === 0) s.def = 'NO COGS';
     else if (s.qty < 0 || s.type.includes('RETURN')) { s.def = 'REVIEW'; s.msg = 'Return / negative quantity - not processed by FIFO; '; }
     else if (!first.has(s.prod)) { s.def = 'REVIEW'; s.msg = 'No FG layer for this Product Code; '; }
@@ -392,6 +391,28 @@ export function runFIFO(ctx) {
     // internal (dropped before saving): layers for the rework pass
     _sorted: sorted,
   };
+}
+/** 05_SALES_COGS Line Key: Transaction Key (or fallback) + '#' + occurrence within the period. */
+function lineKey(r, d, keyCount) {
+  let base = s5t(r.txnKey);
+  if (!base) base = `${ymd(d)}|${s5t(r.invNo)}|${utxt(r.product)}|${vbFmt(num(r.qty), 4)}|${num(r.amtUSD).toFixed(2)}`;
+  const ku = base.toUpperCase(); keyCount.set(ku, (keyCount.get(ku) || 0) + 1);
+  return `${base}#${keyCount.get(ku)}`;
+}
+/**
+ * Sales lines of the period that share a Transaction Key (F-03). The sales file has no Invoice Line No., so several genuine
+ * lines of one invoice can look identical; each repeat (#2, #3 …) must be confirmed KEEP or EXCLUDE before close.
+ */
+export function duplicateGroups(salesRows, period) {
+  const { start, end } = periodBounds(period);
+  const keyCount = new Map(); const groups = new Map();
+  (salesRows || []).forEach((r, idx) => {
+    const d = dateVal(r.invDate); if (d === null || d < start || d > end) return;
+    const key = lineKey(r, d, keyCount); const base = key.slice(0, key.lastIndexOf('#')).toUpperCase();
+    if (!groups.has(base)) groups.set(base, []);
+    groups.get(base).push({ key, occ: +key.slice(key.lastIndexOf('#') + 1), dbRow: idx + 6, date: d, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), name: s5t(r.prodName), qty: num(r.qty), usd: num(r.amtUSD), vnd: num(r.amtVND) });
+  });
+  return [...groups.values()].filter((g) => g.length > 1);
 }
 const ymd = (serial) => { const { y, m, d } = serialToYMD(serial); return `${y}${String(m).padStart(2, '0')}${String(d).padStart(2, '0')}`; };
 

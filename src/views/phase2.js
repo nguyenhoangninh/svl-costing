@@ -1,7 +1,7 @@
 // Phase 2 views: STEP 3B (Direct WIP Adjustment), STEP 4 (Sales / Price Master, FX-GL, Cost Allocation).
 import * as B from '../engine/step3b.js';
 import * as F from '../engine/step4.js';
-import { step3bControls, step4Controls } from '../engine/controls.js';
+import { step2Controls, step3Controls, step3bControls, step4Controls } from '../engine/controls.js';
 import { num, ttxt, txt, utxt, serialToISO, nowISO, isoToSerial } from '../engine/util.js';
 import { RW_FIELDS } from '../engine/step2.js';
 
@@ -22,8 +22,9 @@ export function derive(S) {
     let engPosted = 0; for (const v of posted.values()) engPosted += v.amt;
     const balancePass = w.control ? B.balancePassCount(w.control, d.step3) : 0;
     const step4Posted = d.step4 && d.step4.snap ? d.step4.snap.posted3B : null;
-    const controls = step3bControls({ period, input: w.input, inputD, engine: w.engine, engDyn, detail: w.detail, control: w.control, reg632: w.reg632, wf, balancePass, step3: d.step3, step4Posted });
-    out.d3b = { inputD, engDyn, wf, posted, engPosted, balancePass, controls };
+    const buildStale = !!(w.control && w.control.fp && w.control.fp !== B.buildFingerprint(w.input, d.erpMap, d.step2, d.step3));
+    const controls = step3bControls({ period, input: w.input, inputD, engine: w.engine, engDyn, detail: w.detail, control: w.control, reg632: w.reg632, wf, balancePass, step3: d.step3, step4Posted, buildStale });
+    out.d3b = { inputD, engDyn, wf, posted, engPosted, balancePass, controls, buildStale };
   }
   const s4 = d.step4;
   const fl = s4 && !s4.blocked && out.d3b ? F.finalLayer(s4, out.d3b.posted, d.register) : null;
@@ -47,8 +48,20 @@ function currentSnap(S, d3b) {
     fx: d.gl ? num(d.gl.fx) : 0, gl622: d.gl ? num(d.gl.gl622) : 0, gl627: d.gl ? num(d.gl.gl627) : 0, direct622: dt.d622, direct627: dt.d627, activeDirect: dt.n, posted3B: d3b ? d3b.engPosted : 0,
   };
 }
+/** Why STEP 4 must be rerun, or '' (F-01: covers the whole upstream chain, not only Step 4's own snapshot). */
+export function step4StaleReason(S, d3b) {
+  const d = S.d; const s4 = d.step4; if (!s4 || !s4.snap) return '';
+  const ctx = { period: S.period, step2: d.step2, register: d.register, latestImport: A.latestImport(), opening: d.opening, step3: d.step3 };
+  const s2 = step2Controls(ctx).status, s3 = step3Controls(ctx).status;
+  if (String(s2).startsWith('RERUN') || String(s2).startsWith('BLOCK')) return `STEP 2 = ${s2}`;
+  if (String(s3).startsWith('RERUN') || String(s3).startsWith('BLOCK')) return `STEP 3A = ${s3}`;
+  if (d3b && d3b.buildStale) return 'STEP 3B: INPUT / ERP map đã đổi sau BUILD';
+  if (!d.pm || d.pm.status !== 'CURRENT') return `Price Master = ${d.pm ? d.pm.status : 'chưa cập nhật'}`;
+  return '';
+}
 function step4Freshness(S, d3b) {
   const s4 = S.d.step4; if (!s4 || !s4.snap) return 'NOT RUN';
+  if (step4StaleReason(S, d3b)) return 'OUTDATED - RERUN REQUIRED';
   const c = currentSnap(S, d3b), p = s4.snap;
   const same = c.period === p.period && c.latestImport === p.latestImport && c.step2RunAt === p.step2RunAt && c.step3RunAt === p.step3RunAt && c.dbSavedAt === p.dbSavedAt && c.pmUpdatedAt === p.pmUpdatedAt
     && c.glPeriod === p.glPeriod && c.fx === p.fx && c.gl622 === p.gl622 && c.gl627 === p.gl627 && Math.abs(c.direct622 - p.direct622) <= 1 && Math.abs(c.direct627 - p.direct627) <= 1 && c.activeDirect === p.activeDirect && Math.abs(c.posted3B - p.posted3B) <= 1;
@@ -72,11 +85,14 @@ function editList(el, cfg) {
   el.addEventListener('change', (e) => {
     const inp = e.target.closest('[data-k]'); if (!inp) return;
     const r = rows[+inp.closest('tr').dataset.i]; const c = columns.find((x) => x.key === inp.dataset.k);
-    r[c.key] = c.date ? (inp.value ? isoToSerial(inp.value) : null) : c.num ? (inp.value === '' ? null : num(inp.value)) : inp.value;
+    if (!A.guardEdit()) { draw(); return; }
+    let val = inp.value;
+    if (c.num) { val = A.parseNum(inp.value, c.label); if (val === undefined) { draw(); return; } }
+    r[c.key] = c.date ? (inp.value ? isoToSerial(inp.value) : null) : val;
     onChange(rows, r, c.key);
   });
   el.addEventListener('click', (e) => {
-    if (e.target.closest('[data-del]')) { rows.splice(+e.target.closest('tr').dataset.i, 1); onChange(rows); draw(); }
+    if (e.target.closest('[data-del]')) { if (!A.guardEdit()) return; rows.splice(+e.target.closest('tr').dataset.i, 1); onChange(rows); draw(); }
     if (e.target.closest('[data-add]')) { if (!A.guardEdit()) return; rows.push(newRow()); onChange(rows); draw(); }
   });
 }
@@ -117,7 +133,8 @@ export function view3b(el) {
     A.mountTable(box, { columns: cols, rows, filterKey: 'check', height: 520, totals: ['basisAmt', 'erpAmt'], onExport: A.exportTable('03_WIP_DIRECT_ADJ_INPUT', cols),
       onEdit: !edit ? undefined : (row, key, val) => {
         const src = w.input.find((r) => ttxt(r.code) === row.key); if (!src) return;
-        src[key] = ['basisQty', 'basisAmt'].includes(key) ? (val === '' ? null : num(val)) : val; row[key] = src[key];
+        if (['basisQty', 'basisAmt'].includes(key)) { const v = A.parseNum(val, key); if (v === undefined) { A.render(); return; } src[key] = v; } else src[key] = val;
+        row[key] = src[key];
         A.audit('3B INPUT EDIT', `${row.key} · ${key} = ${val}`); A.markDirty('wipadj', 'audit');
       } });
   } else if (tab === 'control') {
@@ -176,6 +193,7 @@ export function do3bApply() {
   const S = A.S; const w = S.d.wipadj;
   if (!w || !w.control) { A.toast('Chưa BUILD.', 'block'); return; }
   if (!w.control.builtAt || w.control.builtAt < S.d.step3.runAt) { A.toast('CONTROL cũ hơn STEP 3. Chạy 1 BUILD / REFRESH trước.', 'block'); return; }
+  if (w.control.fp && w.control.fp !== B.buildFingerprint(w.input, S.d.erpMap, S.d.step2, S.d.step3)) { A.toast('STOPPED: INPUT hoặc ERP map đã thay đổi sau lần BUILD mà người duyệt đã xem. Chạy 1 · BUILD / REFRESH rồi duyệt lại.', 'block'); return; }
   let res = B.applyControl(w.control, S.d.step3, '');
   if (res.mode === 'NEED_REASON') {
     const prev = w.control.noAdj ? w.control.noAdj.reason : '';
@@ -207,13 +225,16 @@ export function viewSales(el) {
   const S = A.S; const d = S.d; const tab = S.tabSales || 'import';
   const st = d.salesImport; const db = d.salesDB; const pm = d.pm;
   const missing = pm ? pm.rows.filter((r) => r.status === 'MISSING PRICE').length : null;
+  const dup = A.dupStatus();
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 4.1 · Doanh thu &amp; Price Master</h1><p class="lead">Import file doanh thu (MONTHLY hoặc YTD) → Validate &amp; Save vào Sales Database (kiểm tra chỉ mang tính cảnh báo, không chặn dòng nào) → Update Price Master: giá tháng hiện tại → giá thực tế gần nhất → YTD → Sales Order; giá thủ công luôn được ưu tiên.</p></div>
       <div class="result"><span>Price Master</span>${A.pill(pm ? pm.status : 'NOT RUN')}<small>${pm ? `${pm.rows.length} sản phẩm · thiếu giá ${missing}` : ''}</small></div></header>
     <div class="kpis">${A.kpiN('Dòng staging', st ? st.rows.length : 0)}${A.kpiN('Sales Database', db ? db.rows.length : 0)}${A.kpiN('SO fallback', (d.soPrice || []).length)}${A.kpiN('Giá thủ công', (d.manualPrice || []).length)}</div>
-    ${tabsHTML(tab, [['import', 'Import & Validate'], ['db', 'Sales Database'], ['pm', 'Price Master'], ['so', 'Sales Order fallback'], ['manual', 'Giá thủ công']], 'data-tabs')}
+    ${dup.groups.length ? `<div class="alert ${dup.pending ? 'review' : 'pass'}">Kỳ ${esc(S.period)} có <b>${dup.groups.length}</b> nhóm dòng doanh thu giống hệt nhau (cùng ngày, hoá đơn, sản phẩm, số lượng, tiền – file không có Invoice Line No.). ${dup.pending ? `Còn <b>${dup.pending}</b> dòng lặp chưa xác nhận → <a href="#sales" data-tab-dup>xác nhận ở tab Nghi trùng</a>. Chưa xác nhận thì không đóng kỳ được.` : `Đã xác nhận hết (loại ${dup.excluded} dòng).`}</div>` : ''}
+    ${tabsHTML(tab, [['import', 'Import & Validate'], ['db', 'Sales Database'], ['dup', `Nghi trùng${dup.pending ? ' (' + dup.pending + ')' : ''}`], ['pm', 'Price Master'], ['so', 'Sales Order fallback'], ['manual', 'Giá thủ công']], 'data-tabs')}
     <div id="ts"></div></section>`;
   el.querySelectorAll('[data-tabs]').forEach((b) => b.addEventListener('click', () => { S.tabSales = b.dataset.tabs; A.render(); }));
+  el.querySelectorAll('[data-tab-dup]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); S.tabSales = 'dup'; A.render(); }));
   const box = el.querySelector('#ts'); const edit = A.canEdit();
   const salesCols = [...F.SALES_FIELDS.map((f, i) => ({ key: f, label: F.SALES_HEADERS[i], type: f === 'invDate' ? 'date' : ['fx', 'qty', 'unitPrice'].includes(f) ? 'qty' : ['amtUSD', 'amtVND'].includes(f) ? 'num' : 'text', width: f === 'prodName' ? 220 : f === 'customer' ? 180 : 110 }))];
   if (tab === 'import') {
@@ -227,6 +248,17 @@ export function viewSales(el) {
       const cols = [...salesCols, { key: 'validStat', label: 'Validation', type: 'status', width: 100 }, { key: 'validMsg', label: 'Validation Message', width: 320 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }, { key: 'saveStat', label: 'Save', width: 80 }];
       A.mountTable(box.querySelector('#t-stg'), { columns: cols, rows: st.rows, filterKey: 'validStat', height: 480, totals: ['qty', 'amtUSD', 'amtVND'], onExport: A.exportTable('04_SALES_IMPORT', cols) });
     }
+  } else if (tab === 'dup') {
+    if (!dup.groups.length) { box.innerHTML = A.emptyNote('Không có dòng doanh thu nào lặp lại trong kỳ.'); return; }
+    const dec = d.dupDecisions || {};
+    box.innerHTML = `<p class="muted">Mỗi nhóm là các dòng giống hệt nhau trong Sales Database. Dòng #1 luôn được tính. Với mỗi dòng lặp (#2, #3…), chọn <b>Dòng thật</b> (vẫn tính giá vốn FIFO – mặc định giống Excel) hoặc <b>Trùng – loại</b> (không tính FIFO). Đối chiếu với hoá đơn gốc / doanh thu TK 511 trên FAST trước khi chọn.</p>
+      ${edit ? '<div class="row"><button class="btn ghost sm" type="button" data-dupall="KEEP">Tất cả dòng lặp là dòng thật</button><button class="btn ghost sm" type="button" data-dupall="EXCLUDE">Tất cả dòng lặp là trùng – loại</button></div>' : ''}
+      <div class="el-wrap"><table class="cp"><thead><tr><th>Ngày</th><th>Hoá đơn</th><th>Khách hàng</th><th>Sản phẩm</th><th class="r">SL</th><th class="r">USD</th><th>Lần</th><th>Xác nhận</th></tr></thead><tbody>
+      ${dup.groups.map((g) => g.map((l) => `<tr><td>${serialToISO(l.date)}</td><td>${esc(l.inv)}</td><td>${esc(l.cust)}</td><td>${esc(l.prod)}</td><td class="r">${A.fmtNum(l.qty)}</td><td class="r">${A.fmtNum(l.usd, 2)}</td><td>#${l.occ}</td><td>${l.occ === 1 ? '<span class="muted">Dòng gốc</span>' : `<select data-dup="${esc(l.key)}" ${edit ? '' : 'disabled'}><option value="">— chưa xác nhận —</option><option value="KEEP" ${dec[l.key] === 'KEEP' ? 'selected' : ''}>Dòng thật</option><option value="EXCLUDE" ${dec[l.key] === 'EXCLUDE' ? 'selected' : ''}>Trùng – loại</option></select>`}</td></tr>`).join('')).join('<tr><td colspan="8"></td></tr>')}
+      </tbody></table></div>`;
+    const save = (k, v, all) => { if (!A.guardEdit()) { A.render(); return; } const o = d.dupDecisions || (d.dupDecisions = {}); if (all) { for (const g of dup.groups) for (const l of g) if (l.occ > 1) o[l.key] = v; } else if (v) o[k] = v; else delete o[k]; A.audit('SALES DUPLICATE DECISION', all ? `Tất cả dòng lặp = ${v}` : `${k} = ${v || '(bỏ)'}`); A.markDirty('dupDecisions', 'audit'); A.render(); };
+    box.querySelectorAll('[data-dup]').forEach((x) => x.addEventListener('change', () => save(x.dataset.dup, x.value)));
+    box.querySelectorAll('[data-dupall]').forEach((x) => x.addEventListener('click', () => save('', x.dataset.dupall, true)));
   } else if (tab === 'db') {
     if (!db) { box.innerHTML = A.emptyNote('Sales Database trống.'); return; }
     const cols = [...salesCols, { key: 'include', label: 'Include in Price', width: 90 }, { key: 'validResult', label: 'Validation', type: 'status', width: 100 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }, { key: 'batchID', label: 'Batch', width: 150 }];
@@ -300,9 +332,11 @@ async function importSOFile(file) {
 export function doSalesSave() {
   const S = A.S;
   try {
+    const pv = F.salesSavePreview(S.d.salesImport, S.d.salesDB, S.period);
+    if (pv.from !== null && !confirm(`Validate & Save (${pv.mode})\n\nThay thế toàn bộ dòng cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
     const r = F.validateSaveSales(S.d.salesImport, S.d.salesDB, S.period);
     S.d.salesDB = r.db; if (S.d.pm) S.d.pm.status = 'OUTDATED';
-    A.audit('SALES VALIDATE & SAVE', `Lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; trùng ${r.stats.dup}; thay thế ${r.stats.replaced}`);
+    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}`);
     A.markDirty('salesImport', 'salesDB', 'pm', 'audit');
     A.toast(`Đã lưu ${r.stats.saved} dòng (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ). Price Master → OUTDATED, hãy Update Price Master.`, 'pass');
   } catch (e) { A.toast('Validate & Save lỗi: ' + e.message, 'block'); }
@@ -333,6 +367,7 @@ export function viewGL(el) {
       <div class="glrow"><label>GL 627 – Chi phí sản xuất chung (VND)<input name="gl627" inputmode="decimal" value="${esc(gl.gl627 ?? '')}" ${edit ? '' : 'disabled'}></label><span class="muted">Kỳ trước: ${A.fmtNum(num(prev.gl627))}</span></div>
       <div class="glrow"><label>Người lập<input name="preparedBy" value="${esc(gl.preparedBy ?? '')}" ${edit ? '' : 'disabled'}></label><label>Nguồn<input name="sourceRef" value="${esc(gl.sourceRef ?? 'FAST / GL current-period TB')}" ${edit ? '' : 'disabled'}></label></div>
       <div class="glrow"><label>622 lũy kế năm (cho STEP 5)<input name="ytd622" inputmode="decimal" value="${esc(gl.ytd622 ?? '')}" ${edit ? '' : 'disabled'}></label><label>627 lũy kế năm<input name="ytd627" inputmode="decimal" value="${esc(gl.ytd627 ?? '')}" ${edit ? '' : 'disabled'}></label></div>
+      <p class="muted">Nhập số không cần dấu phân cách (26300, 15506701812) hoặc đủ nhóm nghìn (15.506.701.812 / 15,506,701,812). Số dạng “26.300” sẽ bị hỏi lại vì không rõ là 26300 hay 26,3.</p>
       ${edit ? `<div class="row"><button class="btn" type="submit">Lưu GL cho kỳ ${esc(S.period)}</button><span class="muted">${gl.updatedAt ? `Lưu lúc ${A.fmtTs(gl.updatedAt)}` : ''}</span></div>` : ''}
     </form>
     <h2>Pool chung</h2>
@@ -344,7 +379,9 @@ export function viewGL(el) {
     <div id="l-dir"></div></section>`;
   if (edit) el.querySelector('#f-gl').addEventListener('submit', (e) => {
     e.preventDefault(); const f = new FormData(e.target);
-    const n = (k) => { const v = String(f.get(k) ?? '').trim().replace(/,/g, ''); return v === '' ? null : num(v); };
+    const vals = {};
+    for (const k of ['fx', 'gl622', 'gl627', 'ytd622', 'ytd627']) { const v = A.parseNum(f.get(k), k.toUpperCase()); if (v === undefined) return; vals[k] = v; }
+    const n = (k) => vals[k];
     if (!d.gl) d.gl = gl;
     Object.assign(gl, { period: S.period, fx: n('fx'), gl622: n('gl622'), gl627: n('gl627'), ytd622: n('ytd622'), ytd627: n('ytd627'), preparedBy: f.get('preparedBy'), sourceRef: f.get('sourceRef'), updatedAt: nowISO() });
     A.audit('GL INPUT', `FX=${gl.fx}; 622=${gl.gl622}; 627=${gl.gl627}`); A.markDirty('gl', 'audit'); A.toast('Đã lưu FX / GL.', 'pass'); A.render();
@@ -390,7 +427,7 @@ export function view4(el) {
     box.innerHTML = `<form id="f-lot" class="inline lotf"><label>Cao (x median)<input name="hiX" value="${p.hiX}"></label><label>Thấp (x median)<input name="loX" value="${p.loX}"></label><label>Mẫu tối thiểu<input name="minN" value="${p.minN}"></label><label>|Ảnh hưởng| tối thiểu (VND)<input name="minImp" value="${p.minImp}"></label><button class="btn ghost" type="submit">Chạy lại kiểm tra</button></form>
       ${lc ? `<p>${A.pill(lc.status)} · Ảnh hưởng tuyệt đối ${A.fmtNum(lc.abs)} VND · còn trong FG cuối kỳ ${A.fmtNum(lc.closingImpact)} VND · ${A.fmtTs(lc.runAt)}</p>` : ''}<div id="t-lot"></div>
       <p class="muted">Đơn giá RM cuối của từng lô so với trung vị cùng sản phẩm (lô kỳ này; thêm lớp FG đầu kỳ nếu ít hơn số mẫu tối thiểu). Chỉ để review, không chặn STEP 4.</p>`;
-    box.querySelector('#f-lot').addEventListener('submit', (e) => { e.preventDefault(); const f = new FormData(e.target); d.lotParams = { hiX: num(f.get('hiX')), loX: num(f.get('loX')), minN: num(f.get('minN')), minImp: num(f.get('minImp')) }; runLotCheck(); A.markDirty('lotParams', 'lotCheck'); A.render(); });
+    box.querySelector('#f-lot').addEventListener('submit', (e) => { e.preventDefault(); if (!A.guardEdit()) return; const f = new FormData(e.target); const pv = {}; for (const k of ['hiX', 'loX', 'minN', 'minImp']) { const v = A.parseNum(f.get(k), k); if (v === undefined) return; pv[k] = v; } d.lotParams = pv; runLotCheck(); A.markDirty('lotParams', 'lotCheck'); A.render(); });
     if (lc) {
       const cols = [['pc', 'PC No.', 120], ['date', 'PC Date', 100, 'date'], ['prod', 'Product Code', 140], ['name', 'Product Name', 220], ['fam', 'Family', 80], ['qty', 'Complete Qty', 100, 'qty'], ['unit', 'Unit RM (final)', 120, 'num'], ['median', 'Reference Median', 120, 'num'], ['ratio', 'Ratio', 80, 'qty'], ['sample', 'Sample', 70, 'int'], ['impact', 'Impact vs Median', 140, 'num'], ['closingQty', 'Qty in Closing FG', 110, 'qty'], ['closingImpact', 'Impact in Closing FG', 140, 'num'], ['flag', 'Flag', 320]].map(([key, label, width, type]) => ({ key, label, width, type }));
       A.mountTable(box.querySelector('#t-lot'), { columns: cols, rows: lc.rows, height: 420, totals: ['impact', 'closingImpact'], onExport: A.exportTable('04_LOT_COST_CHECK', cols) });
@@ -410,7 +447,7 @@ export function runLotCheck() {
 }
 export function doStep4() {
   const S = A.S; const d = S.d;
-  const g = gateMsg(S);
+  const g = gateMsg(S) || (derive(S).d3b && derive(S).d3b.buildStale ? 'STEP 3B: INPUT / ERP map đã đổi sau BUILD – chạy lại BUILD (và APPLY nếu có duyệt).' : '');
   if (g) { A.toast('STEP 4 bị chặn: ' + g, 'block'); return; }
   try {
     const s4 = F.runStep4({ period: S.period, step2: d.step2, step3: d.step3, pm: d.pm, gl: d.gl, directAdj: d.directAdj });
