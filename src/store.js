@@ -149,7 +149,9 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
   const snap = await F.getDoc(pdoc(period));
   const cur = snap.exists() ? snap.data() : null;
   const curRev = cur ? cur.rev || 0 : 0;
-  if (cur && (baseRev === null || baseRev === undefined || curRev !== baseRev)) throw new ConflictError(cur);
+  // baseRev: number (cloud revision last loaded/saved here) or, for devices synced before revisions existed, the cloud updatedAt string
+  const baseOK = !cur || (typeof baseRev === 'number' && curRev === baseRev) || (typeof baseRev === 'string' && !cur.rev && cur.updatedAt === baseRev);
+  if (!baseOK) throw new ConflictError(cur);
   const old = cur ? cur.blobs || {} : {};
   const manifest = {}; const written = [];
   const names = Object.keys(blobs); let i = 0;
