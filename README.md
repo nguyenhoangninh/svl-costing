@@ -38,7 +38,7 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 2. Firestore → **Rules**: dán nội dung `firestore.rules` → Publish.
 3. **Authentication → Sign-in method → Google → Enable**.
 4. **Authentication → Settings → Authorized domains → Add domain**: `nguyenhoangninh.github.io`.
-5. Trong rules, thay `YOUR_EMAIL@gmail.com` bằng email Google được phép truy cập (thêm người: thêm email vào danh sách). Email không nằm trong repo công khai.
+5. Trong rules, thay `YOUR_EMAIL@gmail.com` bằng email Google của chủ sở hữu (luôn có quyền Quản trị). Người dùng khác được thêm/xoá ngay trên web: **Kỳ, cloud & chuyển đổi → Người dùng & phân quyền** (Quản trị / Chỉnh sửa / Chỉ xem).
 
 Không đăng nhập (hoặc chưa bật Firestore) thì ứng dụng vẫn chạy đầy đủ, dữ liệu chỉ lưu trong trình duyệt (IndexedDB) của máy đó.
 

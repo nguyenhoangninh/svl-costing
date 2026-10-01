@@ -70,12 +70,14 @@ function markDirty(...blobs) {
 }
 function scheduleCloud() {
   if (!store.cloud.user) { S.sync = 'local'; renderSync(); return; }
+  if (!store.canEdit()) { S.sync = 'readonly'; renderSync(); return; }
+  if (!S.period) { S.sync = 'synced'; renderSync(); return; }
   S.sync = 'pending'; renderSync();
   clearTimeout(syncTimer);
   syncTimer = setTimeout(pushCloud, 1500);
 }
 async function pushCloud() {
-  if (!store.cloud.user || !S.period) return;
+  if (!store.cloud.user || !S.period || !store.canEdit()) return;
   try {
     S.sync = 'saving'; renderSync();
     const meta = await store.cloudSave(S.period, allBlobs(), summaryForCloud(), (m) => { S.syncMsg = m; renderSync(); });
@@ -140,6 +142,14 @@ function statusAll() {
   return { s1, s1c, s2c: step2Controls(ctx), s3c: step3Controls(ctx) };
 }
 
+// ======================= permissions =======================
+function guardEdit() {
+  if (store.canEdit()) return true;
+  toast('Tài khoản của bạn chỉ có quyền xem. Nhờ quản trị viên cấp quyền Chỉnh sửa nếu cần.', 'review');
+  return false;
+}
+const WRITE_ACTS = new Set(['new-period', 'run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period']);
+
 // ======================= UI helpers =======================
 function toast(msg, kind = 'info') {
   const t = document.createElement('div'); t.className = `toast ${kind}`; t.textContent = msg;
@@ -154,7 +164,7 @@ const pill = (s) => `<span class="pill ${statusClass(s)}">${esc(s ?? '')}</span>
 const v = (x, t = 'num') => (typeof x === 'number' ? fmtCell(x, t) : esc(x ?? ''));
 function renderSync() {
   const el = $('#sync'); if (!el) return;
-  const map = { local: ['Chỉ lưu trên máy này', 's-info'], pending: ['Chờ đồng bộ…', 's-rerun'], saving: [S.syncMsg || 'Đang lưu lên cloud…', 's-rerun'], synced: ['Đã đồng bộ cloud', 's-pass'], error: ['Lỗi đồng bộ: ' + S.syncMsg, 's-block'] };
+  const map = { local: ['Chỉ lưu trên máy này', 's-info'], pending: ['Chờ đồng bộ…', 's-rerun'], saving: [S.syncMsg || 'Đang lưu lên cloud…', 's-rerun'], synced: ['Đã đồng bộ cloud', 's-pass'], readonly: ['Chỉ xem – không lưu thay đổi', 's-info'], error: ['Lỗi đồng bộ: ' + S.syncMsg, 's-block'] };
   const [t, c] = map[S.sync] || map.local;
   el.className = `sync pill ${c}`; el.textContent = t; el.title = t;
 }
@@ -227,7 +237,7 @@ function renderShell() {
     <div class="ver">${esc(APP_VERSION)}</div>`;
   const u = store.cloud.user;
   $('#account').innerHTML = !store.cloud.enabled ? '<span class="muted">Chế độ offline</span>'
-    : u ? `<span class="who" title="${esc(u.email)}">${esc(u.displayName || u.email)}</span><button class="btn ghost sm" data-act="signout" type="button">Đăng xuất</button>`
+    : u ? `<span class="who" title="${esc(u.email)}">${esc(u.displayName || u.email)} · ${esc(store.ROLES[store.cloud.role] || '')}</span><button class="btn ghost sm" data-act="signout" type="button">Đăng xuất</button>`
       : `<button class="btn sm" data-act="signin" type="button" ${store.cloud.ready ? '' : 'disabled'}>Đăng nhập Google</button>`;
   renderSync();
 }
@@ -326,6 +336,7 @@ VIEWS.step1 = (el) => {
 };
 
 async function importERP(files) {
+  if (!guardEdit()) return;
   const plan = planImport(files.map((f) => ({ name: f.name, lastModified: f.lastModified, file: f })), S.period);
   const planEl = $('#plan');
   if (plan.error) { planEl.innerHTML = `<div class="alert block"><b>Import bị chặn.</b> ${esc(plan.error)}</div>`; return; }
@@ -433,7 +444,7 @@ VIEWS.rework = (el) => {
   mountTable($('#t-rw'), {
     columns: cols, rows: reg.rows, filterKey: 'inputCheck', height: 520, totals: ['issueQty', 'erpRef', 'closingWIP', 'carryIn'],
     onExport: exportTable('03_FG_REWORK_INPUT', cols),
-    onEdit: (row, k, val) => {
+    onEdit: !store.canEdit() ? undefined : (row, k, val) => {
       if (k === 'compDate') row[k] = val ? ((Date.UTC(+val.slice(0, 4), +val.slice(5, 7) - 1, +val.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000) : null;
       else if (['compQty', 'scrapQty'].includes(k)) row[k] = val === '' ? null : num(val);
       else row[k] = val;
@@ -472,7 +483,7 @@ VIEWS.opening = (el) => {
 const kpiN = (label, n) => `<div class="kpi"><span>${esc(label)}</span><b>${n === undefined || n === null ? '—' : fmtNum(n)}</b></div>`;
 
 async function importOpening(file) {
-  if (!file) return;
+  if (!file || !guardEdit()) return;
   await busy(`Đang đọc ${file.name}…`, async () => {
     try {
       const buf = await file.arrayBuffer();
@@ -578,16 +589,64 @@ VIEWS.settings = (el) => {
         <label class="btn">Chọn file .xlsm…<input type="file" id="f-xlsm" accept=".xlsm,.xlsx" hidden></label>
         <div id="mig"></div></div>
       <div class="card"><h2>Đồng bộ cloud</h2>
-        ${!c.enabled ? '<p>Chưa cấu hình Firebase — dữ liệu chỉ nằm trong trình duyệt này.</p>' : c.user ? `<p>Đăng nhập: <b>${esc(c.user.email)}</b>. Mọi thay đổi được tự động lưu lên Firestore (đã nén).</p><div class="row"><button class="btn ghost" data-act="push-cloud" type="button">Lưu kỳ này lên cloud ngay</button><button class="btn ghost" data-act="pull-cloud" type="button">Tải lại kỳ này từ cloud</button></div>` : `<p>Đăng nhập Google để lưu và mở dữ liệu trên mọi máy. ${c.error ? `<span class="err">${esc(c.error)}</span>` : ''}</p>`}
+        ${!c.enabled ? '<p>Chưa cấu hình Firebase — dữ liệu chỉ nằm trong trình duyệt này.</p>' : c.user ? `<p>Đăng nhập: <b>${esc(c.user.email)}</b> · vai trò <b>${esc(store.ROLES[c.role] || '')}</b>${c.isOwner ? ' (chủ sở hữu)' : ''}. ${store.canEdit() ? 'Mọi thay đổi được tự động lưu lên Firestore (đã nén).' : 'Bạn chỉ xem được dữ liệu, không lưu thay đổi lên cloud.'}</p><div class="row"><button class="btn ghost" data-act="push-cloud" type="button">Lưu kỳ này lên cloud ngay</button><button class="btn ghost" data-act="pull-cloud" type="button">Tải lại kỳ này từ cloud</button></div>` : `<p>Đăng nhập Google để lưu và mở dữ liệu trên mọi máy. ${c.error ? `<span class="err">${esc(c.error)}</span>` : ''}</p>`}
         <h2>Kỳ hiện có</h2><ul class="plist">${S.periods.map((p) => `<li><a href="#cc" data-act="goto-period" data-p="${p}">${p}</a>${p === S.period ? ' (đang mở)' : ''}</li>`).join('')}</ul>
         <div class="row"><button class="btn ghost" data-act="new-period" type="button">Tạo kỳ mới…</button><button class="btn ghost" data-act="export-all" type="button">Xuất kết quả kỳ ra Excel</button>
         ${S.period ? `<button class="btn danger ghost" data-act="delete-period" type="button">Xoá kỳ ${esc(S.period)}…</button>` : ''}</div></div>
-    </div></section>`;
+    </div>
+    ${store.isAdmin() ? `<div class="card" id="users"><h2>Người dùng &amp; phân quyền</h2><p class="muted">Đang tải danh sách…</p></div>` : ''}
+    </section>`;
   $('#f-xlsm').addEventListener('change', (e) => migrateWorkbook(e.target.files[0]));
+  if (store.isAdmin()) renderUsers();
 };
 
+let accessDraft = null;
+async function renderUsers() {
+  const box = $('#users'); if (!box) return;
+  if (!accessDraft) {
+    try { const a = await store.getAccess(); accessDraft = { members: { ...(a.members || {}) }, updatedAt: a.updatedAt, updatedBy: a.updatedBy, dirty: false }; }
+    catch (e) { box.innerHTML = `<h2>Người dùng &amp; phân quyền</h2><div class="alert block">Không đọc được danh sách: ${esc(e.message)}</div>`; return; }
+  }
+  const me = String(store.cloud.user.email).toLowerCase();
+  const rows = Object.entries(accessDraft.members).sort((a, b) => a[0].localeCompare(b[0]));
+  const opt = (sel) => Object.entries(store.ROLES).map(([k, l]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${l}</option>`).join('');
+  box.innerHTML = `<h2>Người dùng &amp; phân quyền</h2>
+    <p class="muted">Người trong danh sách đăng nhập Google bằng đúng email này là dùng được dữ liệu trên cloud. <b>Quản trị</b>: toàn quyền và quản lý người dùng · <b>Chỉnh sửa</b>: import, chạy các bước, sửa sổ rework · <b>Chỉ xem</b>: xem và xuất Excel. Chủ sở hữu khai báo trong Firestore Rules luôn có quyền Quản trị.</p>
+    <table class="cp"><thead><tr><th>Email Google</th><th>Vai trò</th><th></th></tr></thead><tbody>
+      ${rows.length ? rows.map(([e, r]) => `<tr><td>${esc(e)}${e === me ? ' <span class="muted">(bạn)</span>' : ''}</td><td><select data-user="${esc(e)}" aria-label="Vai trò của ${esc(e)}">${opt(r)}</select></td><td class="r"><button class="btn ghost sm danger" type="button" data-del-user="${esc(e)}">Xoá</button></td></tr>`).join('')
+        : '<tr><td colspan="3" class="muted">Chưa có ai ngoài chủ sở hữu.</td></tr>'}
+    </tbody></table>
+    <form id="f-user" class="inline" style="margin-top:12px">
+      <label>Email <input name="email" type="email" required placeholder="ten@gmail.com" style="min-width:260px"></label>
+      <label>Vai trò <select name="role" style="display:block;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:var(--panel)">${opt('editor')}</select></label>
+      <button class="btn ghost" type="submit">Thêm vào danh sách</button>
+    </form>
+    <div class="row"><button class="btn" type="button" id="save-users" ${accessDraft.dirty ? '' : 'disabled'}>Lưu thay đổi</button>
+      <span class="muted">${accessDraft.dirty ? 'Có thay đổi chưa lưu.' : accessDraft.updatedAt ? `Cập nhật lần cuối ${fmtTs(accessDraft.updatedAt)} bởi ${esc(accessDraft.updatedBy || '')}` : ''}</span></div>`;
+  box.querySelectorAll('[data-user]').forEach((s) => s.addEventListener('change', () => { accessDraft.members[s.dataset.user] = s.value; accessDraft.dirty = true; renderUsers(); }));
+  box.querySelectorAll('[data-del-user]').forEach((b) => b.addEventListener('click', () => {
+    const e = b.dataset.delUser;
+    if (e === me && !store.cloud.isOwner && !confirm('Xoá chính bạn khỏi danh sách? Bạn sẽ mất quyền truy cập sau khi lưu.')) return;
+    delete accessDraft.members[e]; accessDraft.dirty = true; renderUsers();
+  }));
+  $('#f-user').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target); const e = String(f.get('email')).trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { toast('Email không hợp lệ.', 'block'); return; }
+    accessDraft.members[e] = f.get('role'); accessDraft.dirty = true; renderUsers();
+  });
+  $('#save-users').addEventListener('click', async () => {
+    try {
+      const saved = await store.saveAccess(accessDraft.members);
+      audit('USER ACCESS UPDATE', Object.entries(saved).map(([e, r]) => `${e}=${r}`).join(', ') || '(trống)');
+      markDirty('audit');
+      accessDraft = null; toast('Đã lưu danh sách người dùng.', 'pass'); renderUsers();
+    } catch (e) { toast('Không lưu được: ' + e.message, 'block'); }
+  });
+}
+
 async function migrateWorkbook(file) {
-  if (!file) return;
+  if (!file || !guardEdit()) return;
   const erpSheets = ERPS.flatMap((e) => REPORTS.map((r) => dsKey(e, r)));
   const extra = ['00_CONTROL_CENTER', 'WIP_OPENING', '03_FG_REWORK_INPUT', '03_STOCK_OUT_ALLOCATION', '03_WIP_ALLOCATION'];
   let report = '';
@@ -700,6 +759,7 @@ document.addEventListener('click', async (e) => {
   const a = e.target.closest('[data-act]'); if (!a) return;
   const act = a.dataset.act;
   if (a.tagName === 'A') e.preventDefault();
+  if (WRITE_ACTS.has(act) && !guardEdit()) return;
   switch (act) {
     case 'signin': try { await store.signIn(); } catch (err) { toast('Đăng nhập lỗi: ' + err.message, 'block'); } break;
     case 'signout': await store.signOut(); break;
@@ -755,8 +815,10 @@ window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) ||
   if (store.cloud.enabled) {
     store.initCloud(async (u) => {
       renderShell();
+      accessDraft = null;
       if (u) { await refreshPeriods(); if (S.period) await openPeriod(S.period); else if (S.periods[0]) await openPeriod(S.periods[0]); scheduleCloud(); }
       else if (store.cloud.error) toast(store.cloud.error, 'review');
+      render();
     });
   }
 })();
