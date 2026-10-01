@@ -402,7 +402,7 @@ function gateMsg(S) {
   const d = S.d;
   return F.step4Gate({ period: S.period, salesImport: d.salesImport, pm: d.pm, gl: d.gl, step2: d.step2, step3: d.step3, opening: d.opening, latestImport: A.latestImport(), manual: d.manualPrice, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '' });
 }
-function runLotCheck() {
+export function runLotCheck() {
   const S = A.S; const fl = A.derived().d4.fl; if (!fl) return;
   const ref = S.d.fgRef || {};
   const cq = new Map(Object.entries(ref.closingQty || {}));

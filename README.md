@@ -14,9 +14,9 @@ Bản web của **SVL Costing Master (Excel/VBA v30.9)**: tính giá thành sả
 | STEP 3A | Opening WIP (import / roll forward / validate) + Material WIP | Có trên web |
 | STEP 3B | Điều chỉnh WIP trực tiếp (ERP map, INPUT, BUILD, duyệt, APPLY, sổ 632) | Có trên web |
 | STEP 4 | Doanh thu, Price Master, FX/GL 622-627, phân bổ giá thành, đối chiếu, kiểm tra đơn giá lô | Có trên web |
-| STEP 5 | FG theo lô, FIFO COGS, Rework FIFO, FG History, đóng kỳ | Giai đoạn 3 |
+| STEP 5 | FG đầu kỳ theo lô, FIFO giá vốn, FIFO rework (5B), nhập–xuất–tồn, FG History, đóng kỳ, roll forward | Có trên web |
 
-Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_FGRework`) và công thức Control Center. Kiểm thử hồi quy trên dữ liệu kỳ 2026-08: **69.871/69.871 giá trị khớp** cho STEP 1–3A và **223.899/223.899** cho STEP 3B–4 (từng dòng phân bổ, từng lô PC-P, từng vật tư WIP, sổ rework, Price Master, giá thành 380 lô, checkpoint).
+Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_FGRework`) và công thức Control Center. Kiểm thử hồi quy trên dữ liệu kỳ 2026-08: **69.871/69.871 giá trị khớp** cho STEP 1–3A, **223.899/223.899** cho STEP 3B–4 và **99.522/99.522** cho STEP 5 (từng dòng phân bổ, từng lô PC-P, từng vật tư WIP, sổ rework, Price Master, giá thành 380 lô, checkpoint).
 
 ## Cách dùng hằng tháng
 
@@ -30,9 +30,12 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 8. **4.1 Doanh thu & giá**: import file doanh thu (YTD / MONTHLY) → *Validate & Save* → tab Price Master → *Update Price Master*. Giá thủ công và danh sách SO dự phòng được giữ qua các kỳ.
 9. **4.2 FX / GL**: nhập tỷ giá, GL 622, GL 627 của kỳ và các khoản phân bổ trực tiếp (nếu có).
 10. **4.3 Phân bổ giá thành**: *Chạy STEP 4* → xem giá thành theo lô, đối chiếu, kiểm tra đơn giá lô.
-11. Xuất Excel từng bảng hoặc cả kỳ để chạy tiếp STEP 5 trong file Excel ở giai đoạn này.
+11. **5.1 FG đầu kỳ**: roll forward từ FG cuối kỳ trước (kỳ trước phải đã đóng) hoặc import template → *Validate*.
+12. **5.2 FIFO giá vốn**: *RUN FIFO COGS* (tự chạy luôn FIFO rework nếu sổ 2B có dòng). Nếu báo rework hoàn thành làm đổi giá thành STEP 4, chạy lại một lần nữa.
+13. **5.3 FG History & đóng kỳ**: *BUILD FG HISTORY* → *CLOSE MONTH*. Sau đó tạo kỳ mới: FG đầu kỳ, Opening WIP, Rework WIP B/F, FG History, Sales DB, giá… được mang sang tự động.
+14. Xuất Excel từng bảng hoặc cả kỳ khi cần lưu trữ.
 
-**Chuyển từ Excel sang web:** *Kỳ, cloud & chuyển đổi → Nạp một kỳ từ file Costing Master (.xlsm)* đọc 21 sheet ERP, WIP_OPENING, sổ rework, các sheet STEP 3B / 4 (ERP map, quyết định duyệt, doanh thu, giá, GL), chạy lại STEP 2–4 và hiện bảng đối chiếu Web ↔ Excel.
+**Chuyển từ Excel sang web:** *Kỳ, cloud & chuyển đổi → Nạp một kỳ từ file Costing Master (.xlsm)* đọc 21 sheet ERP, WIP_OPENING, sổ rework, các sheet STEP 3B / 4 / 5 (ERP map, quyết định duyệt, doanh thu, giá, GL, FG đầu kỳ, override, FG History), chạy lại STEP 2–5 và hiện bảng đối chiếu Web ↔ Excel.
 
 ## Thiết lập Firebase (một lần)
 
@@ -66,7 +69,7 @@ src/engine/           engine tính toán (thuần JS, chạy được cả Node)
 src/store.js          IndexedDB + Firestore (nén, chia khối)
 src/worker.js         đọc Excel trong Web Worker
 lib/                  SheetJS 0.18.5 (Apache-2.0)
-test/verify.mjs       kiểm thử hồi quy engine với file Excel
+test/verify.mjs       kiểm thử hồi quy engine với file Excel (verify2: STEP 3B–4, verify5: STEP 5)
 ```
 
 Chạy kiểm thử (cần file Costing Master và thư mục file ERP của kỳ):

@@ -41,6 +41,10 @@ export function statusClass(s) {
   const u = String(s || '').toUpperCase();
   if (!u) return 's-none';
   if (u.startsWith('MISSING') || u === 'STOPPED') return 's-block';
+  if (u === 'CLOSED' || u === 'READY TO CLOSE' || u === 'READY FOR PRODUCTION') return 's-pass';
+  if (u === 'READY WITH REVIEW') return 's-review';
+  if (u.startsWith('RERUN HISTORY') || u === 'NOT LOADED' || u.startsWith('LOADED')) return 's-rerun';
+  if (u === 'NOT READY' || u === 'BLOCKED') return 's-block';
   if (u === 'HOLD' || u.startsWith('PENDING') || u.startsWith('APPROVED - AWAIT')) return 's-review';
   if (u === 'APPLIED' || u === 'RECORDED' || u.startsWith('OK') || u === 'APPROVE' || u.startsWith('VALIDATED')) return 's-pass';
   if (u.startsWith('PASS WITH') || u.startsWith('REVIEW') || u.includes('WARNING') || u === 'PARTIAL' || u.startsWith('PARTIAL') || u === 'NEW MATERIAL' || u === 'MASTER DATA MISSING' || u === 'FALLBACK EQUAL') return 's-review';
