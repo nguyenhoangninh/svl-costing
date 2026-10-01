@@ -344,12 +344,14 @@ function renderShell() {
       </div>
     </div>
     <nav class="line" aria-label="Quy trình tháng">
-      ${NAV.map((n) => `<a href="#${n.id}" class="stop ${S.view === n.id ? 'on' : ''} ${n.later ? 'later' : ''}" ${S.view === n.id ? 'aria-current="page"' : ''}>
+      ${NAV.map((n) => `<a href="#${n.id}" title="${esc(`${n.no ? n.no + ' · ' : ''}${n.label} – ${n.key ? rs[n.key] : n.sub}`)}" class="stop ${S.view === n.id ? 'on' : ''} ${n.later ? 'later' : ''}" ${S.view === n.id ? 'aria-current="page"' : ''}>
         <span class="node ${n.key ? statusClass(rs[n.key]) : n.later ? 's-none' : 's-cc'}">${esc(n.no || '◎')}</span>
         <span class="stop-t"><b>${esc(n.label)}</b><small>${esc(n.key ? rs[n.key] : n.sub)}</small></span></a>`).join('')}
     </nav>
     <nav class="tools" aria-label="Công cụ">${TOOLS.map((t) => `<a href="#${t.id}" class="${S.view === t.id ? 'on' : ''}">${esc(t.label)}</a>`).join('')}</nav>
     <div class="ver">${esc(APP_VERSION)}</div>`;
+  const hp = $('#hdr-period');
+  if (hp) hp.innerHTML = S.periods.map((p) => `<option ${p === S.period ? 'selected' : ''}>${p}</option>`).join('');
   const u = store.cloud.user;
   $('#account').innerHTML = !store.cloud.enabled ? (store.SANDBOX ? '<span class="muted">Sandbox (thử nghiệm)</span>' : '<span class="muted">Chế độ offline</span>')
     : u ? `<span class="who" title="${esc(u.email)}">${esc(u.displayName || u.email)} · ${esc(store.ROLES[store.cloud.role] || '')}</span><button class="btn ghost sm" data-act="signout" type="button">Đăng xuất</button>`
@@ -371,6 +373,7 @@ function render() {
   if (!S.period && S.view !== 'settings') { app().innerHTML = viewWelcome(); return; }
   app().innerHTML = '';
   view(app());
+  cardTables(app());
   app().focus({ preventScroll: true });
 }
 
@@ -421,15 +424,16 @@ VIEWS.cc = (el) => {
       ${kpi('FG cuối kỳ', st.d5 && st.d5.res ? st.d5.res.totals.closeA : null)}
     </div>
     <h2>Quy trình tháng</h2>
-    <table class="cp"><thead><tr><th>Bước</th><th>Quy trình</th><th>Trạng thái</th><th class="r">Giá trị</th><th>Cập nhật</th><th>Việc tiếp theo</th></tr></thead><tbody>
+    <ol class="steplist">${steps.map((x) => `<li><a href="#${x[6]}"><span class="node ${statusClass(x[2])}">${esc(x[0])}</span><span class="sl-t"><b>${esc(x[1])}</b><small>${esc(x[3] || '')}${x[5] ? ` · ${esc(x[5])}` : ''}</small></span>${pill(x[2])}</a></li>`).join('')}</ol>
+    <table class="cp steptable"><thead><tr><th>Bước</th><th>Quy trình</th><th>Trạng thái</th><th class="r">Giá trị</th><th>Cập nhật</th><th>Việc tiếp theo</th></tr></thead><tbody>
     ${steps.map((x) => `<tr><td>${x[0]}</td><td><a href="#${x[6]}">${esc(x[1])}</a></td><td>${pill(x[2])}</td><td class="r">${esc(x[3])}</td><td>${fmtTs(x[4])}</td><td class="muted">${esc(x[5])}</td></tr>`).join('')}
     </tbody></table>
     <div>
-      <div><h2>STEP 2 — checkpoint <small>${st.s2c.okText} · ${pill(st.s2c.status)}</small></h2>${st.s2c.rows.length ? cpTable(st.s2c.rows) : emptyNote('Chưa chạy STEP 2.', 'step2', 'Mở STEP 2')}</div>
-      <div><h2>STEP 3A — checkpoint <small>${st.s3c.okText} · ${pill(st.s3c.status)}</small></h2>${cpTable(st.s3c.rows)}</div>
-      ${st.s3bc.rows.length ? `<div><h2>STEP 3B — checkpoint <small>${st.s3bc.okText} · ${pill(st.s3bc.status)}</small></h2>${cpTable(st.s3bc.rows)}</div>` : ''}
-      ${st.s4c.rows.length ? `<div><h2>STEP 4 — checkpoint <small>${st.s4c.okText} · ${pill(st.s4c.status)}</small></h2>${cpTable(st.s4c.rows)}</div>` : ''}
-      ${st.s5c.rows.length ? `<div><h2>STEP 5 — checkpoint <small>${st.s5c.okText} · ${pill(st.s5c.status)}</small></h2>${cpTable(st.s5c.rows)}</div>` : ''}
+      <details class="cpd" ${cpOpen(st.s2c.status)}><summary><h2>STEP 2 — checkpoint <small>${st.s2c.okText} · ${pill(st.s2c.status)}</small></h2></summary>${st.s2c.rows.length ? cpTable(st.s2c.rows) : emptyNote('Chưa chạy STEP 2.', 'step2', 'Mở STEP 2')}</details>
+      <details class="cpd" ${cpOpen(st.s3c.status)}><summary><h2>STEP 3A — checkpoint <small>${st.s3c.okText} · ${pill(st.s3c.status)}</small></h2></summary>${cpTable(st.s3c.rows)}</details>
+      ${st.s3bc.rows.length ? `<details class="cpd" ${cpOpen(st.s3bc.status)}><summary><h2>STEP 3B — checkpoint <small>${st.s3bc.okText} · ${pill(st.s3bc.status)}</small></h2></summary>${cpTable(st.s3bc.rows)}</details>` : ''}
+      ${st.s4c.rows.length ? `<details class="cpd" ${cpOpen(st.s4c.status)}><summary><h2>STEP 4 — checkpoint <small>${st.s4c.okText} · ${pill(st.s4c.status)}</small></h2></summary>${cpTable(st.s4c.rows)}</details>` : ''}
+      ${st.s5c.rows.length ? `<details class="cpd" ${cpOpen(st.s5c.status)}><summary><h2>STEP 5 — checkpoint <small>${st.s5c.okText} · ${pill(st.s5c.status)}</small></h2></summary>${cpTable(st.s5c.rows)}</details>` : ''}
     </div>
     ${journal(st)}
   </section>`;
@@ -579,7 +583,7 @@ function bfFromRow(r) {
 VIEWS.rework = (el) => {
   const reg = S.d.register;
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">FG xuất kho đi rework không phải tiêu hao NVL. Cập nhật loại, trạng thái và lô PC rework ở đây; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO sẽ được tính ở STEP 5B (giai đoạn 3).</p></div>
+    <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">FG xuất kho đi rework không phải tiêu hao NVL. Cập nhật loại, trạng thái và lô PC rework ở đây; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO được tính khi chạy STEP 5.2 (FIFO rework).</p></div>
     ${reg ? `<div class="result"><span>Kiểm tra dữ liệu nhập</span>${pill(reg.rows.filter((r) => String(r.inputCheck).startsWith('BLOCK')).length ? 'BLOCK' : 'PASS')}<small>${reg.stats.rows} dòng kỳ này · ${reg.stats.bfRows} dòng B/F</small></div>` : ''}</header>
     ${reg ? `<div class="kpis">${kpiN('Số lượng FG xuất', reg.stats.issueQty)}${kpi('Giá trị ERP (memo)', reg.stats.erpRef)}${kpi('Rework WIP chuyển sang (B/F)', reg.stats.bfCost)}${kpi('Closing Rework WIP', reg.rows.reduce((a, r) => a + num(r.closingWIP), 0))}</div>
     <div id="t-rw"></div>` : emptyNote('Sổ được tạo khi chạy STEP 2.', 'step2', 'Mở STEP 2')}
@@ -1023,7 +1027,7 @@ document.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('change', async (e) => {
-  if (e.target.id === 'period-sel') await openPeriod(e.target.value);
+  if (e.target.id === 'period-sel' || e.target.id === 'hdr-period') await openPeriod(e.target.value);
 });
 document.addEventListener('submit', async (e) => {
   if (e.target.id === 'f-new') { e.preventDefault(); const p = new FormData(e.target).get('p').trim(); if (!isPeriod(p)) { toast('Kỳ phải có dạng YYYY-MM.', 'block'); return; } await openPeriod(p); markDirty('audit'); }
@@ -1031,6 +1035,26 @@ document.addEventListener('submit', async (e) => {
 window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) || 'cc'; closeNav(); render(); });
 
 // ======================= installed app (PWA): drawer, install, update, offline =======================
+const isPhone = () => matchMedia('(max-width: 699px)').matches;
+/** Checkpoint sections stay open on larger screens; on phones only the ones that need attention are open. */
+const cpOpen = (status) => (!isPhone() || !String(status).startsWith('PASS') ? 'open' : '');
+/** Phone layout: checkpoint tables become label/value cards (labels taken from the table header). */
+function cardTables(root) {
+  for (const t of root.querySelectorAll('table.cp')) {
+    if (t.classList.contains('el')) continue;
+    const heads = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    if (!heads.length) continue;
+    t.classList.add('cards');
+    for (const tr of t.querySelectorAll('tbody tr')) {
+      const tds = [...tr.children];
+      if (tds.length === 1) tr.classList.add('sep');
+      tds.forEach((td, i) => {
+        td.dataset.label = heads[i] || ''; const tx = td.textContent.trim();
+        if ((!tx && !td.querySelector('select,input,button')) || (/^(Chênh lệch|Difference)$/i.test(heads[i] || '') && /^[–-]?$/.test(tx))) td.classList.add('empty');
+      });
+    }
+  }
+}
 function closeNav() { document.body.classList.remove('nav-open'); const m = $('#menu'); if (m) m.setAttribute('aria-expanded', 'false'); const sc = $('#scrim'); if (sc) sc.hidden = true; }
 $('#menu').addEventListener('click', () => {
   const open = !document.body.classList.contains('nav-open');

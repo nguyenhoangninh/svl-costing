@@ -1,7 +1,7 @@
 // SVL Costing service worker: makes the web app installable and usable offline (iOS / Android / desktop).
 // Same-origin files: network-first (always the latest deployed code when online), cache fallback when offline.
 // Versioned third-party modules (Firebase SDK, fonts): cache-first. Cloud data (Firestore / Google sign-in) is never cached.
-const VERSION = 'v1.4.0';
+const VERSION = 'v1.5.0';
 const CACHE = `svl-costing-${VERSION}`;
 const PRECACHE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',

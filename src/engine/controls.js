@@ -175,6 +175,6 @@ export function step4Controls(x) {
   ];
   const o = overall(rows, '', '');
   const s = (i) => rows[i].status;
-  const next = s(0) !== 'PASS' ? 'Validate & lưu doanh thu' : s(1) !== 'PASS' || s(2) !== 'PASS' ? 'Chạy UPDATE PRICE / xử lý giá thiếu' : s(3) !== 'PASS' && !s4 ? 'Nhập FX / GL rồi chạy STEP 4' : s(3) !== 'PASS' ? 'Hoàn tất FX / GL' : s(12) !== 'CURRENT' || s(7) !== 'PASS' ? 'Chạy STEP 4' : o.status.startsWith('PASS') ? 'Chạy STEP 5 – FIFO COGS (giai đoạn 3)' : 'Xem lại cầu nối STEP 4';
+  const next = s(0) !== 'PASS' ? 'Validate & lưu doanh thu' : s(1) !== 'PASS' || s(2) !== 'PASS' ? 'Chạy UPDATE PRICE / xử lý giá thiếu' : s(3) !== 'PASS' && !s4 ? 'Nhập FX / GL rồi chạy STEP 4' : s(3) !== 'PASS' ? 'Hoàn tất FX / GL' : s(12) !== 'CURRENT' || s(7) !== 'PASS' ? 'Chạy STEP 4' : o.status.startsWith('PASS') ? 'Chạy STEP 5 – FIFO COGS' : 'Xem lại cầu nối STEP 4';
   return { rows, okText: o.okText, status: o.status, next };
 }
