@@ -70,6 +70,7 @@ export async function initCloud(onUser) {
     const app = appM.initializeApp(FIREBASE_CONFIG, 'svl-costing');
     fb = { app, auth: authM.getAuth(app), fs: fsM.getFirestore(app), A: authM, F: fsM };
     cloud.ready = true;
+    authM.getRedirectResult(fb.auth).catch((e) => { cloud.error = 'Đăng nhập lỗi: ' + (e.code || e.message); });
     authM.onAuthStateChanged(fb.auth, async (u) => {
       cloud.role = ''; cloud.isOwner = false; cloud.error = '';
       if (u && !allowed(u.email)) { cloud.error = `Tài khoản ${u.email} không có quyền truy cập.`; await authM.signOut(fb.auth); return; }
@@ -88,7 +89,16 @@ export async function initCloud(onUser) {
   } catch (e) { cloud.offline = true; cloud.error = 'Không kết nối được Firebase — chỉ xem dữ liệu đã lưu trên máy này, không chỉnh sửa được cho đến khi kết nối lại.'; console.warn(e); cloud.ready = false; onUser(null); }
 }
 const allowed = (email) => !ALLOWED_EMAILS.length || ALLOWED_EMAILS.map((x) => x.toLowerCase()).includes(String(email || '').toLowerCase());
-export async function signIn() { await fb.A.signInWithPopup(fb.auth, new fb.A.GoogleAuthProvider()); }
+/** Popup first (works on desktop, Android and installed iOS apps); falls back to a full-page redirect where popups are not allowed. */
+export async function signIn() {
+  const provider = new fb.A.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try { await fb.A.signInWithPopup(fb.auth, provider); } catch (e) {
+    if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(e && e.code)) await fb.A.signInWithRedirect(fb.auth, provider);
+    else if (e && e.code === 'auth/popup-closed-by-user') return;
+    else throw e;
+  }
+}
 export async function signOut() { await fb.A.signOut(fb.auth); }
 
 // ---------------- users & roles ----------------

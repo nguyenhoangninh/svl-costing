@@ -54,5 +54,16 @@ let threw = '';
 try { F5.runFIFO({ ...ctx({}), step4: { current: 'OUTDATED - RERUN REQUIRED', overall: 'PASS' } }); } catch (e) { threw = e.message; }
 eq('FIFO refuses stale STEP 4', threw.includes('CURRENT'), true);
 
+// ---- PWA: every module the app can load is precached by the service worker (offline start)
+import fs from 'node:fs';
+import path from 'node:path';
+const swText = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+const pre = new Set([...swText.matchAll(/'\.\/([^']+)'/g)].map((m) => m[1]));
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+const root = new URL('..', import.meta.url).pathname;
+for (const f of [...walk(path.join(root, 'src')), ...walk(path.join(root, 'lib')).filter((x) => x.endsWith('.mjs')), ...walk(path.join(root, 'icons')).filter((x) => x.endsWith('.png'))]) eq(`precached ${path.relative(root, f)}`, pre.has(path.relative(root, f)), true);
+const man = JSON.parse(fs.readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8'));
+for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(path.join(root, ic.src)), true);
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

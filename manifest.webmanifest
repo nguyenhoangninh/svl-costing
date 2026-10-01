@@ -1,0 +1,25 @@
+{
+  "name": "SVL Costing – Giá thành sản xuất",
+  "short_name": "SVL Costing",
+  "description": "Tính giá thành sản xuất tháng của Starry Vietnam: import ERP, WIP, phân bổ 622/627, FIFO giá vốn, đóng kỳ.",
+  "id": "./",
+  "start_url": "./#cc",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "vi",
+  "background_color": "#1c2b36",
+  "theme_color": "#1c2b36",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Tổng quan kỳ", "url": "./#cc" },
+    { "name": "FIFO giá vốn", "url": "./#step5" },
+    { "name": "Đóng kỳ", "url": "./#close" }
+  ]
+}

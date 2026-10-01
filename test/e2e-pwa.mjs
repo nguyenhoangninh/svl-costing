@@ -1,0 +1,38 @@
+// PWA check: manifest, service worker, offline start, phone drawer navigation.
+import { chromium, devices } from 'playwright';
+import path from 'node:path';
+const [, , base0, wbPath, outDir] = process.argv;
+const base = base0 + '?sandbox=1';
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const ctx = await browser.newContext({ ...devices['Pixel 7'] });
+const page = await ctx.newPage();
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+page.on('dialog', (d) => d.accept());
+await page.goto(base + '#settings');
+await page.waitForSelector('#f-xlsm', { state: 'attached' });
+const man = await page.evaluate(async () => { const l = document.querySelector('link[rel=manifest]'); const r = await fetch(l.href); return r.json(); });
+console.log('manifest:', man.short_name, man.display, man.icons.length, 'icons');
+await page.evaluate(() => navigator.serviceWorker.ready);
+console.log('sw controlled after reload:', await (async () => { await page.reload(); await page.waitForTimeout(800); return page.evaluate(() => !!navigator.serviceWorker.controller); })());
+await page.setInputFiles('#f-xlsm', wbPath);
+await page.waitForSelector('#mig table', { timeout: 240000 });
+await page.goto(base + '#cc'); await page.waitForTimeout(500);
+await page.screenshot({ path: path.join(outDir, '40-phone-cc.png') });
+await page.click('#menu'); await page.waitForTimeout(400);
+await page.screenshot({ path: path.join(outDir, '41-phone-drawer.png') });
+await page.click('#rail a[href="#step5"]'); await page.waitForTimeout(500);
+console.log('drawer closed after nav:', !(await page.evaluate(() => document.body.classList.contains('nav-open'))), '| view:', (await page.textContent('h1')).trim());
+await page.screenshot({ path: path.join(outDir, '42-phone-step5.png') });
+// offline start
+await ctx.setOffline(true);
+await page.reload(); await page.waitForTimeout(1500);
+console.log('offline start:', (await page.textContent('h1')).trim(), '| sync pill:', (await page.textContent('#sync')).trim());
+await page.click('[data-act=s5-run]').catch(() => {}); await page.waitForTimeout(800);
+await page.screenshot({ path: path.join(outDir, '43-phone-offline.png') });
+await ctx.setOffline(false);
+await page.goto(base + '#settings'); await page.waitForTimeout(500);
+console.log('install card:', (await page.textContent('.install-card')).replace(/\s+/g, ' ').slice(0, 120));
+console.log('errors:', errors.join('\n') || 'none');
+await browser.close();
+if (errors.length) process.exit(1);

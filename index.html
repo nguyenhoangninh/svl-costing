@@ -2,7 +2,14 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c2b36">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SVL Costing">
 <title>SVL Costing</title>
 <meta name="description" content="SVL Costing Master trên web — tính giá thành tháng: import ERP, phân bổ Stock Out, Material WIP.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -238,11 +245,43 @@ table.el input[type=date] { min-width: 130px; }
 .lotf input { width: 140px; }
 .row label select { margin-left: 6px; padding: 5px 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); }
 @media (max-width: 640px) { .glf label { flex-basis: 100%; } .lotf input { width: 110px; } }
+
+/* ---------- installed app (PWA) & phones ---------- */
+.menu-t { display: none; background: none; border: 0; color: #f0f4f2; font-size: 22px; line-height: 1; padding: 4px 6px; margin-left: -6px; cursor: pointer; }
+header.top { padding-top: calc(10px + env(safe-area-inset-top)); padding-left: calc(20px + env(safe-area-inset-left)); padding-right: calc(20px + env(safe-area-inset-right)); }
+#toasts { bottom: calc(18px + env(safe-area-inset-bottom)); }
+.install-card { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.install-card img { width: 44px; height: 44px; border-radius: 10px; }
+.update-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 70; background: var(--ink); color: #f0f4f2; padding: 10px 14px; border-radius: 10px; display: flex; gap: 12px; align-items: center; box-shadow: 0 6px 20px rgba(0,0,0,.3); font-size: 14px; }
+.offline-pill { font-size: 12px; background: #8a5a12; color: #fff; padding: 2px 8px; border-radius: 10px; }
+@media (max-width: 900px) {
+  .menu-t { display: block; }
+  header.top { position: sticky; top: 0; z-index: 40; gap: 10px; padding-left: calc(14px + env(safe-area-inset-left)); padding-right: calc(14px + env(safe-area-inset-right)); }
+  .theme-t { display: none; }
+  #account .who { max-width: 110px; }
+  /* the process line becomes a slide-in drawer, keeping its vertical form */
+  #rail { position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 86vw); height: auto; z-index: 50; transform: translateX(-102%); transition: transform .22s ease; border-right: 1px solid var(--rule); border-bottom: 0; padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); gap: 16px; overflow: auto; box-shadow: 4px 0 24px rgba(0,0,0,.25); }
+  body.nav-open #rail { transform: none; }
+  #scrim { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 45; }
+  .line { flex-direction: column; overflow: visible; gap: 0; }
+  .line::before { left: 17px; right: auto; top: 18px; bottom: 18px; width: 2px; height: auto; }
+  .stop { flex-direction: row; gap: 12px; min-width: 0; text-align: left; padding: 9px 6px; }
+  .stop-t small { display: block; }
+  .stop-t b { font-size: 14px; }
+  .tools { flex-direction: column; }
+  .ver { display: block; }
+  main { padding-bottom: env(safe-area-inset-bottom); }
+  .btn { min-height: 38px; }
+  #toasts { left: calc(12px + env(safe-area-inset-left)); right: calc(12px + env(safe-area-inset-right)); max-width: none; }
+  .toast { font-size: 13px; padding: 8px 12px; }
+}
+@media (prefers-reduced-motion: reduce) { #rail { transition: none; } }
 </style>
 </head>
 <body>
 <div class="shell">
   <header class="top">
+    <button class="menu-t" id="menu" type="button" aria-label="Mở danh sách bước" aria-controls="rail" aria-expanded="false">☰</button>
     <div class="brand"><b>SVL Costing</b><span>Giá thành sản xuất tháng · Starry Vietnam</span></div>
     <div class="grow"></div>
     <span id="sync" class="sync pill s-info">Chỉ lưu trên máy này</span>
@@ -250,6 +289,7 @@ table.el input[type=date] { min-width: 130px; }
     <div id="account"></div>
   </header>
   <aside id="rail"></aside>
+  <div id="scrim" hidden></div>
   <main id="main" tabindex="-1"></main>
 </div>
 <div id="busy" hidden><div class="busy-box" role="status" aria-live="polite"><div class="spin"></div><div id="busy-msg">Đang xử lý…</div></div></div>

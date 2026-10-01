@@ -49,6 +49,16 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 
 Khi đã cấu hình Firebase, **phải đăng nhập** mới xem / sửa được dữ liệu. Muốn thử nghiệm không ảnh hưởng dữ liệu thật, mở `…/svl-costing/?sandbox=1`: dùng một cơ sở dữ liệu riêng trên máy, không đồng bộ cloud.
 
+## Cài như ứng dụng trên iPhone / Android
+
+SVL Costing là ứng dụng web cài được (PWA): có biểu tượng trên màn hình chính, mở toàn màn hình, xem được dữ liệu đã lưu khi mất mạng và tự cập nhật.
+
+- **iPhone / iPad:** mở https://nguyenhoangninh.github.io/svl-costing/ bằng **Safari** → nút **Chia sẻ** → **Thêm vào MH chính** → **Thêm**.
+- **Android:** mở bằng **Chrome** → menu **⋮** → **Cài đặt ứng dụng** (hoặc *Thêm vào màn hình chính*). Màn hình *Kỳ, cloud & chuyển đổi* có nút **Cài ứng dụng** khi trình duyệt hỗ trợ.
+- **Máy tính:** biểu tượng cài đặt trên thanh địa chỉ Chrome / Edge.
+
+Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mất mạng: xem được dữ liệu trên máy (chỉ xem); đăng nhập và đồng bộ cloud cần có mạng.
+
 ## Kiểm soát (theo audit 01/10/2026)
 
 | Kiểm soát | Cách hoạt động |

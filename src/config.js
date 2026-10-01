@@ -16,4 +16,4 @@ export const ALLOWED_EMAILS = []; // e.g. ['ten@gmail.com'] — optional UI chec
 // Firestore collection holding one document per costing period (YYYY-MM).
 export const CLOUD_COLLECTION = 'svl_costing_periods';
 
-export const APP_VERSION = 'web 1.3 · engine = Costing Master v30.9 (Step 1–5) · controls F-01…F-16';
+export const APP_VERSION = 'web 1.4 · app iOS / Android (PWA) · engine Costing Master v30.9 (Step 1–5)';

@@ -256,8 +256,11 @@ window.addEventListener('beforeunload', (e) => {
 
 // ======================= UI helpers =======================
 function toast(msg, kind = 'info') {
-  const t = document.createElement('div'); t.className = `toast ${kind}`; t.textContent = msg;
-  $('#toasts').appendChild(t); setTimeout(() => t.remove(), kind === 'block' ? 9000 : 4500);
+  const t = document.createElement('div'); t.className = `toast ${kind}`; t.textContent = msg; t.title = 'Bấm để đóng';
+  t.addEventListener('click', () => t.remove());
+  const box = $('#toasts'); box.appendChild(t);
+  const keep = matchMedia('(max-width: 900px)').matches ? 2 : 4;
+  while (box.children.length > keep) box.firstElementChild.remove(); setTimeout(() => t.remove(), kind === 'block' ? 9000 : 4500);
 }
 function setBusy(msg) { S.busy = msg; const b = $('#busy'); b.hidden = !msg; $('#busy-msg').textContent = msg || ''; }
 async function busy(msg, fn) {
@@ -269,6 +272,7 @@ const v = (x, t = 'num') => (typeof x === 'number' ? fmtCell(x, t) : esc(x ?? ''
 function renderSync() {
   const el = $('#sync'); if (!el) return;
   const map = { local: ['Chỉ lưu trên máy này', 's-info'], pending: ['Chờ đồng bộ…', 's-rerun'], saving: [S.syncMsg || 'Đang lưu lên cloud…', 's-rerun'], synced: ['Đã đồng bộ cloud', 's-pass'], readonly: ['Chỉ xem – không lưu thay đổi', 's-info'], error: ['Lỗi đồng bộ: ' + S.syncMsg, 's-block'], conflict: ['Xung đột cloud – ' + S.syncMsg, 's-block'] };
+  if (!navigator.onLine) { el.className = 'sync pill s-review'; el.textContent = 'Offline'; el.title = 'Không có mạng'; return; }
   const [t, c] = store.SANDBOX ? ['SANDBOX – dữ liệu thử, không đồng bộ cloud', 's-review'] : map[S.sync] || map.local;
   el.className = `sync pill ${c}`; el.textContent = t; el.title = t;
 }
@@ -737,6 +741,7 @@ VIEWS.audit = (el) => {
 VIEWS.settings = (el) => {
   const c = store.cloud;
   el.innerHTML = `<section class="page"><header class="ph"><div><h1>Kỳ, cloud &amp; chuyển đổi</h1></div></header>
+    ${installCard()}
     <div class="grid2">
       <div class="card"><h2>Nạp một kỳ từ file Costing Master (.xlsm)</h2>
         <p>Đọc 21 sheet ERP, WIP_OPENING và sổ 03_FG_REWORK_INPUT (giữ dữ liệu nhập tay) từ file Excel, rồi chạy lại STEP 2–3A trên web và đối chiếu với kết quả trong file.</p>
@@ -1023,7 +1028,55 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('submit', async (e) => {
   if (e.target.id === 'f-new') { e.preventDefault(); const p = new FormData(e.target).get('p').trim(); if (!isPeriod(p)) { toast('Kỳ phải có dạng YYYY-MM.', 'block'); return; } await openPeriod(p); markDirty('audit'); }
 });
-window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) || 'cc'; render(); });
+window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) || 'cc'; closeNav(); render(); });
+
+// ======================= installed app (PWA): drawer, install, update, offline =======================
+function closeNav() { document.body.classList.remove('nav-open'); const m = $('#menu'); if (m) m.setAttribute('aria-expanded', 'false'); const sc = $('#scrim'); if (sc) sc.hidden = true; }
+$('#menu').addEventListener('click', () => {
+  const open = !document.body.classList.contains('nav-open');
+  document.body.classList.toggle('nav-open', open); $('#menu').setAttribute('aria-expanded', String(open)); $('#scrim').hidden = !open;
+});
+$('#scrim').addEventListener('click', closeNav);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
+$('#rail').addEventListener('click', (e) => { if (e.target.closest('a[href^="#"]')) closeNav(); });
+
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (S.view === 'settings') render(); });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('Đã cài SVL Costing lên thiết bị.', 'pass'); });
+function installCard() {
+  const img = '<img src="icons/icon-192.png" alt="">';
+  if (isStandalone()) return `<div class="card install-card">${img}<div><b>Đang chạy như ứng dụng</b><div class="muted">Mở từ biểu tượng SVL Costing trên màn hình chính. Ứng dụng tự cập nhật khi có phiên bản mới.</div></div></div>`;
+  if (installEvt) return `<div class="card install-card">${img}<div style="flex:1"><b>Cài SVL Costing lên máy</b><div class="muted">Có biểu tượng trên màn hình chính, mở toàn màn hình, xem được khi mất mạng.</div></div><button class="btn" data-act="install-app" type="button">Cài ứng dụng</button></div>`;
+  if (isIOS()) return `<div class="card install-card">${img}<div><b>Cài lên iPhone / iPad</b><div class="muted">Mở trang này bằng <b>Safari</b> → bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → <b>Thêm vào MH chính</b> → <b>Thêm</b>.</div></div></div>`;
+  return `<div class="card install-card">${img}<div><b>Cài SVL Costing như ứng dụng</b><div class="muted">Android: mở bằng Chrome → menu ⋮ → <b>Cài đặt ứng dụng</b> (hoặc <b>Thêm vào màn hình chính</b>). Máy tính: biểu tượng cài đặt trên thanh địa chỉ Chrome / Edge.</div></div></div>`;
+}
+document.addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-act="install-app"]') || !installEvt) return;
+  installEvt.prompt(); const r = await installEvt.userChoice; installEvt = null;
+  if (r.outcome !== 'accepted') toast('Đã huỷ cài đặt.', 'info');
+  render();
+});
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    const offer = (w) => {
+      if (!w || !navigator.serviceWorker.controller || $('#update-bar')) return;
+      const bar = document.createElement('div'); bar.id = 'update-bar'; bar.className = 'update-bar'; bar.setAttribute('role', 'status');
+      bar.innerHTML = '<span>Đã có phiên bản mới của SVL Costing.</span><button class="btn sm" type="button">Cập nhật</button>';
+      bar.querySelector('button').addEventListener('click', async () => { await saveChain; w.postMessage('skip-waiting'); });
+      document.body.appendChild(bar);
+    };
+    if (reg.waiting) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => { const w = reg.installing; w && w.addEventListener('statechange', () => { if (w.state === 'installed') offer(w); }); });
+    setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+  }).catch((err) => console.warn('SW', err));
+  // reload only when an installed app switches to a new version (not on the very first install)
+  let reloading = false; const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloading) { reloading = true; location.reload(); } });
+}
+window.addEventListener('online', () => { renderSync(); toast('Đã có mạng trở lại.', 'pass'); if (store.cloud.user) scheduleCloud(); });
+window.addEventListener('offline', () => { renderSync(); toast('Mất kết nối mạng – xem được dữ liệu trên máy, thay đổi sẽ đồng bộ khi có mạng.', 'review'); });
 
 P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
 P3.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
