@@ -2,10 +2,12 @@
 // data is protected by Google sign-in + the Firestore rules in firestore.rules.
 // Set FIREBASE_CONFIG = null to run fully offline (data stays in this browser only).
 export const FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyA8XGvUoCBWs8WUlwC2hUEHPF6RQl6eSM0',
-  authDomain: 'dailyworkplan-de669.firebaseapp.com',
-  projectId: 'dailyworkplan-de669',
-  storageBucket: 'dailyworkplan-de669.firebasestorage.app',
+  apiKey: 'AIzaSyDvlXlxD5WfYGoSvkuo1Lm6B9WjeXxdHGM',
+  authDomain: 'svl-costing.firebaseapp.com',
+  projectId: 'svl-costing',
+  storageBucket: 'svl-costing.firebasestorage.app',
+  messagingSenderId: '369004239067',
+  appId: '1:369004239067:web:4d58f572f7fcc834b414fe',
 };
 
 // Only these Google accounts may open cloud data (must match firestore.rules).

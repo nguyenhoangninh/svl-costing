@@ -32,7 +32,7 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 
 ## Thiết lập Firebase (một lần)
 
-Ứng dụng dùng project Firebase `dailyworkplan-de669` (cùng project với Master Work Plan), nhưng dữ liệu giá thành nằm riêng trong **Firestore** và bắt buộc đăng nhập Google.
+Ứng dụng dùng project Firebase riêng **SVL-Costing** (`svl-costing`). Dữ liệu giá thành nằm trong **Firestore** và bắt buộc đăng nhập Google.
 
 1. Firebase Console → **Build → Firestore Database → Create database** (chọn vùng `asia-southeast1`, chế độ production).
 2. Firestore → **Rules**: dán nội dung `firestore.rules` → Publish.
