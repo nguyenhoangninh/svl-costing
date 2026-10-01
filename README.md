@@ -12,11 +12,11 @@ Bản web của **SVL Costing Master (Excel/VBA v30.9)**: tính giá thành sả
 | STEP 2 | Phân bổ Stock Out NVL vào lô PC-P (quy tắc T/O/S) | Có trên web |
 | STEP 2B | Sổ FG Stock Out / Rework (giữ dữ liệu nhập tay, B/F kỳ trước) | Có trên web |
 | STEP 3A | Opening WIP (import / roll forward / validate) + Material WIP | Có trên web |
-| STEP 3B | Điều chỉnh WIP trực tiếp | Giai đoạn 2 |
-| STEP 4 | Doanh thu, Price Master, 622/627, phân bổ giá thành | Giai đoạn 2 |
+| STEP 3B | Điều chỉnh WIP trực tiếp (ERP map, INPUT, BUILD, duyệt, APPLY, sổ 632) | Có trên web |
+| STEP 4 | Doanh thu, Price Master, FX/GL 622-627, phân bổ giá thành, đối chiếu, kiểm tra đơn giá lô | Có trên web |
 | STEP 5 | FG theo lô, FIFO COGS, Rework FIFO, FG History, đóng kỳ | Giai đoạn 3 |
 
-Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_FGRework`) và công thức Control Center. Kiểm thử hồi quy trên dữ liệu kỳ 2026-08: **69.871/69.871 giá trị khớp** với file Excel (từng dòng phân bổ, từng lô PC-P, từng vật tư WIP, sổ rework, checkpoint).
+Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_FGRework`) và công thức Control Center. Kiểm thử hồi quy trên dữ liệu kỳ 2026-08: **69.871/69.871 giá trị khớp** cho STEP 1–3A và **223.899/223.899** cho STEP 3B–4 (từng dòng phân bổ, từng lô PC-P, từng vật tư WIP, sổ rework, Price Master, giá thành 380 lô, checkpoint).
 
 ## Cách dùng hằng tháng
 
@@ -26,9 +26,13 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 4. **2B**: cập nhật Rework Type / Status / Rework PC / Completed Qty… ngay trong bảng.
 5. **Opening WIP**: roll forward từ kỳ trước hoặc import file Costing Master tháng trước → *Validate & lưu*.
 6. **STEP 3**: bấm *Chạy STEP 3*, xem checkpoint và bảng WIP theo vật tư.
-7. Xuất Excel từng bảng hoặc cả kỳ (*Kỳ, cloud & chuyển đổi → Xuất kết quả kỳ ra Excel*) để chạy tiếp STEP 3B–5 trong file Excel ở giai đoạn này.
+7. **STEP 3B**: *Đồng bộ INPUT* → *1 · BUILD / REFRESH* → tab CONTROL chọn APPROVE / HOLD cho từng vật tư → *2 · APPLY & SYNC* (không APPROVE dòng nào thì nhập lý do để đóng không điều chỉnh).
+8. **4.1 Doanh thu & giá**: import file doanh thu (YTD / MONTHLY) → *Validate & Save* → tab Price Master → *Update Price Master*. Giá thủ công và danh sách SO dự phòng được giữ qua các kỳ.
+9. **4.2 FX / GL**: nhập tỷ giá, GL 622, GL 627 của kỳ và các khoản phân bổ trực tiếp (nếu có).
+10. **4.3 Phân bổ giá thành**: *Chạy STEP 4* → xem giá thành theo lô, đối chiếu, kiểm tra đơn giá lô.
+11. Xuất Excel từng bảng hoặc cả kỳ để chạy tiếp STEP 5 trong file Excel ở giai đoạn này.
 
-**Chuyển từ Excel sang web:** *Kỳ, cloud & chuyển đổi → Nạp một kỳ từ file Costing Master (.xlsm)* đọc 21 sheet ERP, WIP_OPENING và sổ rework, chạy lại STEP 2–3A và hiện bảng đối chiếu Web ↔ Excel.
+**Chuyển từ Excel sang web:** *Kỳ, cloud & chuyển đổi → Nạp một kỳ từ file Costing Master (.xlsm)* đọc 21 sheet ERP, WIP_OPENING, sổ rework, các sheet STEP 3B / 4 (ERP map, quyết định duyệt, doanh thu, giá, GL), chạy lại STEP 2–4 và hiện bảng đối chiếu Web ↔ Excel.
 
 ## Thiết lập Firebase (một lần)
 

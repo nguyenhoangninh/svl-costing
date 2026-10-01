@@ -8,15 +8,16 @@ import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
 import * as store from './store.js';
 import { APP_VERSION } from './config.js';
+import * as P2 from './views/phase2.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit'];
+const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [] }; }
+function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -44,7 +45,7 @@ async function loadLocal(period) {
     const b = k.slice(`p/${period}/`.length); const v = await store.localGet(k);
     if (b.startsWith('ds:')) d.datasets[b.slice(3)] = v; else if (BLOBS.includes(b)) d[b] = v;
   }
-  d.audit = d.audit || []; d.importLog = d.importLog || {};
+  d.audit = d.audit || []; d.importLog = d.importLog || {}; d.soPrice = d.soPrice || []; d.manualPrice = d.manualPrice || []; d.directAdj = d.directAdj || [];
   return d;
 }
 async function saveLocal() {
@@ -104,7 +105,7 @@ async function openPeriod(p, { preferCloud = false } = {}) {
           const r = await store.cloudLoad(p, (m) => setBusy(m));
           const d = emptyData();
           for (const [k, v] of Object.entries(r.blobs)) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
-          d.audit = d.audit || []; d.importLog = d.importLog || {};
+          d.audit = d.audit || []; d.importLog = d.importLog || {}; d.soPrice = d.soPrice || []; d.manualPrice = d.manualPrice || []; d.directAdj = d.directAdj || [];
           S.d = d;
           S.dirty = new Set(Object.keys(allBlobs())); await saveLocal(); S.dirty.clear();
           await store.localSet(lk(p, 'cloudAt'), r.meta.updatedAt);
@@ -139,8 +140,11 @@ function statusAll() {
   const s1 = step1Status(datasetsMeta());
   const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets));
   const ctx = { period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport, opening: S.d.opening, step3: S.d.step3 };
-  return { s1, s1c, s2c: step2Controls(ctx), s3c: step3Controls(ctx) };
+  const p2 = S.period ? P2.derive(S) : { d3b: null, d4: null };
+  const s3bc = p2.d3b ? p2.d3b.controls : { status: 'NOT RUN', okText: '', rows: [], next: 'Chạy STEP 3A trước' };
+  return { s1, s1c, s2c: step2Controls(ctx), s3c: step3Controls(ctx), p2, s3bc, s4c: p2.d4 ? p2.d4.controls : { status: 'NOT RUN', okText: '', rows: [], next: '' } };
 }
+function derivedNow() { return P2.derive(S); }
 
 // ======================= permissions =======================
 function guardEdit() {
@@ -148,7 +152,7 @@ function guardEdit() {
   toast('Tài khoản của bạn chỉ có quyền xem. Nhờ quản trị viên cấp quyền Chỉnh sửa nếu cần.', 'review');
   return false;
 }
-const WRITE_ACTS = new Set(['new-period', 'run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period']);
+const WRITE_ACTS = new Set(['new-period', 'run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'pm-update', 'run-step4']);
 
 // ======================= UI helpers =======================
 function toast(msg, kind = 'info') {
@@ -199,8 +203,10 @@ const NAV = [
   { id: 'rework', no: '2B', label: 'Sổ FG Rework', sub: 'FG xuất đi rework', key: 'rw' },
   { id: 'opening', no: '3A', label: 'Opening WIP', sub: 'Số dư đầu kỳ', key: 'op' },
   { id: 'step3', no: '3A', label: 'Material WIP', sub: 'WIP theo vật tư', key: 's3' },
-  { id: 'p3b', no: '3B', label: 'Điều chỉnh WIP', sub: 'Giai đoạn 2', later: true },
-  { id: 'p4', no: '4', label: 'Phân bổ giá thành', sub: 'Giai đoạn 2', later: true },
+  { id: 'p3b', no: '3B', label: 'Điều chỉnh WIP', sub: 'WIP âm → lô PC', key: 's3b' },
+  { id: 'sales', no: '4.1', label: 'Doanh thu & giá', sub: 'Sales · Price Master', key: 'pm' },
+  { id: 'gl', no: '4.2', label: 'FX / GL 622-627', sub: 'Tỷ giá · chi phí', key: 'gl' },
+  { id: 'step4', no: '4.3', label: 'Phân bổ giá thành', sub: '622 / 627 theo lô', key: 's4' },
   { id: 'p5', no: '5', label: 'FG & FIFO COGS', sub: 'Giai đoạn 3', later: true },
 ];
 const TOOLS = [
@@ -215,6 +221,9 @@ function railStatus(st) {
   return {
     s1: st.s1c.result, s2: st.s2c.status, rw: !S.d.register ? 'NOT RUN' : blocks ? 'BLOCK' : 'PASS',
     op: op === 'READY' ? 'PASS' : op === 'READY WITH WARNINGS' ? 'PASS WITH REVIEW' : op === 'NO DATA' ? 'NOT RUN' : 'BLOCK', s3: st.s3c.status,
+    s3b: st.s3bc.status, s4: st.s4c.status,
+    pm: !S.d.pm ? 'NOT RUN' : S.d.pm.status !== 'CURRENT' ? S.d.pm.status : S.d.pm.rows.some((r) => r.status === 'MISSING PRICE') ? 'BLOCK' : 'PASS',
+    gl: S.d.gl && S.d.gl.period === S.period && num(S.d.gl.fx) > 0 ? 'PASS' : 'NOT RUN',
   };
 }
 
@@ -260,49 +269,63 @@ function viewWelcome() {
 }
 
 const VIEWS = {};
+VIEWS.p3b = (el) => P2.view3b(el);
+VIEWS.sales = (el) => P2.viewSales(el);
+VIEWS.gl = (el) => P2.viewGL(el);
+VIEWS.step4 = (el) => P2.view4(el);
 
 VIEWS.cc = (el) => {
-  const st = statusAll(); const s2 = S.d.step2, s3 = S.d.step3;
+  const st = statusAll(); const rs = railStatus(st); const s2 = S.d.step2, s3 = S.d.step3;
   const steps = [
     ['1.0', 'Import ERP', st.s1c.result, `${st.s1c.coreReady} báo cáo`, st.s1.latestImport, st.s1c.next, 'step1'],
     ['2.0', 'Phân bổ Stock Out', st.s2c.status, s2 ? fmtNum(s2.total.alloc) : '', s2 && s2.runAt, st.s2c.next, 'step2'],
     ['2.B', 'Sổ FG Rework', railStatus(st).rw, S.d.register ? `${S.d.register.stats.rows} dòng · SL ${fmtNum(S.d.register.stats.issueQty)}` : '', S.d.register && S.d.register.refreshedAt, '', 'rework'],
     ['3.0', 'Material WIP (3A)', st.s3c.status, s3 ? fmtNum(s3.summary.closingAmt) : '', s3 && s3.runAt, st.s3c.next, 'step3'],
+    ['3.B', 'Điều chỉnh WIP trực tiếp', st.s3bc.status, st.p2.d3b ? fmtNum(st.p2.d3b.wf.finalClosing) : '', S.d.wipadj && S.d.wipadj.control && (S.d.wipadj.control.appliedAt || S.d.wipadj.control.builtAt), st.s3bc.next, 'p3b'],
+    ['4.1', 'Doanh thu & Price Master', rs.pm, S.d.pm ? `${S.d.pm.rows.length} sản phẩm` : '', S.d.pm && S.d.pm.updatedAt, S.d.pm ? '' : 'Import doanh thu → Validate & Save → Update Price Master', 'sales'],
+    ['4.2', 'FX / GL 622-627', rs.gl, S.d.gl && S.d.gl.period === S.period ? `FX ${fmtNum(num(S.d.gl.fx), 2)}` : '', S.d.gl && S.d.gl.updatedAt, rs.gl === 'PASS' ? '' : 'Nhập tỷ giá, GL 622, GL 627 của kỳ', 'gl'],
+    ['4.3', 'Phân bổ giá thành', st.s4c.status, st.p2.d4 && st.p2.d4.fl ? fmtNum(st.p2.d4.fl.totals.totalCost) : '', S.d.step4 && S.d.step4.runAt, st.s4c.next, 'step4'],
   ];
   const next = steps.find((x) => !String(x[2]).startsWith('PASS'));
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>Tổng quan kỳ ${esc(S.period)}</h1><p class="lead">Chạy lần lượt từng bước; mỗi bước chỉ đi tiếp khi các checkpoint không còn BLOCK.</p></div>
-      <div class="next"><span>Việc tiếp theo</span><b>${next ? `<a href="#${next[6]}">${esc(next[1])}</a> — ${esc(next[5] || 'xem checkpoint')}` : 'Bước 1–3A đã PASS. Bước 3B/4/5 vẫn chạy trong Excel ở giai đoạn này.'}</b></div></header>
+      <div class="next"><span>Việc tiếp theo</span><b>${next ? `<a href="#${next[6]}">${esc(next[1])}</a> — ${esc(next[5] || 'xem checkpoint')}` : 'Bước 1–4 đã PASS. STEP 5 (FG FIFO / đóng kỳ) vẫn chạy trong Excel ở giai đoạn này.'}</b></div></header>
     <div class="kpis">
       ${kpi('Opening WIP', S.d.opening && S.d.opening.stats ? S.d.opening.stats.totalAmt : null)}
       ${kpi('WIP vào (MI + Stock Out)', s3 ? s3.summary.inAmt : null)}
       ${kpi('WIP ra (PC + MR + Stock Out)', s3 ? s3.summary.outAmt : null)}
-      ${kpi('Closing WIP ERP', s3 ? s3.summary.closingAmt : null, true)}
-      ${kpi('Stock Out NVL đã phân bổ', s2 ? s2.total.alloc : null)}
+      ${kpi('Closing WIP ERP', s3 ? s3.summary.closingAmt : null)}
+      ${kpi('Closing WIP cuối (sau 3B)', st.p2.d3b ? st.p2.d3b.wf.finalClosing : null, true)}
+      ${kpi('Giá thành SX (STEP 4)', st.p2.d4 && st.p2.d4.fl ? st.p2.d4.fl.totals.totalCost : null, true)}
     </div>
     <h2>Quy trình tháng</h2>
     <table class="cp"><thead><tr><th>Bước</th><th>Quy trình</th><th>Trạng thái</th><th class="r">Giá trị</th><th>Cập nhật</th><th>Việc tiếp theo</th></tr></thead><tbody>
     ${steps.map((x) => `<tr><td>${x[0]}</td><td><a href="#${x[6]}">${esc(x[1])}</a></td><td>${pill(x[2])}</td><td class="r">${esc(x[3])}</td><td>${fmtTs(x[4])}</td><td class="muted">${esc(x[5])}</td></tr>`).join('')}
-    <tr class="later"><td>3.B → 5</td><td>Điều chỉnh WIP, phân bổ 622/627, FIFO COGS, đóng kỳ</td><td>${pill('EXCEL')}</td><td></td><td></td><td class="muted">Giai đoạn 2–3 của bản web</td></tr>
+    <tr class="later"><td>5</td><td>FG FIFO, COGS, rework, đóng kỳ</td><td>${pill('EXCEL')}</td><td></td><td></td><td class="muted">Giai đoạn 3 của bản web</td></tr>
     </tbody></table>
     <div>
       <div><h2>STEP 2 — checkpoint <small>${st.s2c.okText} · ${pill(st.s2c.status)}</small></h2>${st.s2c.rows.length ? cpTable(st.s2c.rows) : emptyNote('Chưa chạy STEP 2.', 'step2', 'Mở STEP 2')}</div>
       <div><h2>STEP 3A — checkpoint <small>${st.s3c.okText} · ${pill(st.s3c.status)}</small></h2>${cpTable(st.s3c.rows)}</div>
+      ${st.s3bc.rows.length ? `<div><h2>STEP 3B — checkpoint <small>${st.s3bc.okText} · ${pill(st.s3bc.status)}</small></h2>${cpTable(st.s3bc.rows)}</div>` : ''}
+      ${st.s4c.rows.length ? `<div><h2>STEP 4 — checkpoint <small>${st.s4c.okText} · ${pill(st.s4c.status)}</small></h2>${cpTable(st.s4c.rows)}</div>` : ''}
     </div>
-    ${journal()}
+    ${journal(st)}
   </section>`;
 };
 function kpi(label, val, strong) {
   return `<div class="kpi ${strong ? 'strong' : ''}"><span>${esc(label)}</span><b>${val === null || val === undefined ? '—' : fmtNum(val)}</b><small>VND</small></div>`;
 }
 function emptyNote(msg, href, cta) { return `<div class="empty"><p>${esc(msg)}</p>${href ? `<a class="btn" href="#${href}">${esc(cta)}</a>` : ''}</div>`; }
-function journal() {
+function journal(st) {
   const s3 = S.d.step3; if (!s3) return '';
   const S3 = s3.summary;
   const je = [['JE01', '154', '152', 'Xuất NVL vào WIP – MI', S3.miAmt], ['JE02', '154', '152', 'Xuất NVL vào WIP – Stock Out', S3.soAmt], ['JE05', '152', '154', 'Nhập lại NVL từ WIP – MR', S3.mrAmt]];
-  return `<h2>Bút toán từ STEP 3A</h2><table class="cp"><thead><tr><th>JE</th><th>Nợ</th><th>Có</th><th>Diễn giải</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>
+  const s4 = S.d.step4, fl = st && st.p2.d4 && st.p2.d4.fl;
+  if (s4 && !s4.blocked) je.push(['JE03', '154', '622', 'Kết chuyển nhân công trực tiếp', s4.alloc622], ['JE04', '154', '627', 'Kết chuyển chi phí SX chung', s4.alloc627]);
+  if (fl) je.push(['JE06', '155', '154', 'Nhập kho thành phẩm theo giá thành STEP 4', fl.totals.totalCost]);
+  return `<h2>Bút toán đề xuất</h2><table class="cp"><thead><tr><th>JE</th><th>Nợ</th><th>Có</th><th>Diễn giải</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>
     ${je.map((j) => `<tr><td>${j[0]}</td><td>${j[1]}</td><td>${j[2]}</td><td>${esc(j[3])}</td><td class="r">${fmtNum(j[4])}</td></tr>`).join('')}</tbody></table>
-    <p class="muted">JE03/JE04 (622/627), JE06 (155) và JE07–JE08 (COGS, rework) có sau STEP 4–5.</p>`;
+    <p class="muted">JE07–JE08 (COGS, rework) có sau STEP 5.</p>`;
 }
 
 // ---------- STEP 1 ----------
@@ -480,7 +503,7 @@ VIEWS.opening = (el) => {
     mountTable($('#t-op'), { columns: cols, rows: op.rows, filterKey: 'status', totals: ['qty', 'amt'], height: 520, onExport: exportTable('WIP_OPENING', cols) });
   }
 };
-const kpiN = (label, n) => `<div class="kpi"><span>${esc(label)}</span><b>${n === undefined || n === null ? '—' : fmtNum(n)}</b></div>`;
+const kpiN = (label, n) => `<div class="kpi"><span>${esc(label)}</span><b>${n === undefined || n === null ? '—' : typeof n === 'string' ? esc(n) : fmtNum(n)}</b></div>`;
 
 async function importOpening(file) {
   if (!file || !guardEdit()) return;
@@ -648,7 +671,7 @@ async function renderUsers() {
 async function migrateWorkbook(file) {
   if (!file || !guardEdit()) return;
   const erpSheets = ERPS.flatMap((e) => REPORTS.map((r) => dsKey(e, r)));
-  const extra = ['00_CONTROL_CENTER', 'WIP_OPENING', '03_FG_REWORK_INPUT', '03_STOCK_OUT_ALLOCATION', '03_WIP_ALLOCATION'];
+  const extra = ['00_CONTROL_CENTER', 'WIP_OPENING', '03_FG_REWORK_INPUT', '03_STOCK_OUT_ALLOCATION', '03_WIP_ALLOCATION', ...P2.PHASE2_SHEETS];
   let report = '';
   await busy(`Đang đọc ${file.name} (file lớn có thể mất 10–30 giây)…`, async () => {
     try {
@@ -702,10 +725,14 @@ async function migrateWorkbook(file) {
         ['STEP 3 · WIP ra', s3 && s3.summary.outAmt, cellv(wa, 5, 9)], ['STEP 3 · Closing WIP', s3 && s3.summary.closingAmt, cellv(wa, 5, 15)],
         ['STEP 3 · Số vật tư', s3 && s3.rows.length, wa ? wa.slice(11).filter((r) => r && r[0] !== null && r[0] !== undefined && r[0] !== '').length : null],
       ];
+      let p2msg = '';
+      if (s3) {
+        try { const m = P2.migratePhase2(g, S, period); cmp.push(...m.cmp); p2msg = m.msg; audit('STEP 3B + STEP 4 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = 'STEP 3B/4: ' + e.message; }
+      }
       report = `<table class="cp"><thead><tr><th>Chỉ tiêu</th><th class="r">Web</th><th class="r">Excel</th><th class="r">Chênh lệch</th><th></th></tr></thead><tbody>${cmp.map(([l, a, b]) => {
         const d = typeof a === 'number' && typeof b === 'number' ? a - b : null;
         return `<tr><td>${esc(l)}</td><td class="r">${a === null || a === undefined ? '—' : fmtNum(a, Number.isInteger(a) ? 0 : 2)}</td><td class="r">${b === null || b === undefined ? "—" : fmtNum(b, Number.isInteger(b) ? 0 : 2)}</td><td class="r">${d === null ? '' : fmtNum(d, 2)}</td><td>${pill(d === null ? 'INFO' : Math.abs(d) < 1 ? 'PASS' : 'CHECK')}</td></tr>`;
-      }).join('')}</tbody></table>${s3err ? `<div class="alert block">STEP 3: ${esc(s3err)}</div>` : ''}`;
+      }).join('')}</tbody></table>${s3err ? `<div class="alert block">STEP 3: ${esc(s3err)}</div>` : ''}${p2msg ? `<div class="alert review">${esc(p2msg)}</div>` : ''}`;
       S.dirty = new Set(Object.keys(allBlobs()));
       await saveLocal(); S.dirty.clear(); scheduleCloud();
       await refreshPeriods();
@@ -730,6 +757,16 @@ async function exportAll() {
     const pad = Array(10).fill([]);
     sheets.push({ name: '03_WIP_ALLOCATION', aoa: [['STEP 3 - MATERIAL WIP'], ['Reporting Period', S.period, '', 'Run Time', s3.runAt, '', 'Opening Source', s3.openingSource], ...pad.slice(0, 8), WIP_HEADERS, ...s3.rows.map((r) => keys.map((k) => r[k]))] });
   }
+  const D = P2.derive(S);
+  const tbl = (name, fields, headers, rows) => sheets.push({ name, aoa: [headers, ...rows.map((r) => fields.map((f) => r[f] ?? ''))] });
+  if (S.d.wipadj && S.d.wipadj.control) {
+    const cf = ['code', 'desc', 'erp', 'basisQty', 'basisAmt', 'method', 'nDetail', 'share', 'apc', 'adir', 'status', 'decision', 'note', 'gate', 'wipPostAmt', 'pcPostAmt', 'postCheck'];
+    tbl('03_WIP_DIRECT_ADJ_CONTROL', cf, cf, S.d.wipadj.control.rows);
+    if (D.d3b) { const wf = ['code', 'erp', 'erpSource', 'rule', 'adjQty', 'adjAmt', 'finalQty', 'finalAmt', 'postedPC', 'method', 'status']; tbl('03_WIP_FINAL', wf, wf, D.d3b.wf.rows); }
+  }
+  if (S.d.pm) tbl('04_PRICE_MASTER', P2.F.PM_FIELDS, P2.F.PM_HEADERS, S.d.pm.rows);
+  if (D.d4 && D.d4.fl) tbl('04_COST_ALLOCATION', P2.F.CA_FIELDS, P2.F.CA_HEADERS, D.d4.fl.rows.map((r) => ({ ...r, date: typeof r.date === 'number' ? serialToISO(r.date) : r.date })));
+  if (S.d.step4 && S.d.step4.recon) tbl('04_RECONCILIATION', ['label', 'expected', 'result', 'diff', 'status', 'note'], ['Control', 'Expected', 'Result', 'Difference', 'Status', 'Note'], S.d.step4.recon.rows);
   if (!sheets.length) { toast('Chưa có kết quả để xuất.', 'review'); return; }
   await exportBook(`SVL_Costing_Web_${S.period}.xlsx`, sheets);
 }
@@ -741,6 +778,7 @@ async function newPeriod() {
   if (!p) return;
   if (!isPeriod(p)) { toast('Kỳ phải có dạng YYYY-MM.', 'block'); return; }
   const prev = S.period && nextPeriod(S.period) === p ? { step3: S.d.step3, register: S.d.register } : null;
+  const prevD = S.period && S.period < p ? S.d : null;
   await openPeriod(p);
   if (prev && !S.d.opening && prev.step3) {
     S.d.opening = openingFromClosing(prev.step3, p); validateOpening(S.d.opening, S.d.datasets, p);
@@ -751,6 +789,11 @@ async function newPeriod() {
     // Closing Rework WIP of the previous period becomes B/F rows (RW_ArchiveClosingReworkWIP → RW_CollectBroughtForward)
     S.d.bfSeed = prev.register.rows.filter((r) => (r.active === 'Y' || r.active === 'B/F') && num(r.closingWIP) > 1).map((r) => ({ ...bfFromRow(r), bfQty: r.active === 'B/F' ? r.bfQty : r.fifoQty, carryCost: num(r.closingWIP), originPeriod: r.active === 'B/F' ? r.originPeriod : r.period }));
     if (S.d.bfSeed.length) { S.d.register = { period: p, refreshedAt: '', rows: S.d.bfSeed.map((b) => ({ active: 'B/F', ...b, bfCost: b.carryCost, closingWIP: b.carryCost, fifoStatus: 'OPENING B/F', rowSource: 'OPENING B/F' })), stats: { rows: 0, issueQty: 0, erpRef: 0, bfRows: S.d.bfSeed.length, bfCost: S.d.bfSeed.reduce((a, b) => a + b.carryCost, 0) } }; markDirty('register'); }
+  }
+  if (prevD) {
+    const cf = P2.carryForward(prevD, p); const took = [];
+    for (const [k, val] of Object.entries(cf)) { const cur = S.d[k]; if (cur === null || cur === undefined || (Array.isArray(cur) && !cur.length)) { S.d[k] = val; took.push(k); } }
+    if (took.length) { audit('CARRY FORWARD', `${S.period} ← ${took.join(', ')}`); markDirty(...took, 'audit'); }
   }
   S.view = 'cc'; location.hash = 'cc'; render();
 }
@@ -786,6 +829,13 @@ document.addEventListener('click', async (e) => {
     case 'push-cloud': await pushCloud(); toast('Đã lưu lên cloud.', 'pass'); break;
     case 'pull-cloud': await openPeriod(S.period, { preferCloud: true }); break;
     case 'export-all': await exportAll(); break;
+    case '3b-sync': P2.do3bSync(); render(); break;
+    case '3b-build': await busy('Đang BUILD STEP 3B…', async () => P2.do3bBuild()); render(); break;
+    case '3b-apply': await busy('Đang APPLY STEP 3B…', async () => P2.do3bApply()); render(); break;
+    case '3b-all': P2.do3bAll(a.dataset.dec); render(); break;
+    case 'sales-save': await busy('Đang Validate & Save doanh thu…', async () => P2.doSalesSave()); render(); break;
+    case 'pm-update': await busy('Đang cập nhật Price Master…', async () => P2.doPMUpdate()); render(); break;
+    case 'run-step4': await busy('Đang chạy STEP 4…', async () => P2.doStep4()); render(); break;
     case 'delete-period':
       if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${S.period}/`)) await store.localDel(k);
@@ -805,6 +855,8 @@ document.addEventListener('submit', async (e) => {
   if (e.target.id === 'f-new') { e.preventDefault(); const p = new FormData(e.target).get('p').trim(); if (!isPeriod(p)) { toast('Kỳ phải có dạng YYYY-MM.', 'block'); return; } await openPeriod(p); markDirty('audit'); }
 });
 window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) || 'cc'; render(); });
+
+P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit, canEdit: () => store.canEdit(), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
 
 // ======================= boot =======================
 (async function boot() {

@@ -59,6 +59,7 @@ function loadPCPool(ds, erp, pool) {
   const cPC = headerCol(h, 'PC No.'), cMO = headerCol(h, 'MO No.'), cProd = headerCol(h, 'Product Code');
   const cName = headerCol(h, 'Product Name'), cLoc = headerCol(h, 'Location');
   const cQty = headerCol(h, 'Current Complete Qty'), cCost = headerCol(h, 'Total Cost');
+  const cDate = headerCol(h, 'Date'), cSub = headerCol(h, 'Sub-MO'), cUnit = headerCol(h, 'Unit');
   if (cPC < 0 || cProd < 0 || cCost < 0) throw new Error(`Required PC-P headers not found in PC-P-${erp}`);
   const end = lastDataEnd(ds.rows, cPC);
   for (let i = 0; i < end; i++) {
@@ -68,6 +69,7 @@ function loadPCPool(ds, erp, pool) {
       erp, rowIdx: i, pcNo: txt(r[cPC]), mo: cMO >= 0 ? txt(r[cMO]) : '', prod: txt(r[cProd]),
       name: cName >= 0 ? txt(r[cName]) : '', loc: cLoc >= 0 ? txt(r[cLoc]) : '',
       qty: cQty >= 0 ? num(r[cQty]) : 0, cost: num(r[cCost]),
+      date: cDate >= 0 ? (typeof r[cDate] === 'number' ? r[cDate] : num(r[cDate])) : 0, sub: cSub >= 0 ? txt(r[cSub]) : '', unit: cUnit >= 0 ? txt(r[cUnit]) : '',
       allocT: 0, allocS: 0, allocO: 0, alloc: 0, src: '',
     });
   }
