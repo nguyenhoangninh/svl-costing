@@ -1,0 +1,7 @@
+node_modules/
+*.xlsx
+*.xlsm
+*.xls
+*.png
+!icon*.png
+.DS_Store

@@ -1,0 +1,20 @@
+rules_version = '2';
+// Firestore rules for SVL Costing Web.
+// Only the listed Google accounts can read or write costing data. Keep the list in sync with src/config.js.
+// If this Firebase project already has Firestore rules for other apps, copy only the
+// "svl_costing_periods" block and the isSvlCostingUser() function into the existing rules.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSvlCostingUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['YOUR_EMAIL@gmail.com'];
+    }
+    match /svl_costing_periods/{period} {
+      allow read, write: if isSvlCostingUser();
+      match /chunks/{chunk} {
+        allow read, write: if isSvlCostingUser();
+      }
+    }
+  }
+}
