@@ -298,7 +298,7 @@ export function runFIFO(ctx) {
         cq += s.fq; crm += s.rm; c622 += s.c622; c627 += s.c627; ct += s.tot;
         if (nd > TOLQ) { s.status = 'INSUFFICIENT FG'; s.msg += `Product short by ${vbFmt(nd, 4, true)} units for the period; `; } else s.status = 'OK';
       });
-    } else strictProduct(prod, list);
+    }
   }
   // STRICT_DATE (owner decision 02/10/2026): sales and FG rework issues of a product run through FIFO in one date order;
   // each event can only use layers dated on/before it. Rework takes are reserved here and booked by runReworkFIFO.
