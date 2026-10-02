@@ -1,6 +1,6 @@
 {
   "name": "svl-costing",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "SVL Costing Master on the web",
   "scripts": {
     "test": "node test/unit.mjs && node test/synth.mjs",
