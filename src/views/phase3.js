@@ -20,7 +20,9 @@ export function engineBalances(S, p2, res) {
   const wf = p2 && p2.d3b ? p2.d3b.wf : null;
   const w632 = ((d.wipadj && d.wipadj.reg632) || []).filter((r) => r.record === 'RECORDED').reduce((a, r) => a + num(r.impact), 0);
   return {
-    a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0),
+    // DIRECT_632 impact > 0 = Dr 632 / Cr 154; impact < 0 = Dr 154 / Cr 632.
+    // Therefore the recorded entry changes both balances with opposite signs.
+    a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0) - w632,
     a155: res ? res.totals.closeA : 0,
     a632: (res ? res.totals.cogsA : 0) + w632,
     a511: F5.periodRevenue(d.salesDB ? d.salesDB.rows : [], S.period),
@@ -334,14 +336,21 @@ async function priorSalesFor(S) {
   const rows = S.d.salesDB ? S.d.salesDB.rows : [];
   const pS = S.period;
   if (!rows.some((r) => num(r.qty) < 0 && F5.saleDate(r) !== null && serialToISO(F5.saleDate(r)).slice(0, 7) === pS)) return [];
-  const out = []; let p = pS;
+  const out = [], returned = new Map(); let p = pS;
   for (let k = 0; k < 12; k++) {
     p = prevPeriod(p);
     const pd = await A.loadPeriodData(p).catch(() => null);
     const r5 = pd && pd.step5 && pd.step5.period === p ? pd.step5 : null;
-    if (r5) for (const x of r5.sales || []) if (x.fin === 'FIFO COGS' && num(x.fq) > 0) out.push({ inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period: p });
+    if (!r5) continue;
+    for (const x of r5.sales || []) {
+      if (x.fin === 'FIFO COGS' && num(x.fq) > 0) out.push({ inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period: p });
+      if (x.fin === 'RETURN' && x.status === 'RETURNED' && ttxt(x.origInv) && num(x.fq) < 0) {
+        const key = `${utxt(x.origInv)}|${utxt(x.prod)}`;
+        returned.set(key, (returned.get(key) || 0) + -num(x.fq));
+      }
+    }
   }
-  return out;
+  return out.map((o) => ({ ...o, returned: returned.get(`${utxt(o.inv)}|${utxt(o.prod)}`) || 0 }));
 }
 export async function doRunFIFO() {
   const S = A.S; const d = S.d;
@@ -503,9 +512,15 @@ export async function doClose() {
   A.toast(`Kỳ ${S.period} đã ĐÓNG${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Rework WIP chuyển kỳ: ${d.rwArchive.length} dòng / ${A.fmtNum(arcCost)} VND. Bước tiếp: tạo kỳ ${nextP(S.period)} → Roll forward.`, 'pass');
   A.render();
 }
-export function doReopen() {
+export async function doReopen() {
   const S = A.S;
   if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được mở lại kỳ đã đóng.', 'review'); return; }
+  const np = nextP(S.period);
+  const nd = await A.loadPeriodData(np).catch(() => null);
+  if (nd && nd.closed && nd.closed.period === np) {
+    A.toast(`Không thể mở lại ${S.period}: kỳ kế tiếp ${np} đã ĐÓNG và đang phụ thuộc số dư cuối kỳ này. Mở lại ${np} trước, sau đó mới mở lại ${S.period}.`, 'block');
+    return;
+  }
   const reason = (prompt(`Mở lại kỳ ${S.period} đã đóng (để sửa số liệu). Nhập lý do:`, '') || '').trim();
   if (!reason) return;
   const was = S.d.closed;
@@ -516,7 +531,7 @@ export function doReopen() {
 }
 
 // ======================= migration / carry-forward =======================
-export function migratePhase3(g, S, period) {
+export async function migratePhase3(g, S, period) {
   const d = S.d; const cell = (gr, r, c) => (gr && gr[r - 1] ? gr[r - 1][c - 1] : null);
   const oG = g['05_FG_OPENING'];
   if (oG) {
@@ -540,7 +555,7 @@ export function migratePhase3(g, S, period) {
   let msg = '';
   try {
     if (d.fgOpen && String(d.fgOpen.status).startsWith('VALIDATED') && d.step4 && !d.step4.blocked) {
-      doRunFIFO();
+      await doRunFIFO();
       if (d.step5 && histThrough === period) doBuildHistory();
     } else msg = 'STEP 5: FG đầu kỳ chưa VALIDATED hoặc STEP 4 chưa chạy được – chưa chạy FIFO.';
   } catch (e) { msg = 'STEP 5: ' + e.message; }

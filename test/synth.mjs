@@ -96,9 +96,10 @@ const fgOpen = { period: P, status: 'LOADED', rows: [['SPX-100', 10, 9000000], [
 F5.validateOpeningFG(fgOpen, P);
 const run = (mode) => {
   const reg = JSON.parse(JSON.stringify(register));
-  const res = F5.runFIFO({ period: P, opening: fgOpen, caRows: fl.rows, salesRows: salesDB.rows, pmRows: pm.rows, fx: FX, overrides: {}, dupDecisions: {}, mode, tol: 1, register: reg, sellCostRate: 0.015,
+  const salesRows = mode === 'MONTHLY' ? salesDB.rows.filter((r) => num(r.qty) >= 0) : salesDB.rows;
+  const res = F5.runFIFO({ period: P, opening: fgOpen, caRows: fl.rows, salesRows, pmRows: pm.rows, fx: FX, overrides: {}, dupDecisions: {}, mode, tol: 1, register: reg, sellCostRate: 0.015,
     step4: { current: 'CURRENT', overall: fl.overall, finalCost: fl.totals.totalCost, qty: s4.recon.rows[1].result } });
-  F5.runReworkFIFO(res, reg, { period: P, opening: fgOpen, salesRows: salesDB.rows, step4Carry: fl.totals.carryIn });
+  F5.runReworkFIFO(res, reg, { period: P, opening: fgOpen, salesRows, step4Carry: fl.totals.carryIn });
   F5.finalizeRun(res);
   return { res, reg };
 };
@@ -112,7 +113,7 @@ ok('3B has amount-basis rows', b.engine.rows.some((r) => r.note === 'Actual PC-M
 ok('3B WIP bridge', wf.bridgeStatus === 'PASS', wf.bridgeStatus);
 ok('step4 overall PASS', String(fl.overall).startsWith('PASS'), fl.overall);
 for (const [n, x] of [['MONTHLY', M], ['STRICT', St]]) for (const k of [8, 9, 10, 11, 12]) ok(`${n} rec ${k}`, x.res.rec[k].status === 'PASS', JSON.stringify(x.res.rec[k]));
-ok('return restored', M.res.sales.some((s) => s.fin === 'RETURN' && s.status === 'RETURNED'));
+ok('return restored in STRICT_DATE', St.res.sales.some((s) => s.fin === 'RETURN' && s.status === 'RETURNED'));
 ok('bill date moves INV-6 out of the period', !M.res.sales.some((s) => s.inv === 'INV-6'));
 const f154 = (x) => num(s3.openingAmt) + s3.summary.miAmt + s3.summary.soAmt + s4.alloc622 + s4.alloc627 + x.res.rework.fifoCost - s3.summary.mrAmt - fl.totals.totalCost - wf.finalClosing - x.reg.rows.reduce((a, r) => a + num(r.closingWIP), 0);
 ok('154 bridge MONTHLY', Math.abs(f154(M)) <= 1, f154(M));
@@ -128,7 +129,6 @@ const snap = {
   step3: { closing: r2(s3.summary.closingAmt), final: r2(wf.finalClosing) },
   b3: eng.filter((e) => e.Y === 'Y').map((e) => [e.key, e.pc, r2(e.AA)]),
   step4: fl.rows.map((r) => [r.pc, r2(r.totalCost)]),
-  monthly: { cogs: r2(M.res.totals.cogsA), close: r2(M.res.totals.closeA), rw: r2(M.res.rework.fifoCost), ret: r2(M.res.totals.retA), nrvProv: r2(M.res.totals.nrvProv), lines: M.res.sales.map((s) => [s.inv, s.fin, r2(s.tot)]) },
   strict: { cogs: r2(St.res.totals.cogsA), close: r2(St.res.totals.closeA), rw: r2(St.res.rework.fifoCost), rwStatus: St.reg.rows.map((r) => r.fifoStatus), lines: St.res.sales.map((s) => [s.inv, s.status, r2(s.tot)]) },
   revenue: r2(F5.periodRevenue(salesDB.rows, P)),
 };

@@ -257,6 +257,16 @@ export function runFIFO(ctx) {
     S.push(s);
   });
 
+  // Sales returns are inventory events. For accounting safety, returns require chronological FIFO;
+  // MONTHLY cannot prove when returned FG became available for a later sale/rework in the same period.
+  const returns = S.filter((s) => s.fin === 'RETURN');
+  if (mode === 'MONTHLY' && returns.length) throw new Error('Có Sales Return trong kỳ. Chuyển FIFO sang STRICT_DATE để hoàn nhập COGS và đưa hàng trả lại vào đúng thứ tự thời gian.');
+  const returnByProd = new Map();
+  for (const s of returns) { if (!returnByProd.has(s.prod)) returnByProd.set(s.prod, []); returnByProd.get(s.prod).push(s); }
+  let retQ = 0, retA = 0, retN = 0;
+  const originNow = new Map(), returnedNow = new Map();
+  const originKey = (o) => `${utxt(o.inv)}|${utxt(o.prod)}`;
+
   // FIFO allocation
   const D = []; let shortProducts = 0; const undatedUsed = new Set();
   const rwByProd = new Map(), rwPlan = [];
@@ -288,24 +298,61 @@ export function runFIFO(ctx) {
         cq += s.fq; crm += s.rm; c622 += s.c622; c627 += s.c627; ct += s.tot;
         if (nd > TOLQ) { s.status = 'INSUFFICIENT FG'; s.msg += `Product short by ${vbFmt(nd, 4, true)} units for the period; `; } else s.status = 'OK';
       });
-    } else strictProduct(prod, list);
+    }
   }
   // STRICT_DATE (owner decision 02/10/2026): sales and FG rework issues of a product run through FIFO in one date order;
   // each event can only use layers dated on/before it. Rework takes are reserved here and booked by runReworkFIFO.
   function strictProduct(prod, list) {
-    const ev = [...list.map((s) => ({ k: 'S', d: s.date, o: s.dbRow, s })), ...(rwByProd.get(prod) || []).map((e) => ({ k: 'R', d: e.d, o: e.i, e }))]
-      .sort((a, b) => a.d - b.d || (a.k === b.k ? a.o - b.o : a.k === 'R' ? -1 : 1));
+    const prodLayers = sorted.filter((l) => l.prod === prod);
+    const ret = returnByProd.get(prod) || [];
+    const ev = [
+      ...list.map((s) => ({ k: 'S', d: s.date, o: s.dbRow, s })),
+      ...ret.map((s) => ({ k: 'T', d: s.date, o: s.dbRow, s })),
+      ...(rwByProd.get(prod) || []).map((e) => ({ k: 'R', d: e.d, o: e.i, e })),
+    ].sort((a, b) => a.d - b.d || (a.k === b.k ? a.o - b.o : a.k === 'T' ? -1 : a.k === 'R' && b.k === 'S' ? -1 : 1));
     let short = false;
+    const currentOrigins = () => [...originNow.values()].filter((o) => o.prod === prod && o.date <= (currentEventDate || Number.MAX_SAFE_INTEGER));
+    let currentEventDate = null;
     for (const x of ev) {
+      currentEventDate = x.d;
+      if (x.k === 'T') {
+        const s = x.s; const q = -s.qty;
+        const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
+        const cand = [...currentOrigins(), ...prior];
+        let o = null;
+        if (s.origInv) o = cand.filter((z) => utxt(z.inv) === utxt(s.origInv)).sort((a, b) => b.date - a.date)[0] || null;
+        if (!o) o = cand.filter((z) => utxt(z.cust) === utxt(s.cust)).sort((a, b) => b.date - a.date)[0] || null;
+        if (!o) {
+          s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
+          s.msg += `Return: original sale not found${s.origInv ? ' (' + s.origInv + ')' : ''} – set Original Invoice No.; `;
+          continue;
+        }
+        const ok = originKey(o), already = num(o.returned) + (returnedNow.get(ok) || 0), avail = Math.max(0, num(o.fq) - already);
+        if (q > avail + TOLQ) {
+          s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
+          s.msg += `Return qty ${vbFmt(q, 4, true)} exceeds remaining returnable qty ${vbFmt(avail, 4, true)} of ${o.inv}; `;
+          continue;
+        }
+        const f = q / num(o.fq);
+        s.fq = -q; s.rm = -num(o.rm) * f; s.c622 = -num(o.c622) * f; s.c627 = -num(o.c627) * f; s.tot = -num(o.tot) * f;
+        s.matchedOrigInv = o.inv; s.status = 'RETURNED';
+        s.msg += `Return at original COGS of ${o.inv} (${o.period || period}); `;
+        returnedNow.set(ok, (returnedNow.get(ok) || 0) + q);
+        retN++; retQ += q; retA += -s.tot;
+        const l = { lid: `RT-${period.replace('-', '')}-${s.inv || 'NOINV'}-${pad(retN, 3)}`, src: 'RETURN', sp: period, pc: o.inv || '', dt: s.date, mo: '', prod, name: s.name, loc: '', unit: '', qty: q, rm: -s.rm, a622: -s.c622, a627: -s.c627, tot: -s.tot, price: 0, prov: 0, cons: '', flag: `Sales return ${s.inv}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + retN };
+        sorted.push(l); prodLayers.push(l);
+        prodLayers.sort((a, b) => a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
+        continue;
+      }
+
       let nd = x.k === 'S' ? x.s.qty : x.e.qty; const takes = [];
-      for (let pos = first.get(prod); pos <= last.get(prod); pos++) {
+      for (const l of prodLayers) {
         if (nd <= TOLQ) break;
-        const l = sorted[pos];
         if (!(l.dt <= x.d || l.dt === 0)) continue;
         const avail = l.qty - l.oq - (l.rq || 0);
         if (avail <= TOLQ) continue;
         const take = avail <= nd + TOLQ ? avail : nd;
-        if (l.dt === 0 && l.src !== 'OPENING') undatedUsed.add(l.lid || `${l.pc}|${prod}`); // audit F-11
+        if (l.dt === 0 && l.src !== 'OPENING') undatedUsed.add(l.lid || `${l.pc}|${prod}`);
         if (x.k === 'S') {
           const s = x.s; const d = takeLayer(l, take, D, prod, s.seq);
           if (l.dt === 0 && l.src !== 'OPENING') s.msg += `Used production layer ${l.pc || ''} without completion date; `;
@@ -313,32 +360,22 @@ export function runFIFO(ctx) {
         } else { l.rq = (l.rq || 0) + take; takes.push({ lid: l.lid, qty: take }); }
         nd -= take;
       }
-      if (x.k === 'S') { const s = x.s; if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; } else s.status = 'OK'; }
-      else rwPlan[x.e.i] = { takes, short: nd > TOLQ ? nd : 0 };
+      if (x.k === 'S') {
+        const s = x.s;
+        if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; }
+        else s.status = 'OK';
+        if (s.fq > TOLQ && s.inv) originNow.set(originKey({ inv: s.inv, prod }), { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
+      } else rwPlan[x.e.i] = { takes, short: nd > TOLQ ? nd : 0 };
     }
     if (short) shortProducts++;
   }
-  if (mode !== 'MONTHLY') for (const prod of rwByProd.keys()) if (!lines.has(prod)) strictProduct(prod, []);
-
-  // sales returns → RETURN layers at the original sale's unit cost
-  let retQ = 0, retA = 0, retN = 0;
-  for (const s of S) {
-    if (s.fin !== 'RETURN') continue;
-    const q = -s.qty;
-    const cand = [...S.filter((x) => x.fin === 'FIFO COGS' && x.prod === s.prod && x.fq > TOLQ).map((x) => ({ inv: x.inv, cust: x.cust, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period })),
-      ...(ctx.priorSales || []).filter((x) => utxt(x.prod) === s.prod && num(x.fq) > TOLQ)];
-    let o = null;
-    if (s.origInv) o = cand.filter((x) => utxt(x.inv) === utxt(s.origInv)).sort((a, b) => b.date - a.date)[0] || null;
-    if (!o) o = cand.filter((x) => utxt(x.cust) === utxt(s.cust) && x.date <= s.date).sort((a, b) => b.date - a.date)[0] || null;
-    if (!o) { s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++; s.msg += `Return: original sale not found${s.origInv ? ' (' + s.origInv + ')' : ''} – set Original Invoice No. or treat manually; `; continue; }
-    const f = q / num(o.fq);
-    s.fq = -q; s.rm = -num(o.rm) * f; s.c622 = -num(o.c622) * f; s.c627 = -num(o.c627) * f; s.tot = -num(o.tot) * f;
-    s.status = 'RETURNED'; s.msg += `Return at original COGS of ${o.inv} (${o.period || period}); `;
-    retN++;
-    const lid = `RT-${period.replace('-', '')}-${s.inv || 'NOINV'}-${pad(retN, 3)}`;
-    sorted.push({ lid, src: 'RETURN', sp: period, pc: o.inv || '', dt: s.date, mo: '', prod: s.prod, name: s.name, loc: '', unit: '', qty: q, rm: -s.rm, a622: -s.c622, a627: -s.c627, tot: -s.tot, price: 0, prov: 0, cons: '', flag: `Sales return ${s.inv}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + retN });
-    retQ += q; retA += -s.tot;
+  if (mode !== 'MONTHLY') {
+    const products = new Set([...lines.keys(), ...rwByProd.keys(), ...returnByProd.keys()]);
+    for (const prod of products) strictProduct(prod, lines.get(prod) || []);
+    sorted.sort((a, b) => a.prod.localeCompare(b.prod) || a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
   }
+
+  // Sales returns were already processed as chronological inventory events above.
 
   // outputs
   const fx = num(ctx.fx);
@@ -402,7 +439,7 @@ export function runFIFO(ctx) {
   const sales = S.map((s) => {
     const o = { seq: s.seq, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
-    else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv });
+    else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv });
     return o;
   });
   let sumDetA = 0;

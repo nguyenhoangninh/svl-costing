@@ -45,10 +45,10 @@ export function step1Controls(s1, accessLimited = 0, dateIssues = []) {
   const sysReady = Object.values(s1.bySys).filter((s) => s.status === 'READY').length;
   return {
     coreReady: `${imported + noData} / 21`, sysReady: `${sysReady} / 3`,
-    status: sysReady === 3 && imported + noData === 21 ? 'PASS' : missing === 21 ? 'NOT RUN' : 'REVIEW',
+    status: dateIssues.length ? 'BLOCK' : sysReady === 3 && imported + noData === 21 ? 'PASS' : missing === 21 ? 'NOT RUN' : 'REVIEW',
     imported, noData, missing, totalRows: s1.checklist.reduce((a, c) => a + c.dataRows, 0), accessLimited,
-    next: missing === 0 ? (dateIssues.length ? `Kiểm tra ${dateIssues.length} báo cáo có dòng ngoài kỳ (STEP 1) rồi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
-    result: missing === 0 ? (dateIssues.length ? 'PASS WITH REVIEW' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
+    next: missing === 0 ? (dateIssues.length ? `Sửa / xuất lại ${dateIssues.length} báo cáo có dòng ngoài kỳ trước khi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
+    result: missing === 0 ? (dateIssues.length ? 'BLOCK - ERP ROW PERIOD' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
     dateIssues,
   };
 }

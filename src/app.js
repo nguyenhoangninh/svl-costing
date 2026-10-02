@@ -577,6 +577,12 @@ VIEWS.step2 = (el) => {
 };
 
 function doStep2() {
+  const periodIssues = outOfPeriodRows(S.d.datasets, S.period);
+  if (periodIssues.length) {
+    const sample = periodIssues.slice(0, 3).map((x) => `${x.key}: ${x.n} dòng [${x.months.join(', ')}]`).join('; ');
+    toast(`STEP 2 bị chặn: có dòng ERP ngoài kỳ ${S.period}. ${sample}${periodIssues.length > 3 ? '…' : ''}. Sửa / xuất lại báo cáo rồi import lại.`, 'block');
+    return;
+  }
   try {
     const s2 = runStep2(S.d.datasets, S.period);
     S.d.step2 = s2;
@@ -941,7 +947,7 @@ async function migrateWorkbook(file) {
       let p2msg = '';
       if (s3) {
         try { const m = P2.migratePhase2(g, S, period); cmp.push(...m.cmp); p2msg = m.msg; audit('STEP 3B + STEP 4 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = 'STEP 3B/4: ' + e.message; }
-        try { const m = P3.migratePhase3(g, S, period); cmp.push(...m.cmp); p2msg = [p2msg, m.msg].filter(Boolean).join(' · '); audit('STEP 5 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = [p2msg, 'STEP 5: ' + e.message].filter(Boolean).join(' · '); }
+        try { const m = await P3.migratePhase3(g, S, period); cmp.push(...m.cmp); p2msg = [p2msg, m.msg].filter(Boolean).join(' · '); audit('STEP 5 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = [p2msg, 'STEP 5: ' + e.message].filter(Boolean).join(' · '); }
       }
       report = `<table class="cp"><thead><tr><th>Chỉ tiêu</th><th class="r">Web</th><th class="r">Excel</th><th class="r">Chênh lệch</th><th></th></tr></thead><tbody>${cmp.map(([l, a, b]) => {
         const d = typeof a === 'number' && typeof b === 'number' ? a - b : null;
@@ -1075,7 +1081,7 @@ document.addEventListener('click', async (e) => {
     case 's5-run': await busy('Đang chạy FIFO COGS…', async () => P3.doRunFIFO()); render(); break;
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
     case 's5-close': await P3.doClose(); render(); break;
-    case 's5-reopen': P3.doReopen(); render(); break;
+    case 's5-reopen': await P3.doReopen(); render(); break;
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
       if (isClosed() && !confirm(`Kỳ ${S.period} ĐÃ ĐÓNG. Xoá kỳ đã đóng sẽ mất số liệu đã khoá sổ. Chỉ tiếp tục khi đã lưu bản xuất Excel / bản sao. Tiếp tục?`)) break;

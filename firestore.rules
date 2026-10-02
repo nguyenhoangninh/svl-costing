@@ -45,7 +45,8 @@ service cloud.firestore {
       allow delete: if isAdmin();
       match /chunks/{chunk} {
         allow read: if canRead();
-        allow create, update: if isAdmin() || (canWrite() && periodOpen(period));
+        // Even admins must REOPEN the parent period first; CLOSED data chunks are immutable.
+        allow create, update: if canWrite() && periodOpen(period);
         allow delete: if isAdmin();
       }
     }

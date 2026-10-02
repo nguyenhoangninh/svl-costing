@@ -195,13 +195,17 @@ export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AM
   for (const key of order) {
     const erp = inpErp.get(key); const d = useD.get(key);
     let totQ = 0, totA = 0; if (d) for (const v of d.values()) { totQ += v[3]; totA += v[4]; }
-    const byAmt = basis === 'AMOUNT' && totA > 0 && [...d.values()].every((v) => v[4] >= 0);
+    const amountValid = !!d && totA > 0 && [...d.values()].every((v) => v[4] >= 0);
+    if (basis === 'AMOUNT' && totQ > 0 && !amountValid) {
+      throw new Error(`Material ${key}: ACTUAL_USAGE đang chọn AMOUNT nhưng PC-M Total Cost không đủ cơ sở dương. Không tự fallback sang QTY; sửa dữ liệu PC-M hoặc chọn QTY như một ngoại lệ legacy có chủ ý.`);
+    }
+    const byAmt = basis === 'AMOUNT' && amountValid;
     if (byAmt) {
       nUse++;
       for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, v[4], totA, v[4] / totA, 'Actual PC-M amount ratio', 'USAGE');
     } else if (totQ > 0) {
       nUse++;
-      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, basis === 'AMOUNT' ? 'PC-M quantity ratio (amount = 0 / negative → fallback)' : 'Actual PC-M quantity ratio', 'USAGE');
+      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, 'Actual PC-M quantity ratio (explicit legacy basis)', 'USAGE');
     } else {
       nNo++;
       const tot = pcpTot[erp] || 0;
