@@ -31,10 +31,10 @@ jobs:
           grep -q "request.resource.data.rev == getAfter(periodPath(period)).data.rev" firestore.rules
           grep -q "allow update, delete: if false;" firestore.rules
 
-  # Production deploy: main is published only after every accounting/control check passes.
+  # Production deploy temporarily paused during v1.10.0 remediation.
   deploy:
     needs: checks
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: false
     runs-on: ubuntu-latest
     permissions:
       pages: write
