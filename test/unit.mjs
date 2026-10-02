@@ -80,6 +80,19 @@ import * as TR from '../src/engine/trace.js';
   // PC-M dataset absent → one dataset-level message, not one per lot
   t = TR.costTrace({ prod: 'A', fl, index: TR.buildIndex({}) });
   eq('trace: missing PC-M reported once', pcRev(t), 1);
+  // drill-down: lot missing a material that the other lots use → "KHÔNG CÓ trong lô"; material view per lot
+  {
+    const fl2 = { rows: [1, 2, 3, 4].map((i) => ({ erp: 'O', pc: 'PC-' + i, mo: 'MO-9', sub: 'S', prod: 'A', qty: 10, pcRM: i < 4 ? 300 : 100, totalCost: i < 4 ? 400 : 200, totalRM: i < 4 ? 300 : 100 })) };
+    const rows = []; for (const i of [1, 2, 3, 4]) { rows.push(['PC-' + i, 'MO-9', 'S', 'A', 'M1', 'x', 10, 100]); if (i < 4) rows.push(['PC-' + i, 'MO-9', 'S', 'A', 'M2', 'y', i === 3 ? 30 : 20, 200]); }
+    const t2 = TR.costTrace({ prod: 'A', fl: fl2, index: TR.buildIndex(ds(rows)) });
+    const d = TR.anomalyDetail({ kind: 'lot', lk: t2.lots[3].key }, t2, null);
+    eq('detail lot: missing material', d.tables[0].rows.map((r) => [r.mat, r.status]), [['M2', 'KHÔNG CÓ trong lô'], ['M1', 'OK']]);
+    eq('detail lot: expected value of missing material', Math.round(d.tables[0].rows[0].expAmt), Math.round(20 * (600 / 70)));
+    eq('detail lot: own PC-M lines', d.tables[2].rows.length, 1);
+    const m = TR.anomalyDetail({ kind: 'mat', mat: 'M2' }, t2, null);
+    eq('detail mat: per-lot usage deviation', m.tables[0].rows.map((r) => Math.round(r.useDev * 100)), [0, 0, 50]);
+    eq('detail: unknown kind → null', TR.anomalyDetail({ kind: 'x' }, t2, null), null);
+  }
 }
 
 // ---- PWA: every module the app can load is precached by the service worker (offline start)

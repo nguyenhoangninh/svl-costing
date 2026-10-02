@@ -26,7 +26,7 @@ export function mountTable(el, cfg) {
     </div>
     <div class="vt-scroll" tabindex="0" style="height:${cfg.height || 520}px">
       <table class="vt-table"><colgroup>${cols.map((c) => `<col style="width:${c.width || 120}px">`).join('')}</colgroup>
-        <thead><tr>${cols.map((c, i) => `<th data-i="${i}" class="${c.type === 'num' || c.type === 'qty' || c.type === 'pct' || c.type === 'int' ? 'r' : ''}" title="Sắp xếp">${esc(c.label)}</th>`).join('')}</tr></thead>
+        <thead><tr>${cols.map((c, i) => `<th data-i="${i}" class="${c.type === 'num' || c.type === 'qty' || c.type === 'pct' || c.type === 'pct1' || c.type === 'int' ? 'r' : ''}" title="Sắp xếp">${esc(c.label)}</th>`).join('')}</tr></thead>
         <tbody></tbody>
         <tfoot></tfoot>
       </table>
@@ -77,7 +77,8 @@ export function mountTable(el, cfg) {
     let html = `<tr class="vt-pad" style="height:${top}px"></tr>`;
     for (let i = start; i < end; i++) {
       const r = view[i];
-      html += `<tr data-v="${i}">${cols.map((c) => cellHTML(r, c)).join('')}</tr>`;
+      const rc = cfg.rowClass ? cfg.rowClass(r) : '';
+      html += `<tr data-v="${i}"${rc ? ` class="${rc}"` : ''}>${cols.map((c) => cellHTML(r, c)).join('')}</tr>`;
     }
     html += `<tr class="vt-pad" style="height:${bottom}px"></tr>`;
     tbody.innerHTML = html;
@@ -85,7 +86,7 @@ export function mountTable(el, cfg) {
 
   function cellHTML(r, c) {
     const v = val(r, c);
-    const right = c.type === 'num' || c.type === 'qty' || c.type === 'pct' || c.type === 'int';
+    const right = c.type === 'num' || c.type === 'qty' || c.type === 'pct' || c.type === 'pct1' || c.type === 'int';
     if (c.editable && cfg.onEdit) {
       if (c.options) return `<td class="ed"><select data-k="${c.key}">${['', ...c.options].map((o) => `<option ${String(v ?? '') === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></td>`;
       const shown = c.type === 'date' ? fmtCell(v, 'dateInput') : (v ?? '');

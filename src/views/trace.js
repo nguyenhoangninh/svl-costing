@@ -1,6 +1,7 @@
 // "Truy xuất giá thành sản phẩm": one product's production cost (STEP 1–4) and cost of goods sold (STEP 5), with anomaly checks.
 import * as TR from '../engine/trace.js';
 import { num, prevPeriod, serialToISO, utxt } from '../engine/util.js';
+import { fmtCell } from '../ui/format.js';
 
 let A = null;
 export function install(api) { A = api; }
@@ -71,13 +72,16 @@ function viewList(box, b, list) {
   A.mountTable(box.querySelector('#tr-list-t'), { columns: cols, rows: rows.sort((a, b2) => b2.review - a.review || b2.cost - a.cost), height: 560, totals: ['qty', 'cost', 'soldQty', 'cogs', 'revenue', 'closeA'], onExport: A.exportTable('TRUY_XUAT_SAN_PHAM', cols), onRowClick: (r) => { location.hash = 'trace=' + encodeURIComponent(r.prod); } });
 }
 
+const anomStore = { cost: [], cogs: [] };
+let curTrace = { t: null, c: null, prod: '' };
 function anomaliesHTML(list, key) {
+  anomStore[key] = list;
   if (!list.length) return '<div class="alert pass">Không phát hiện điểm bất thường theo các quy tắc kiểm tra.</div>';
   const nR = list.filter((a) => a.level !== 'INFO').length, nI = list.length - nR;
   const open = A.S['trOpen' + key];
   const shown = open ? list : list.slice(0, 8);
   return `<div class="anoms"><div class="anoms-h"><b>Điểm cần kiểm tra</b> ${nR ? A.pill(`REVIEW ${nR}`) : ''} ${nI ? `<span class="pill s-info">INFO ${nI}</span>` : ''}</div>
-    <ul>${shown.map((a) => `<li class="an-${a.level.toLowerCase()}"><span class="an-area">${esc(a.area)}</span><span>${esc(a.msg)}</span></li>`).join('')}</ul>
+    <ul>${shown.map((a, i) => `<li class="an-${a.level.toLowerCase()}"><span class="an-area">${esc(a.area)}</span><span class="an-msg">${esc(a.msg)}</span>${a.kind ? `<button type="button" class="btn ghost sm an-more" data-an="${key}:${i}">Chi tiết</button>` : ''}</li>`).join('')}</ul>
     ${list.length > 8 ? `<button class="btn ghost sm" type="button" data-tr-more="${key}">${open ? 'Thu gọn' : `Xem tất cả ${list.length}`}</button>` : ''}</div>`;
 }
 function barHTML(parts, total) {
@@ -98,6 +102,8 @@ function viewProduct(box, b, prod) {
   const tb = box.querySelector('#tr-tab');
   if (tab === 'cost') costTab(tb, t, prod); else cogsTab(tb, c);
   box.querySelectorAll('[data-tr-more]').forEach((x) => x.addEventListener('click', () => { S['trOpen' + x.dataset.trMore] = !S['trOpen' + x.dataset.trMore]; A.render(); }));
+  curTrace = { t, c, prod };
+  box.querySelectorAll('[data-an]').forEach((x) => x.addEventListener('click', () => { const [k, i] = x.dataset.an.split(':'); openDetail(anomStore[k][+i]); }));
 }
 
 function costTab(el, t, prod) {
@@ -179,6 +185,54 @@ function cogsTab(el, c) {
     const cols = mk([['pc', 'Lô PC', 120], ['srcPeriod', 'Kỳ gốc', 80], ['date', 'Ngày lô', 95, 'date'], ['qty', 'SL', 80, 'qty'], ['tot', 'Giá trị', 130, 'num'], ['unitCost', 'Đơn giá', 110, 'num'], ['price', 'Giá bán USD', 90, 'qty'], ['status', 'Trạng thái', 160, 'status'], ['msg', 'Ghi chú', 300]]);
     A.mountTable(box, { columns: cols, rows: c.closing, height: 380, totals: ['qty', 'tot'] });
   }
+}
+
+// ---------------- anomaly drill-down (modal report)
+function factHTML(f) {
+  const v = f.t === 'text' ? esc(f.v ?? '–') : f.t === 'pct' ? pc(f.v) : f.v === null || f.v === undefined ? '–' : fmtCell(f.v, f.t === 'num' ? 'vnd' : f.t);
+  return `<div class="df${f.bad ? ' bad' : ''}"><span>${esc(f.l)}</span><b>${v || '–'}</b></div>`;
+}
+function openDetail(a) {
+  const { t, c, prod } = curTrace;
+  const d = TR.anomalyDetail(a, t, c);
+  if (!d) { A.toast('Dòng này không có thêm số liệu chi tiết.', 'review'); return; }
+  closeDetail();
+  const wrap = document.createElement('div');
+  wrap.className = 'tr-modal'; wrap.id = 'tr-modal';
+  wrap.innerHTML = `<div class="tr-modal-box" role="dialog" aria-modal="true" aria-labelledby="trm-h">
+    <header class="trm-head"><div><span class="an-area ${a.level === 'INFO' ? 'i' : a.level === 'BLOCK' ? 'b' : ''}">${esc(a.area)}</span><h2 id="trm-h">${esc(d.title)}</h2><p class="muted">${esc(prod)} · kỳ ${esc(A.S.period)}${d.lead ? ' · ' + esc(d.lead) : ''}</p></div>
+      <div class="trm-act"><button type="button" class="btn ghost" id="trm-x">Xuất Excel</button><button type="button" class="btn" id="trm-close" aria-label="Đóng">Đóng</button></div></header>
+    <div class="trm-body">
+      <div class="alert ${a.level === 'INFO' ? 'info' : 'review'}">${esc(a.msg)}</div>
+      ${d.facts.length ? `<div class="dfacts">${d.facts.map(factHTML).join('')}</div>` : ''}
+      ${d.checks.length ? `<div class="trm-checks"><b>Gợi ý kiểm tra</b><ol>${d.checks.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>` : ''}
+      ${d.tables.map((tb, i) => `<h3>${esc(tb.title)} <small>${tb.rows.length} dòng</small></h3>${tb.note ? `<p class="muted">${esc(tb.note)}</p>` : ''}<div id="trm-t${i}"></div>`).join('')}
+    </div></div>`;
+  document.body.appendChild(wrap);
+  document.body.classList.add('modal-open');
+  d.tables.forEach((tb, i) => {
+    const box = wrap.querySelector('#trm-t' + i);
+    if (!tb.rows.length) { box.innerHTML = '<p class="muted">Không có dòng nào.</p>'; return; }
+    const cols = tb.cols.map(([key, label, width, type]) => ({ key, label, width, type }));
+    A.mountTable(box, { columns: cols, rows: tb.rows, height: Math.min(30 * tb.rows.length + 90, 380), totals: tb.totals || [], rowClass: tb.hl ? (r) => (tb.hl(r) ? 'hl' : '') : null });
+  });
+  wrap.querySelector('#trm-close').addEventListener('click', closeDetail);
+  wrap.querySelector('#trm-x').addEventListener('click', () => exportDetail(a, d, prod));
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) closeDetail(); });
+  document.addEventListener('keydown', escClose);
+  wrap.querySelector('#trm-close').focus();
+}
+function escClose(e) { if (e.key === 'Escape') closeDetail(); }
+function closeDetail() {
+  const w = document.getElementById('tr-modal'); if (w) w.remove();
+  document.body.classList.remove('modal-open'); document.removeEventListener('keydown', escClose);
+}
+async function exportDetail(a, d, prod) {
+  const cell = (v, ty) => (ty === 'date' && typeof v === 'number' ? serialToISO(v) : v ?? '');
+  const sheets = [{ name: 'Tom tat', cols: [36, 22, 60], aoa: [['Truy xuất chi tiết', prod, A.S.period], [a.level, a.area, a.msg], [d.title, d.lead || ''], [], ['Chỉ tiêu', 'Giá trị'], ...d.facts.map((f) => [f.l, cell(f.v, f.t)]), [], ['Gợi ý kiểm tra'], ...d.checks.map((x, i) => [`${i + 1}.`, x])] }];
+  d.tables.forEach((tb, i) => sheets.push({ name: `${i + 1} ${tb.title}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[\\/?*[\]:]/g, ' ').slice(0, 31), cols: tb.cols.map((x) => Math.round((x[2] || 120) / 7)),
+    aoa: [[...tb.cols.map((x) => x[1]), ...(tb.hl ? ['Cần xem'] : [])], ...tb.rows.map((r) => [...tb.cols.map(([k, , , ty]) => cell(r[k], ty)), ...(tb.hl ? [tb.hl(r) ? 'x' : ''] : [])])] }));
+  await A.exportBook(`Chi_tiet_${prod}_${A.S.period}.xlsx`, sheets);
 }
 
 async function exportProduct(prod, t, c) {

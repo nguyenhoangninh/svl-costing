@@ -3,6 +3,7 @@ import { serialToISO } from '../engine/util.js';
 const nf2 = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nf0 = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
 const nfq = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 4 });
+const nfp1 = new Intl.NumberFormat('vi-VN', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const nfp = new Intl.NumberFormat('vi-VN', { style: 'percent', minimumFractionDigits: 4, maximumFractionDigits: 4 });
 
 export function fmtNum(v, digits = 0) {
@@ -18,6 +19,7 @@ export function fmtCell(v, type) {
     case 'vnd': return typeof v === 'number' ? fmtNum(v) : esc(v);
     case 'int': return typeof v === 'number' ? nf0.format(v) : esc(v);
     case 'qty': return typeof v === 'number' ? (Math.abs(v) < 0.00005 ? '–' : nfq.format(v)) : esc(v);
+    case 'pct1': return typeof v === 'number' ? (Math.abs(v) < 0.0005 ? '–' : nfp1.format(v)) : esc(v);
     case 'pct': return typeof v === 'number' ? nfp.format(v) : esc(v);
     case 'date': return typeof v === 'number' ? fmtDate(serialToISO(v)) : esc(v);
     case 'dateInput': return typeof v === 'number' ? serialToISO(v) : String(v ?? '');
