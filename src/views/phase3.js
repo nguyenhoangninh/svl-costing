@@ -40,7 +40,7 @@ const cfg = (S) => S.d.s5cfg || { mode: 'MONTHLY', tol: 1 };
 /** NRV estimated selling cost (share of selling price); owner decision 02/10/2026: 1.5 % unless changed. */
 export const sellRate = (S) => { const c = cfg(S); return c.sellCostRate === undefined || c.sellCostRate === null || c.sellCostRate === '' ? 0.015 : num(c.sellCostRate); };
 /** Approval key for NRV decision. Any changed closing layer / provision amount invalidates the prior decision. */
-export const nrvKey = (res) => fpRows((res && res.closing) || [], (r) => [ttxt(r.lid), utxt(r.prod), num(r.qty).toFixed(4), num(r.tot).toFixed(0), num(r.prov).toFixed(0), num(r.provNeed).toFixed(0)].join('|'));
+export const nrvKey = (res) => fpRows((res && res.closing) || [], (r) => [ttxt(r.lid), utxt(r.prod), num(r.qty).toFixed(4), num(r.tot).toFixed(0), num(r.price).toFixed(6), num(r.nrvUnit).toFixed(2), num(r.prov).toFixed(0), num(r.provNeed).toFixed(0)].join('|'));
 /** Repeated sales lines of the period and how many still need a KEEP / EXCLUDE decision (F-03). */
 export function dupStatus(S) {
   const groups = F5.duplicateGroups(S.d.salesDB ? S.d.salesDB.rows : [], S.period);
