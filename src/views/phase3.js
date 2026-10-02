@@ -588,11 +588,27 @@ export function doBuildHistory() {
     A.toast(`FG History: ${h.rows.length} dòng (COGS kỳ này ${h.nCOGS}, FG cuối kỳ ${h.nClose}, đã bán trước ${h.nKeep}). Archive gate PASS.`, 'pass');
   } catch (e) { A.toast('BUILD FG HISTORY lỗi: ' + e.message, 'block'); }
 }
+const cloudTransitionMessage = (op, err) => {
+  const msg = err && err.message ? err.message : String(err || '');
+  return /missing or insufficient permissions/i.test(msg)
+    ? `${op}: Firestore từ chối quyền ghi. Kiểm tra đã Publish firestore.rules v1.10.1 và tài khoản hiện tại có role Admin; nếu Rules chưa đồng bộ, CLOSE/REOPEN sẽ không được commit.`
+    : `${op}: ${msg}`;
+};
+
 export async function doClose() {
   const S = A.S; const d = S.d; const D5 = derive(S, P2.derive(S));
   // audit F-16: closing is an approval step – administrators only (reopen already is)
   if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được CLOSE MONTH. Người lập chuẩn bị số liệu; quản trị viên kiểm tra và đóng kỳ.', 'review'); return; }
   if (D5.closeReason) { A.toast('CLOSE MONTH bị chặn: ' + D5.closeReason, 'block'); return; }
+  if (A.cloudOn() && A.cloudMeta) {
+    try {
+      const meta = await A.cloudMeta(S.period);
+      if (meta && meta.summary && meta.summary.closed) {
+        A.toast('Cloud đã ghi kỳ này là CLOSED nhưng dữ liệu trên máy đang OPEN. Hãy Pull cloud / mở lại kỳ từ trạng thái cloud thay vì CLOSE thêm lần nữa.', 'block');
+        return;
+      }
+    } catch (e) { A.toast(cloudTransitionMessage('CLOSE preflight', e), 'block'); return; }
+  }
   const { recon } = D5;
   let msg = `Đóng kỳ kế toán ${S.period}?\n\nFinal Production Status: ${recon.finalStatus}\nMonth Close Gate: ${recon.closeGate}\nFG History: PASS\nBatch 7: PASS`;
   if (recon.finalStatus.includes('REVIEW') || recon.closeGate.includes('REVIEW')) msg += '\n\nKỳ này còn mục REVIEW. Xác nhận đã được quản lý review trước khi đóng.';
@@ -618,7 +634,7 @@ export async function doClose() {
       d.closed = null; d.closedEver = prevClosedEver; d.rwArchive = prevArchive;
       A.audit('STEP 5 - CLOSE MONTH FAILED', `Cloud chưa xác nhận: ${r.error}`);
       A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
-      A.toast(`CHƯA đóng kỳ: cloud không xác nhận (${r.error}). Kiểm tra kết nối / xung đột rồi CLOSE MONTH lại.`, 'block');
+      A.toast(cloudTransitionMessage('CHƯA đóng kỳ', { message: r.error }), 'block');
       A.render(); return;
     }
   }
@@ -628,6 +644,15 @@ export async function doClose() {
 export async function doReopen() {
   const S = A.S;
   if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được mở lại kỳ đã đóng.', 'review'); return; }
+  if (A.cloudOn() && A.cloudMeta) {
+    try {
+      const meta = await A.cloudMeta(S.period);
+      if (meta && !(meta.summary && meta.summary.closed)) {
+        A.toast('Cloud đang ở trạng thái OPEN nhưng dữ liệu trên máy vẫn CLOSED. Hãy Pull cloud để đồng bộ thay vì tạo thêm revision REOPEN.', 'block');
+        return;
+      }
+    } catch (e) { A.toast(cloudTransitionMessage('REOPEN preflight', e), 'block'); return; }
+  }
   const np = nextP(S.period);
   const nd = await A.loadPeriodData(np).catch(() => null);
   if (nd && nd.closed && nd.closed.period === np) {
@@ -645,7 +670,7 @@ export async function doReopen() {
     if (!r.ok) {
       S.d.closed = was;
       A.markDirty('closed');
-      A.toast(`CHƯA mở lại kỳ: cloud không xác nhận (${r.error}).`, 'block');
+      A.toast(cloudTransitionMessage('CHƯA mở lại kỳ', { message: r.error }), 'block');
       A.render(); return;
     }
   }
