@@ -1,6 +1,8 @@
 # SVL Costing Web
 
-> **v1.8.1 core-controls remediation (02/10/2026):** Recognition Date thống nhất theo Bill/B.L. Date (fallback Invoice Date); Sales Return bắt buộc STRICT_DATE, đi vào FIFO theo thứ tự thời gian và bị chặn khi vượt số lượng bán gốc; ERP có dòng ngoài kỳ chặn STEP 2; 3B AMOUNT không tự fallback sang QTY; DIRECT_632 đối ứng đúng FAST 154/632; migration STEP 5 chờ FIFO hoàn tất; không cho reopen kỳ trước khi kỳ kế tiếp đã đóng; dữ liệu chunk của kỳ CLOSED bất biến cho đến khi REOPEN.
+> **v1.9.0 Accounting Integrity (02/10/2026):** hard-block ngày ERP/Sales lỗi hoặc ngoài kỳ; Bill/B.L. Date là recognition date bắt buộc khi được cung cấp; Sales Return chạy STRICT_DATE, match hoá đơn gốc chặt, cộng gộp nhiều line cùng invoice-product và ghi COGS reversal vào FG History; Credit Note không tạo chuyển động FG; hỗ trợ kỳ không sản xuất nhưng bán FG đầu kỳ; Manual Price / Direct 622-627 có maker-checker; fallback STEP 2 trọng yếu cần Admin duyệt; NRV phải có quyết định kế toán trước Close; cloud lưu immutable revision manifest và CLOSED period chỉ sửa sau REOPEN; CI kiểm unit + synthetic + control rules trước deploy.
+
+> **v1.8.1 core-controls remediation:** Recognition Date, STRICT_DATE Rework/Return, ERP-period gate, 3B AMOUNT strict basis, DIRECT_632 FAST bridge, inter-period reopen guard và CI→Pages deployment.
 
 Bản web của **SVL Costing Master (Excel/VBA v30.9)**: tính giá thành sản xuất tháng ngay trong trình duyệt và lưu theo kỳ lên Firebase.
 
@@ -18,7 +20,7 @@ Bản web của **SVL Costing Master (Excel/VBA v30.9)**: tính giá thành sả
 | STEP 4 | Doanh thu, Price Master, FX/GL 622-627, phân bổ giá thành, đối chiếu, kiểm tra đơn giá lô | Có trên web |
 | STEP 5 | FG đầu kỳ theo lô, FIFO giá vốn, FIFO rework (5B), nhập–xuất–tồn, FG History, đóng kỳ, roll forward | Có trên web |
 
-Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_FGRework`) và công thức Control Center. Kiểm thử hồi quy trên dữ liệu kỳ 2026-08: **69.871/69.871 giá trị khớp** cho STEP 1–3A, **223.899/223.899** cho STEP 3B–4 và **99.522/99.522** cho STEP 5 (từng dòng phân bổ, từng lô PC-P, từng vật tư WIP, sổ rework, Price Master, giá thành 380 lô, checkpoint).
+Engine ban đầu được port từ VBA v30.9 và vẫn giữ **legacy regression baseline** của kỳ 2026-08: **69.871/69.871** giá trị cho STEP 1–3A, **223.899/223.899** cho STEP 3B–4 và **99.522/99.522** cho STEP 5 tại baseline Excel tương ứng. Từ v1.8–v1.9, web có một số **approved accounting-policy controls chủ ý khác Excel cũ** (3B amount basis, Bill/B.L. recognition date, chronological Sales Return/Rework, hard validation, maker-checker). Vì vậy không được hiểu mọi khác biệt với workbook v30.9 là regression; cần phân biệt **Legacy Excel Parity** và **Approved Web Accounting Policy**.
 
 ## Cách dùng hằng tháng
 
@@ -44,7 +46,7 @@ Engine JavaScript được port 1:1 từ VBA (`modSTEP1_3_Core`, `modSTEP2B_5B_F
 Ứng dụng dùng project Firebase riêng **SVL-Costing** (`svl-costing`). Dữ liệu giá thành nằm trong **Firestore** và bắt buộc đăng nhập Google.
 
 1. Firebase Console → **Build → Firestore Database → Create database** (chọn vùng `asia-southeast1`, chế độ production).
-2. Firestore → **Rules**: dán nội dung `firestore.rules` → Publish (dán lại mỗi khi file này thay đổi).
+2. Firestore → **Rules**: dán nội dung `firestore.rules` → **Publish**. Đây là bước release bắt buộc mỗi khi file rules thay đổi; deploy GitHub Pages không tự publish Firestore Rules. v1.9 thêm immutable revision manifests và CLOSED-period immutability nên phải publish rules v1.9 trước khi coi cloud-control release là hoàn tất.
 3. **Authentication → Sign-in method → Google → Enable**.
 4. **Authentication → Settings → Authorized domains → Add domain**: `nguyenhoangninh.github.io`.
 5. Trong rules, thay `YOUR_EMAIL@gmail.com` bằng email Google của chủ sở hữu (luôn có quyền Quản trị). Người dùng khác được thêm/xoá ngay trên web: **Kỳ, cloud & chuyển đổi → Người dùng & phân quyền** (Quản trị / Chỉnh sửa / Chỉ xem).
@@ -83,27 +85,37 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 |---|---|
 | Freshness theo phân bổ (F-02, F-03) | STEP 4 OUTDATED khi một dòng 622/627 trực tiếp đổi PC/sản phẩm dù tổng không đổi. STEP 5 OUTDATED khi giá thành từng lô ở STEP 4 đổi (3B / rework chuyển giữa các lô) hoặc khi sửa lựa chọn xử lý FIFO (override). |
 | Chuyển kỳ (F-06) | Opening WIP / Rework B/F chỉ tự chuyển từ kỳ đã ĐÓNG (Rework lấy từ số lưu trữ lúc đóng kỳ). Kỳ trước chưa đóng: phải nhập lý do. Số đã chuyển lưu dấu nguồn; kỳ trước đổi sau đó → Control Center báo và chặn đóng kỳ đến khi roll forward lại. |
-| Dòng bán thiếu ngày (F-05, F-23) | Dòng thiếu / sai ngày hoá đơn chặn đóng kỳ (không còn bị bỏ qua lặng lẽ) và không tích luỹ qua các lần lưu. Dòng FIFO có cảnh báo kiểm tra dữ liệu bán được đếm (REVIEW). |
-| Đóng kỳ (F-16, F-25) | Chỉ Quản trị được CLOSE MONTH. Khi dùng cloud, kỳ chỉ ĐÓNG sau khi cloud xác nhận; lỗi mạng → không đóng. Firestore rules: kỳ đã đóng chỉ Quản trị ghi được, chỉ Quản trị đóng / mở kỳ. **Cần dán lại `firestore.rules`.** |
+| Ngày Sales / ERP (F-05, F-10, F-23) | Sales thiếu/sai Recognition Date hoặc Bill Date được cung cấp nhưng invalid bị BLOCK ngay tại Validate & Save. ERP transaction có ngày ngoài kỳ, trống, invalid hoặc thiếu cột Date bị BLOCK trước STEP 2. |
+| Đóng kỳ (F-16, F-25) | Chỉ Quản trị được CLOSE MONTH. Cloud phải xác nhận revision đóng kỳ. Kỳ CLOSED không được update/delete/chỉnh chunks; Admin phải REOPEN thành một revision riêng trước. Không được reopen kỳ trước khi kỳ kế tiếp còn CLOSED. **Phải Publish `firestore.rules` cùng release.** |
 | Nhật ký cloud (F-26) | Tải đủ mọi sự kiện của kỳ theo trang, sắp theo giờ server. |
 | Cầu nối 154 (F-17) | STEP 5 checkpoint 15a = công thức F200 của Excel (WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối − rework WIP cuối). |
-| Cảnh báo REVIEW (F-10…F-24) | Dòng ERP ngày ngoài kỳ, file không có kỳ trong tên, file NO DATA có số liệu (bị từ chối), Stock Out phân bổ dự phòng rộng > 5%, vật tư đổi hệ ERP, giá từ SO sau kỳ, giá thủ công trùng thời gian, lớp không ngày ở STRICT_DATE, ghi chú hệ S (MI-M-S / PC-M-S). |
+| Exception controls (F-10…F-24) | File NO DATA có số liệu bị từ chối; Stock Out fallback rộng >5% phải Admin duyệt; vật tư đổi ERP cần xác nhận; future SO price / Manual Price overlap / Manual Price chưa duyệt làm BLOCK Price Master; STRICT_DATE cảnh báo lớp sản xuất không có ngày; hệ S vẫn được hiển thị memo để kiểm tra scope. |
 
 ### Quyết định của chủ quy trình 02/10/2026 (v1.8)
 
 | Nội dung | Cách hoạt động |
 |---|---|
 | Chặn theo 3B (F-07) | STEP 4 và CLOSE MONTH bị chặn khi: còn WIP âm chưa đưa vào 3B, chưa BUILD / BUILD cũ, còn dòng chưa quyết định, đã APPROVE chưa APPLY. Riêng đóng kỳ: mọi bút toán DIRECT_632 phải RECORDED. |
-| Đối chiếu FAST (F-17) | STEP 5.3 → tab *Đối chiếu FAST*: nhập số dư 154, 155, phát sinh 632, 511. Lệch > 1 VND phải được xác nhận kèm giải trình (người có quyền chỉnh sửa); xác nhận hết hiệu lực khi số liệu đổi. Chưa nhập / chưa xác nhận thì không đóng kỳ. |
+| Đối chiếu FAST (F-17) | STEP 5.3 → *Đối chiếu FAST*: nhập 154, 155, 632, 511. Lệch >1 VND phải được **Admin khác người nhập FAST** xác nhận kèm giải trình; approval được bind vào figures và tự hết hiệu lực khi số đổi. |
 | 3B theo giá trị (F-01) | ACTUAL_USAGE chia theo giá trị tiêu hao PC-M (Total Cost). Chọn lại "theo số lượng" ở màn hình 3B nếu cần; kỳ chuyển từ Excel giữ cách cũ để khớp file. |
 | FIFO theo ngày (F-04) | STRICT_DATE: dòng bán và phiếu xuất rework chạy chung theo ngày; mỗi sự kiện chỉ dùng lớp có ngày ≤ ngày của nó. MONTHLY giữ như Excel, có cảnh báo khi rework lấy lớp hoàn thành sau ngày xuất. |
-| Ngày Bill (F-08) | File doanh thu có cột *Bill Date* (hoặc B/L Date, Ship Date…) thì giá vốn và doanh thu 511 theo ngày Bill; không có thì theo ngày hoá đơn. |
-| Hàng bán trả lại (F-09) | Dòng SL âm: nhập lại FG theo giá vốn của hoá đơn gốc (cột *Original Invoice No.*; không có thì hoá đơn gần nhất cùng khách – sản phẩm, tìm cả 12 kỳ trước). Không tìm được → REVIEW. Giá vốn 632 là số thuần sau trả lại. |
-| NRV (F-14) | NRV = giá bán × tỷ giá × (1 − 1,5% chi phí bán hàng; sửa được ở STEP 5.2). Bảng tồn cuối có *Dự phòng đề xuất*. |
+| Ngày Bill (F-08) | Nếu file có giá trị *Bill/B.L. Date* thì đây là Recognition Date bắt buộc; Bill Date invalid hoặc sau kỳ bị BLOCK. Chỉ fallback Invoice Date khi Bill Date thực sự trống. YTD Sales DB không được replace quá ngày cuối kỳ giá thành. |
+| Hàng bán trả lại (F-09) | Chỉ `Transaction Type = SALES RETURN` mới tạo physical return. Bắt buộc STRICT_DATE. Nếu nhập Original Invoice No. mà không tìm thấy thì **không fallback**; nếu để trống chỉ auto-match khi có đúng một candidate cùng khách–sản phẩm. Nhiều line cùng invoice-product được cộng gộp; cumulative return không vượt sold qty. Return reversal được ghi âm vào FG History để net COGS/632 reconcile. Credit Note không tạo FG movement. |
+| NRV (F-14) | NRV = giá bán × tỷ giá × (1 − 1,5% chi phí bán hàng; chỉnh được). Nếu có provision proposed >1 VND, CLOSE MONTH bị chặn cho tới khi Admin chọn `RECORDED` (kèm Accounting Ref) hoặc `NO ADJUSTMENT APPROVED` (kèm giải trình). Decision key đổi khi layer/price/NRV thay đổi. |
 | Truy xuất qua các kỳ | Tab *Qua các kỳ*: giá thành, giá vốn, giá bán / sp 6 kỳ gần nhất, có biểu đồ. |
-| Kiểm thử | `node test/synth.mjs`: dữ liệu ERP giả lập, chạy STEP 2 → 5 (cả MONTHLY và STRICT_DATE, rework, trả lại, NRV), kiểm các cầu nối 154/155 và so ảnh chụp kết quả – chạy trên CI mỗi lần đẩy code. |
+| Kiểm thử | CI chạy syntax + `test/unit.mjs` + `test/synth.mjs`: STEP 2→5, MONTHLY/STRICT_DATE, Sales Return→FG History, Credit Note, return cap, zero-production, ERP/Sales date integrity, 3B, Rework, NRV, FAST bridge và snapshot synthetic. Golden Excel tests vẫn cần fixtures thật ngoài repo. |
 
-**Phát hành chỉ sau khi test PASS:** Settings → Pages → Source = *GitHub Actions*; Settings → Secrets and variables → Actions → Variables → thêm `PAGES_FROM_ACTIONS` = `true`. Từ đó web chỉ được cập nhật khi CI xanh.
+**Phát hành:** GitHub Pages dùng workflow CI; job deploy phụ thuộc job checks và chỉ chạy trên `main`. Khi thay `firestore.rules`, web deploy PASS chưa đủ — phải Publish rules lên Firebase và xác minh cloud access/close/reopen bằng tài khoản thử trước khi coi release hoàn tất.
+
+## Governance v1.9
+
+- **STEP 2 fallback trọng yếu:** fallback rộng >5% tổng Stock Out phân bổ sẽ BLOCK cho tới khi Admin xác nhận lý do.
+- **Manual Price:** chỉnh sửa reset approval; `Approved By` do hệ thống ghi từ identity đăng nhập, không nhập tay; maker không tự approve.
+- **Direct 622/627:** dòng Active bắt buộc Reason / Evidence và maker-checker approval; thay đổi allocation reset approval.
+- **FAST difference:** Admin approver phải khác người nhập FAST.
+- **Cloud revision:** mỗi cloud commit tạo manifest hash + immutable revision document; superseded content-addressed chunks được giữ để phục vụ trace/retention.
+- **CLOSED period:** không xoá trực tiếp; phải REOPEN trước và để lại revision/audit trail.
+- **NRV:** period có provision proposed phải có accounting decision trước Close.
 
 ## Bảo mật dữ liệu
 
