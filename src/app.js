@@ -577,6 +577,12 @@ VIEWS.step2 = (el) => {
 };
 
 function doStep2() {
+  const periodIssues = outOfPeriodRows(S.d.datasets, S.period);
+  if (periodIssues.length) {
+    const sample = periodIssues.slice(0, 3).map((x) => `${x.key}: ${x.n} dòng [${x.months.join(', ')}]`).join('; ');
+    toast(`STEP 2 bị chặn: có dòng ERP ngoài kỳ ${S.period}. ${sample}${periodIssues.length > 3 ? '…' : ''}. Sửa / xuất lại báo cáo rồi import lại.`, 'block');
+    return;
+  }
   try {
     const s2 = runStep2(S.d.datasets, S.period);
     S.d.step2 = s2;
