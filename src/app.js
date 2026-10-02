@@ -947,7 +947,7 @@ async function migrateWorkbook(file) {
       let p2msg = '';
       if (s3) {
         try { const m = P2.migratePhase2(g, S, period); cmp.push(...m.cmp); p2msg = m.msg; audit('STEP 3B + STEP 4 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = 'STEP 3B/4: ' + e.message; }
-        try { const m = P3.migratePhase3(g, S, period); cmp.push(...m.cmp); p2msg = [p2msg, m.msg].filter(Boolean).join(' · '); audit('STEP 5 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = [p2msg, 'STEP 5: ' + e.message].filter(Boolean).join(' · '); }
+        try { const m = await P3.migratePhase3(g, S, period); cmp.push(...m.cmp); p2msg = [p2msg, m.msg].filter(Boolean).join(' · '); audit('STEP 5 (sau chuyển đổi)', m.msg || 'OK'); } catch (e) { p2msg = [p2msg, 'STEP 5: ' + e.message].filter(Boolean).join(' · '); }
       }
       report = `<table class="cp"><thead><tr><th>Chỉ tiêu</th><th class="r">Web</th><th class="r">Excel</th><th class="r">Chênh lệch</th><th></th></tr></thead><tbody>${cmp.map(([l, a, b]) => {
         const d = typeof a === 'number' && typeof b === 'number' ? a - b : null;
