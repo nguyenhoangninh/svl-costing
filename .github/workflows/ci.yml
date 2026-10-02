@@ -23,11 +23,10 @@ jobs:
       - name: Synthetic end-to-end costing regression (STEP 2 → 5, no company data)
         run: node test/synth.mjs
 
-  # Publishes the site only after every check passed. Active once
-  # Settings → Pages → Source = "GitHub Actions" and the repository variable PAGES_FROM_ACTIONS = true.
+  # Production deploy: main is published only after every accounting/control check passes.
   deploy:
     needs: checks
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_FROM_ACTIONS == 'true'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
