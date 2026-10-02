@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.8.1 core-controls remediation (02/10/2026):** Recognition Date thống nhất theo Bill/B.L. Date (fallback Invoice Date); Sales Return bắt buộc STRICT_DATE, đi vào FIFO theo thứ tự thời gian và bị chặn khi vượt số lượng bán gốc; ERP có dòng ngoài kỳ chặn STEP 2; 3B AMOUNT không tự fallback sang QTY; DIRECT_632 đối ứng đúng FAST 154/632; migration STEP 5 chờ FIFO hoàn tất; không cho reopen kỳ trước khi kỳ kế tiếp đã đóng; dữ liệu chunk của kỳ CLOSED bất biến cho đến khi REOPEN.
+
 Bản web của **SVL Costing Master (Excel/VBA v30.9)**: tính giá thành sản xuất tháng ngay trong trình duyệt và lưu theo kỳ lên Firebase.
 
 Ứng dụng mở tại: `https://nguyenhoangninh.github.io/svl-costing/`
