@@ -3,7 +3,7 @@ import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt,
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
 import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
-import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows } from './engine/controls.js';
+import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
 import * as store from './store.js';
@@ -233,7 +233,7 @@ function guardPeriod() {
 }
 const guardMutate = () => guardEdit() && guardPeriod();
 const canEditPeriod = () => store.canEdit() && !isClosed();
-const WRITE_ACTS = new Set(['new-period', 'run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist', 's5-close', 's5-reopen']);
+const WRITE_ACTS = new Set(['new-period', 'run-step2', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist', 's5-close', 's5-reopen']);
 
 /** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
 function parseNum(v, label) {
@@ -543,7 +543,7 @@ VIEWS.step2 = (el) => {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 2 · Phân bổ Stock Out vào lô PC</h1><p class="lead">Stock Out NVL được phân bổ vào các lô PC-P theo quy tắc khách hàng / job code / location. Stock Out thành phẩm (FG) không phải NVL — được tách sang sổ Rework (2B).</p></div>
       <div class="result"><span>Kết quả</span>${pill(st.s2c.status)}<small>${esc(st.s2c.okText)}</small></div></header>
-    <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}</div>
+    <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${store.isAdmin() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
     ${s2 ? `
     <div class="grid2">
       <div><h2>Đối chiếu theo hệ nguồn</h2><table class="cp"><thead><tr><th>Hệ</th><th class="r">Stock Out nguồn</th><th class="r">Đã phân bổ</th><th class="r">Chưa phân bổ</th><th class="r">Chênh lệch</th><th>Trạng thái</th></tr></thead><tbody>
@@ -771,6 +771,8 @@ const flowBox = (l, x, strong) => `<div class="fb ${strong ? 'strong' : ''}"><sp
 function doStep3() {
   try {
     const s1 = step1Status(datasetsMeta());
+    const c2 = step2Controls({ period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport });
+    if (String(c2.status).startsWith('BLOCK')) throw new Error('STEP 2 còn checkpoint BLOCK. Xử lý/duyệt fallback trước khi chạy STEP 3.');
     const s3 = runStep3(S.d.datasets, S.d.opening, S.d.step2, S.period, s1.latestImport);
     S.d.step3 = s3;
     audit('STEP 3 - MATERIAL WIP', `Vật tư=${s3.rows.length}; Mới=${s3.summary.newMat}; Closing=${fmtNum(s3.summary.closingAmt)}`);
@@ -1046,6 +1048,16 @@ document.addEventListener('click', async (e) => {
     }
     case 'new-period': await newPeriod(); break;
     case 'run-step2': await busy('Đang chạy STEP 2…', async () => doStep2()); break;
+    case 'approve-step2-fallback': {
+      if (!store.isAdmin()) { toast('Chỉ Quản trị viên được xác nhận phân bổ fallback trọng yếu.', 'review'); break; }
+      const s2 = S.d.step2; if (!s2) break;
+      const amount = fallbackAlloc(s2), totalAlloc = num(s2.total && s2.total.alloc);
+      const reason = (prompt(`Fallback rộng = ${fmtNum(amount)} VND (${totalAlloc ? (Math.abs(amount / totalAlloc) * 100).toFixed(1) : 0}% Stock Out đã phân bổ). Nhập lý do / bằng chứng review (bắt buộc):`, '') || '').trim();
+      if (reason.length < 5) { toast('Cần lý do review ít nhất 5 ký tự.', 'review'); break; }
+      s2.fallbackApproval = { amount, totalAlloc, by: store.cloud.user ? store.cloud.user.email : 'thiết bị này', at: nowISO(), reason };
+      audit('STEP 2 FALLBACK APPROVAL', `${reason} · amount=${fmtNum(amount)} · ratio=${totalAlloc ? (Math.abs(amount / totalAlloc) * 100).toFixed(2) : 0}%`);
+      markDirty('step2', 'audit'); render(); break;
+    }
     case 'run-step3': await busy('Đang chạy STEP 3…', async () => doStep3()); break;
     case 'roll-wip': await rollWIP(); break;
     case 'validate-wip':
