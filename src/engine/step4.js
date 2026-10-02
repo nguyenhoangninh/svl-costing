@@ -432,6 +432,7 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
       activeCount++;
       const e = utxt(d.erp), acc = Math.trunc(num(String(d.account ?? '').replace(/[^\d.-]/g, '')) || 0), amt = num(d.amount), pc = ttxt(d.pc); let pcode = ttxt(d.prod);
       if ((e !== 'T' && e !== 'O') || (acc !== 622 && acc !== 627) || Math.abs(amt) < 0.0000001 || !pc) { r.status = 'CHECK'; directBad++; return r; }
+      if (!ttxt(d.reason)) { r.status = 'CHECK - REASON REQUIRED'; directBad++; return r; }
       const ok = `${e}|${pc.toUpperCase()}`;
       if (!pcCount.has(ok)) { r.status = 'CHECK - PC NOT FOUND'; directBad++; return r; }
       if (!pcode) { if (pcCount.get(ok) === 1) pcode = pcOnlyProd.get(ok); else { r.status = 'CHECK - PRODUCT REQUIRED'; directBad++; return r; } }
