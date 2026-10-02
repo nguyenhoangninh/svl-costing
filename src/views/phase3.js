@@ -19,12 +19,13 @@ export function engineBalances(S, p2, res) {
   const d = S.d; const reg = d.register ? d.register.rows : [];
   const wf = p2 && p2.d3b ? p2.d3b.wf : null;
   const w632 = ((d.wipadj && d.wipadj.reg632) || []).filter((r) => r.record === 'RECORDED').reduce((a, r) => a + num(r.impact), 0);
+  const nd = d.nrvDecision, nrvAdj = nd && res && nd.key === nrvKey(res) && utxt(nd.status) === 'RECORDED' ? num(nd.recordedAmount ?? nd.amount) : 0;
   return {
-    // DIRECT_632 impact > 0 = Dr 632 / Cr 154; impact < 0 = Dr 154 / Cr 632.
-    // Therefore the recorded entry changes both balances with opposite signs.
+    // DIRECT_632 impact > 0 = Dr 632 / Cr 154. NRV recorded adjustment > 0 = Dr 632 / Cr 2294.
     a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0) - w632,
     a155: res ? res.totals.closeA : 0,
-    a632: (res ? res.totals.cogsA : 0) + w632,
+    a2294: nrvAdj,
+    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj,
     a511: F5.periodRevenue(d.salesDB ? d.salesDB.rows : [], S.period),
   };
 }
@@ -99,7 +100,7 @@ export function derive(S, p2) {
     if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
   }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
-    if (!tie.entered) closeReason = 'Chưa nhập số dư FAST 154 / 155 / 632 / 511 (STEP 5.3 → tab Đối chiếu FAST).';
+    if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 (STEP 5.3 → tab Đối chiếu FAST).';
     else if (tie.diffs && !tie.approved) closeReason = `Số liệu lệch FAST ở ${tie.diffs} tài khoản chưa được xác nhận (STEP 5.3 → Đối chiếu FAST → Xác nhận chênh lệch).`;
   }
   return { res, fresh, stale, dups, hg, recon, controls, closeReason, tie };
@@ -152,7 +153,7 @@ function step5Controls(S, x) {
     const f200 = num(s3.openingAmt) + num(S3.miAmt) + num(S3.soAmt) + num(s4.alloc622) + num(s4.alloc627) + fifoC + bf - num(S3.mrAmt) - fl.totals.totalCost - x.d3b.wf.finalClosing - sumOf(reg, 'closingWIP');
     add('15a', 'Cầu nối TK 154 (gồm 3B & rework)', 0, f200, Math.abs(f200) <= 1 ? 'PASS' : stale ? 'RERUN FIFO' : 'REVIEW', 'WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối (sau 3B) − rework WIP cuối');
   }
-  if (res && x.tie) add('15b', 'Đối chiếu số dư FAST 154 / 155 / 632 / 511', 0, x.tie.diffs, x.tie.status === 'PASS' ? 'PASS' : x.tie.status === 'APPROVED' ? 'REVIEW' : x.tie.status === 'NOT ENTERED' ? 'REVIEW' : 'REVIEW', x.tie.status === 'NOT ENTERED' ? 'Chưa nhập số dư FAST' : x.tie.status === 'APPROVED' ? `Chênh lệch đã xác nhận bởi ${x.tie.approval.by}` : x.tie.diffs ? 'Lệch – cần xác nhận trước khi đóng kỳ' : 'Khớp FAST');
+  if (res && x.tie) add('15b', 'Đối chiếu FAST 154 / 155 / 2294 / 632 / 511', 0, x.tie.diffs, x.tie.status === 'PASS' ? 'PASS' : x.tie.status === 'APPROVED' ? 'REVIEW' : x.tie.status === 'NOT ENTERED' ? 'REVIEW' : 'REVIEW', x.tie.status === 'NOT ENTERED' ? 'Chưa nhập số dư FAST' : x.tie.status === 'APPROVED' ? `Chênh lệch đã xác nhận bởi ${x.tie.approval.by}` : x.tie.diffs ? 'Lệch – cần xác nhận trước khi đóng kỳ' : 'Khớp FAST');
   add('16', 'FG History', 'PASS', hg.gate, hg.gate === 'PASS' ? 'PASS' : 'RERUN HISTORY', 'BUILD FG HISTORY sau FIFO');
   const f135 = recon.finalStatus;
   add('17', 'Cổng đóng kỳ', 'READY', res ? f135 : '', !res ? 'NOT RUN' : f135.startsWith('READY') ? (f135.includes('REVIEW') ? 'PASS WITH REVIEW' : 'PASS') : 'BLOCK', '05_RECONCILIATION dòng 49');
@@ -411,9 +412,9 @@ function refreshFgRef(S) {
 function nrvDecisionHTML(S, res, closed) {
   const amt = num(res.totals && res.totals.nrvProv), key = nrvKey(res);
   const d = S.d.nrvDecision, current = d && d.key === key;
-  const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · ${A.fmtNum(d.amount)} VND · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
+  const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · yêu cầu ${A.fmtNum(d.amount)} VND${utxt(d.status) === 'RECORDED' ? ' · đã ghi ' + A.fmtNum(num(d.recordedAmount ?? d.amount)) + ' VND' : ''} · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
   if (closed || !A.isAdmin() || !A.canEdit()) return summary;
-  return summary + `<form id="f-nrv-decision" class="inline"><label>NRV decision <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Accounting Ref<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
+  return summary + `<form id="f-nrv-decision" class="inline"><label>NRV decision <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Accounting Ref<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
 }
 export function viewClose(el) {
   const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
@@ -440,10 +441,15 @@ export function viewClose(el) {
     if (!A.isAdmin() || !A.canEdit()) { A.toast('Chỉ Quản trị viên được xác nhận xử lý NRV.', 'block'); return; }
     const status = utxt(nf.elements.status.value), ref = nf.elements.ref.value.trim(), note = nf.elements.note.value.trim();
     if (!['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(status)) { A.toast('Chọn quyết định NRV.', 'review'); return; }
-    if (status === 'RECORDED' && ref.length < 3) { A.toast('NRV RECORDED cần Accounting Reference / Journal No.', 'review'); return; }
+    let recordedAmount = 0;
+    if (status === 'RECORDED') {
+      recordedAmount = A.parseNum(nf.elements.recordedAmount.value, 'Số NRV đã ghi FAST');
+      if (recordedAmount === undefined || recordedAmount === null) return;
+      if (ref.length < 3) { A.toast('NRV RECORDED cần Accounting Reference / Journal No.', 'review'); return; }
+    }
     if (note.length < 5) { A.toast('Nhập giải trình NRV ít nhất 5 ký tự.', 'review'); return; }
-    S.d.nrvDecision = { key: nrvKey(res), status, ref, note, amount: num(res.totals.nrvProv), by: A.who(), at: nowISO() };
-    A.audit('NRV DECISION', `${status}; amount=${A.fmtNum(res.totals.nrvProv)}; ref=${ref || '-'}; ${note}`);
+    S.d.nrvDecision = { key: nrvKey(res), status, ref, note, amount: num(res.totals.nrvProv), recordedAmount, by: A.who(), at: nowISO() };
+    A.audit('NRV DECISION', `${status}; required=${A.fmtNum(res.totals.nrvProv)}; recorded=${A.fmtNum(recordedAmount)}; ref=${ref || '-'}; ${note}`);
     A.markDirty('nrvDecision', 'audit'); A.render();
   });
     el.querySelectorAll('[data-tabh]').forEach((b) => b.addEventListener('click', () => { S.tabH = b.dataset.tabh; A.render(); }));
@@ -478,7 +484,7 @@ function fastTab(box, D5, closed) {
     </tbody></table>${edit ? '<div class="row"><button class="btn" type="submit">Lưu số FAST</button></div>' : ''}</form>
     ${ft ? `<p class="muted">Nhập bởi ${esc(ft.by || '')} lúc ${A.fmtTs(ft.enteredAt)}.</p>` : ''}
     ${tie.diffs ? (tie.approved ? `<div class="alert info"><b>Chênh lệch đã được xác nhận</b> bởi ${esc(tie.approval.by)} lúc ${A.fmtTs(tie.approval.at)}: ${esc(tie.approval.note)}</div>`
-      : `<div class="alert review"><b>${tie.diffs} tài khoản lệch FAST.</b> Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.${canApproveDiff && tie.entered ? `<form id="f-fast-ok" class="row" style="margin-top:8px"><input name="note" placeholder="Giải trình chênh lệch (bắt buộc)" style="flex:1;min-width:240px"><button class="btn" type="submit">Quản trị xác nhận chênh lệch</button></form>` : `<div class="muted">Maker-checker: chênh lệch phải được Quản trị viên khác người nhập FAST xác nhận.</div>`}</div>`) : tie.entered ? '<div class="alert pass">Khớp FAST ở cả 4 tài khoản.</div>' : ''}`;
+      : `<div class="alert review"><b>${tie.diffs} tài khoản lệch FAST.</b> Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.${canApproveDiff && tie.entered ? `<form id="f-fast-ok" class="row" style="margin-top:8px"><input name="note" placeholder="Giải trình chênh lệch (bắt buộc)" style="flex:1;min-width:240px"><button class="btn" type="submit">Quản trị xác nhận chênh lệch</button></form>` : `<div class="muted">Maker-checker: chênh lệch phải được Quản trị viên khác người nhập FAST xác nhận.</div>`}</div>`) : tie.entered ? '<div class="alert pass">Khớp FAST ở cả 5 tài khoản.</div>' : ''}`;
   const f = box.querySelector('#f-fast');
   if (f && edit) f.addEventListener('submit', (e) => {
     e.preventDefault(); if (closedGuard()) return;
