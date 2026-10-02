@@ -998,6 +998,11 @@ async function exportAll() {
     const dt = (rows, fs) => rows.map((r) => { const o = { ...r }; for (const f of fs) if (typeof o[f] === 'number') o[f] = serialToISO(o[f]); return o; });
     tbl('05_FG_LEDGER', P3.F5.LEDGER_FIELDS, P3.F5.LEDGER_HEADERS, dt(r5.ledger, ['date']));
     tbl('05_SALES_COGS', P3.F5.SALES_FIELDS, P3.F5.SALES_HEADERS, dt(r5.sales, ['date']));
+    if (r5.returnRegister && r5.returnRegister.length) {
+      const rf = ['seq', 'date', 'returnInv', 'customer', 'product', 'productName', 'originalInv', 'returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal', 'layerId', 'status', 'message'];
+      const rh = ['Seq', 'Return Date', 'Return Invoice', 'Customer', 'Product', 'Product Name', 'Original Invoice', 'Return Qty', 'RM Reversal', '622 Reversal', '627 Reversal', 'COGS Reversal', 'Returned FG Layer', 'Status', 'Message'];
+      tbl('05_SALES_RETURN', rf, rh, dt(r5.returnRegister, ['date']));
+    }
     tbl('05_FIFO_DETAIL', P3.F5.DETAIL_FIELDS, P3.F5.DETAIL_HEADERS, dt(r5.detail, ['date']));
     if (r5.rework) tbl('05_FG_REWORK_FIFO', P3.F5.RWF_FIELDS, P3.F5.RWF_HEADERS, dt(r5.rework.rows, ['issueDate', 'layerDate']));
     tbl('05_FG_CLOSING', P3.F5.LAYER_FIELDS, P3.F5.LAYER_HEADERS, dt(r5.closing, ['date']));
