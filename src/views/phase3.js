@@ -443,13 +443,16 @@ function fastTab(box, D5, closed) {
   if (!tie) { box.innerHTML = A.emptyNote('Chạy RUN FIFO COGS trước để có số dư cuối kỳ.', 'step5', 'Mở STEP 5.2'); return; }
   const edit = !closed && A.canEdit();
   const ft = d.fastTie && d.fastTie.period === S.period ? d.fastTie : null;
-  box.innerHTML = `<p class="muted">Nhập số dư / phát sinh trên FAST (sổ cái) để đối chiếu với kết quả giá thành. Lệch > 1 VND phải được người có quyền chỉnh sửa xác nhận kèm giải trình trước khi đóng kỳ; xác nhận tự hết hiệu lực nếu số liệu hai bên thay đổi.</p>
+  const maker = ft ? String(ft.by || '').trim().toLowerCase() : '';
+  const checker = String(A.who() || '').trim().toLowerCase();
+  const canApproveDiff = edit && A.isAdmin() && !!ft && maker !== checker;
+  box.innerHTML = `<p class="muted">Nhập số dư / phát sinh trên FAST (sổ cái) để đối chiếu với kết quả giá thành. Lệch > 1 VND phải được Quản trị viên khác người nhập FAST xác nhận kèm giải trình trước khi đóng kỳ; xác nhận tự hết hiệu lực nếu số liệu hai bên thay đổi.</p>
     <form id="f-fast" autocomplete="off"><table class="cp"><thead><tr><th>TK</th><th>Nội dung</th><th class="r">Theo giá thành (web)</th><th class="r">Số FAST</th><th class="r">Chênh lệch</th><th>Trạng thái</th></tr></thead><tbody>
     ${tie.rows.map((r) => `<tr><td><b>${r.acc}</b></td><td>${esc(r.label)}</td><td class="r">${A.fmtNum(r.engine)}</td><td class="r"><input name="${r.k}" inputmode="decimal" value="${r.fast === null ? '' : A.fmtNum(r.fast)}" ${edit ? '' : 'disabled'} aria-label="Số FAST TK ${r.acc}" style="text-align:right;max-width:180px"></td><td class="r">${r.diff === null ? '' : A.fmtNum(r.diff)}</td><td>${A.pill(r.status === 'DIFF' ? 'REVIEW' : r.status)}</td></tr>`).join('')}
     </tbody></table>${edit ? '<div class="row"><button class="btn" type="submit">Lưu số FAST</button></div>' : ''}</form>
     ${ft ? `<p class="muted">Nhập bởi ${esc(ft.by || '')} lúc ${A.fmtTs(ft.enteredAt)}.</p>` : ''}
     ${tie.diffs ? (tie.approved ? `<div class="alert info"><b>Chênh lệch đã được xác nhận</b> bởi ${esc(tie.approval.by)} lúc ${A.fmtTs(tie.approval.at)}: ${esc(tie.approval.note)}</div>`
-      : `<div class="alert review"><b>${tie.diffs} tài khoản lệch FAST.</b> Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.${edit && tie.entered ? `<form id="f-fast-ok" class="row" style="margin-top:8px"><input name="note" placeholder="Giải trình chênh lệch (bắt buộc)" style="flex:1;min-width:240px"><button class="btn" type="submit">Xác nhận chênh lệch</button></form>` : ''}</div>`) : tie.entered ? '<div class="alert pass">Khớp FAST ở cả 4 tài khoản.</div>' : ''}`;
+      : `<div class="alert review"><b>${tie.diffs} tài khoản lệch FAST.</b> Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.${canApproveDiff && tie.entered ? `<form id="f-fast-ok" class="row" style="margin-top:8px"><input name="note" placeholder="Giải trình chênh lệch (bắt buộc)" style="flex:1;min-width:240px"><button class="btn" type="submit">Quản trị xác nhận chênh lệch</button></form>` : `<div class="muted">Maker-checker: chênh lệch phải được Quản trị viên khác người nhập FAST xác nhận.</div>`}</div>`) : tie.entered ? '<div class="alert pass">Khớp FAST ở cả 4 tài khoản.</div>' : ''}`;
   const f = box.querySelector('#f-fast');
   if (f && edit) f.addEventListener('submit', (e) => {
     e.preventDefault(); if (closedGuard()) return;
@@ -462,6 +465,7 @@ function fastTab(box, D5, closed) {
   const ok = box.querySelector('#f-fast-ok');
   if (ok) ok.addEventListener('submit', (e) => {
     e.preventDefault(); if (closedGuard()) return;
+    if (!A.isAdmin() || maker === checker) { A.toast('Maker-checker: Quản trị viên xác nhận phải khác người nhập số FAST.', 'block'); return; }
     const note = ok.elements.note.value.trim();
     if (note.length < 5) { A.toast('Nhập giải trình chênh lệch (ít nhất 5 ký tự).', 'review'); return; }
     d.fastTie.approval = { key: tie.key, by: A.who(), at: nowISO(), note, diffs: tie.rows.filter((r) => r.status === 'DIFF').map((r) => ({ acc: r.acc, diff: r.diff })) };
