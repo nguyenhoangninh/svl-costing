@@ -532,9 +532,20 @@ export async function doReopen() {
   if (!reason) return;
   const was = S.d.closed;
   S.d.closed = null;
+  A.markDirty('closed');
+  if (A.cloudOn()) {
+    A.toast('Đang ghi revision MỞ LẠI KỲ lên cloud…', 'review');
+    const r = await A.syncNow();
+    if (!r.ok) {
+      S.d.closed = was;
+      A.markDirty('closed');
+      A.toast(`CHƯA mở lại kỳ: cloud không xác nhận (${r.error}).`, 'block');
+      A.render(); return;
+    }
+  }
   A.audit('STEP 5 - REOPEN PERIOD', `${reason} (đóng lúc ${was ? was.closedAt : '?'} bởi ${was ? was.closedBy : '?'})`);
-  A.markDirty('closed', 'audit');
-  A.toast(`Đã mở lại kỳ ${S.period}. Sau khi sửa: RUN FIFO → BUILD FG HISTORY → CLOSE MONTH.`, 'pass');
+  A.markDirty('audit');
+  A.toast(`Đã mở lại kỳ ${S.period}${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Sau khi sửa: RUN FIFO → BUILD FG HISTORY → CLOSE MONTH.`, 'pass');
 }
 
 // ======================= migration / carry-forward =======================
