@@ -236,7 +236,7 @@ export function viewSales(el) {
   const missing = pm ? pm.rows.filter((r) => r.status === 'MISSING PRICE').length : null;
   const dup = A.dupStatus();
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 4.1 · Doanh thu &amp; Price Master</h1><p class="lead">Import file doanh thu (MONTHLY hoặc YTD) → Validate &amp; Save vào Sales Database (kiểm tra chỉ mang tính cảnh báo, không chặn dòng nào) → Update Price Master: giá tháng hiện tại → giá thực tế gần nhất → YTD → Sales Order; giá thủ công luôn được ưu tiên.</p></div>
+    <header class="ph"><div><h1>STEP 4.1 · Doanh thu &amp; Price Master</h1><p class="lead">Import file doanh thu (MONTHLY hoặc YTD) → Validate &amp; Save. Lỗi Recognition/Bill Date, Transaction Type hoặc inventory quantity bị BLOCK; các cảnh báo còn lại được giữ để review. Sau đó Update Price Master: giá tháng hiện tại → giá thực tế gần nhất → YTD → Sales Order; giá thủ công luôn được ưu tiên.</p></div>
       <div class="result"><span>Price Master</span>${A.pill(pm ? pm.status : 'NOT RUN')}<small>${pm ? `${pm.rows.length} sản phẩm · thiếu giá ${missing}` : ''}</small></div></header>
     <div class="kpis">${A.kpiN('Dòng staging', st ? st.rows.length : 0)}${A.kpiN('Sales Database', db ? db.rows.length : 0)}${A.kpiN('SO fallback', (d.soPrice || []).length)}${A.kpiN('Giá thủ công', (d.manualPrice || []).length)}</div>
     ${dup.groups.length ? `<div class="alert ${dup.pending ? 'review' : 'pass'}">Kỳ ${esc(S.period)} có <b>${dup.groups.length}</b> nhóm dòng doanh thu giống hệt nhau (cùng ngày, hoá đơn, sản phẩm, số lượng, tiền – file không có Invoice Line No.). ${dup.pending ? `Còn <b>${dup.pending}</b> dòng lặp chưa xác nhận → <a href="#sales" data-tab-dup>xác nhận ở tab Nghi trùng</a>. Chưa xác nhận thì không đóng kỳ được.` : `Đã xác nhận hết (loại ${dup.excluded} dòng).`}</div>` : ''}
@@ -252,7 +252,7 @@ export function viewSales(el) {
       <label class="btn">Chọn file doanh thu…<input type="file" id="f-sales" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label>
       <button class="btn" type="button" data-act="sales-save" ${st && st.rows.length && !String(st.status).includes('SAVED') ? '' : 'disabled'}>Validate &amp; Save</button>
       <span class="muted">${st ? `${esc(st.fileName || '')} · ${esc(st.mode || '')} · ${A.pill(st.status)}` : 'Chưa import.'}</span></div>
-      <p class="muted">File cần có các cột Invoice Date, Product Number, Quantity, Amount (USD); nên có Customer, Product Name, Exchange Rate, Unit Price, Amount (VND), SI Invoice No., Invoice Line No., Transaction Type. YTD / MONTHLY: dữ liệu cũ trong khoảng ngày của file sẽ được thay thế.</p><div id="t-stg"></div>`;
+      <p class="muted">File cần có Invoice Date, Product Number, Quantity, Amount (USD). Nếu có Bill/B.L. Date thì đây là Recognition Date bắt buộc và phải hợp lệ; giao dịch âm phải có Transaction Type rõ ràng. YTD chỉ thay dữ liệu đến hết kỳ giá thành, không đụng các kỳ tương lai.</p><div id="t-stg"></div>`;
     box.querySelector('#f-sales').addEventListener('change', (e) => importSalesFile(e.target.files[0], box.querySelector('#s-mode').value));
     if (st && st.rows.length) {
       const cols = [...salesCols, { key: 'validStat', label: 'Validation', type: 'status', width: 100 }, { key: 'validMsg', label: 'Validation Message', width: 320 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }, { key: 'saveStat', label: 'Save', width: 80 }];
@@ -346,9 +346,9 @@ export function doSalesSave() {
     if (pv.from !== null && !confirm(`Validate & Save (${pv.mode})\n\nThay thế toàn bộ dòng cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
     const r = F.validateSaveSales(S.d.salesImport, S.d.salesDB, S.period);
     S.d.salesDB = r.db; if (S.d.pm) S.d.pm.status = 'OUTDATED';
-    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}; thiếu ngày ${r.stats.undated}${r.stats.droppedUndated ? `; bỏ ${r.stats.droppedUndated} dòng thiếu ngày của lần lưu trước` : ''}`);
+    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; BLOCK ${r.stats.block || 0}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}${r.stats.droppedUndated ? `; bỏ ${r.stats.droppedUndated} dòng thiếu ngày của lần lưu trước` : ''}`);
     A.markDirty('salesImport', 'salesDB', 'pm', 'audit');
-    A.toast(`Đã lưu ${r.stats.saved} dòng (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ). Price Master → OUTDATED, hãy Update Price Master.${r.stats.undated ? ` ⚠ ${r.stats.undated} dòng thiếu / sai ngày hoá đơn: STEP 5 sẽ chặn đóng kỳ cho tới khi sửa.` : ''}`, r.stats.undated ? 'review' : 'pass');
+    A.toast(`Đã lưu ${r.stats.saved} dòng (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ). Price Master → OUTDATED, hãy Update Price Master.`, r.stats.review ? 'review' : 'pass');
   } catch (e) { A.toast('Validate & Save lỗi: ' + e.message, 'block'); }
 }
 export function doPMUpdate() {
