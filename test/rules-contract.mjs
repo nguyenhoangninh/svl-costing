@@ -1,0 +1,28 @@
+import fs from 'node:fs';
+
+let fail = 0;
+const ok = (label, cond) => { console.log(`${cond ? '✓' : '✗'} ${label}`); if (!cond) fail++; };
+const rules = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+const store = fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8');
+const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
+
+ok('closed period reopen changes only closed manifest key', rules.includes("affectedKeys().hasOnly(['closed'])"));
+ok('reopen summary can only change closed + everClosed', rules.includes("affectedKeys().hasOnly(['closed', 'everClosed'])"));
+ok('reopen preserves everClosed=true', rules.includes("request.resource.data.summary.get('everClosed', false) == true"));
+ok('hard delete blocked after everClosed', rules.includes("get('everClosed', false) != true"));
+ok('content-addressed chunks are create-only', rules.includes('allow create: if canWrite() && periodOpen(period);') && rules.includes('allow update: if false;'));
+ok('old CLOSED chunk exception removed', !rules.includes("chunk.matches('closed@.*')"));
+ok('revision rev bound to parent', rules.includes('request.resource.data.rev == getAfter(periodPath(period)).data.rev'));
+ok('revision hash bound to parent', rules.includes('request.resource.data.manifestHash == getAfter(periodPath(period)).data.manifestHash'));
+ok('revision blob manifest exactly equals parent', rules.includes('request.resource.data.blobs == getAfter(periodPath(period)).data.blobs'));
+ok('revision summary exactly equals parent', rules.includes('request.resource.data.summary == getAfter(periodPath(period)).data.summary'));
+ok('revision documents immutable', /match \/revisions\/\{revision\}[\s\S]*allow update, delete: if false;/.test(rules));
+ok('audit events immutable', /match \/svl_costing_audit\/\{id\}[\s\S]*allow update, delete: if false;/.test(rules));
+ok('cloudSave preserves everClosed after close/reopen', store.includes('safeSummary.everClosed = true'));
+ok('cloudDelete checks everClosed metadata', store.includes('meta.summary.everClosed'));
+ok('cloudDelete checks historical closed revision', store.includes('r.summary && r.summary.closed'));
+ok('close persists local closedEver retention state', phase3.includes('d.closedEver = true'));
+ok('close snapshots exception package', phase3.includes('exceptions'));
+
+console.log(`\n${17 - fail}/17 Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
+process.exit(fail ? 1 : 0);
