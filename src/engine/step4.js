@@ -2,29 +2,20 @@
 // 3B final layer + FG rework carry-in, lot unit-cost check.
 // Port of modSTEP4 (STEP4_Import_Sales_Revenue, STEP4_Validate_Save_Sales, STEP4_Update_Price_Master,
 // STEP4_Run_Cost_Allocation[_Gated]), V3_RefreshPCAndStep4, RW_SyncCompletedToStep4, SVL_LotCostCheck_Build.
-import { txt, ttxt, utxt, num, isNumeric, isPeriod, serialToYMD, nowISO } from './util.js';
+import { txt, ttxt, utxt, num, isNumeric, isPeriod, serialToYMD, nowISO, cellDateSerial } from './util.js';
 
 const EPOCH = Date.UTC(1899, 11, 30);
 const ymdSerial = (y, m, d) => (Date.UTC(y, m - 1, d) - EPOCH) / 86400000;
 export function periodEndSerial(p) { const y = +p.slice(0, 4), m = +p.slice(5, 7); return ymdSerial(y, m + 1, 0); }
 export function periodStartSerial(p) { return ymdSerial(+p.slice(0, 4), +p.slice(5, 7), 1); }
 
-/** VBA IsDate + CDate → serial (or null). Accepts serial numbers, ISO / dd/mm/yyyy strings, Date. */
-export function toSerial(v) {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v === 'number') return v >= 1 && v < 2958466 ? v : null;
-  if (v instanceof Date) return ymdSerial(v.getFullYear(), v.getMonth() + 1, v.getDate());
-  const s = String(v).trim();
-  let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(s);
-  if (m) return ymdSerial(+m[1], +m[2], +m[3]);
-  m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/.exec(s);
-  if (m) return ymdSerial(+m[3], +m[2], +m[1]);
-  return null;
-}
-/** Canonical accounting recognition date: Bill/B.L. date when valid, otherwise Invoice Date. */
+/** Strict accounting date parser. Impossible calendar dates return null. */
+export function toSerial(v) { return cellDateSerial(v); }
+/** Canonical accounting recognition date: when Bill/B.L. Date is supplied it is authoritative; fallback to Invoice Date only when Bill Date is blank. */
 export const recognitionDate = (r) => {
-  const b = toSerial(r && r.billDate);
-  return b !== null ? b : toSerial(r && r.invDate);
+  const rawBill = r && r.billDate;
+  if (rawBill !== null && rawBill !== undefined && ttxt(rawBill) !== '') return toSerial(rawBill);
+  return toSerial(r && r.invDate);
 };
 const yyyymm = (serial) => { const d = serialToYMD(serial); return `${d.y}${String(d.m).padStart(2, '0')}`; };
 const yyyymmdd = (serial) => { const d = serialToYMD(serial); return `${d.y}${String(d.m).padStart(2, '0')}${String(d.d).padStart(2, '0')}`; };
