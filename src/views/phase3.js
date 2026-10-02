@@ -336,14 +336,21 @@ async function priorSalesFor(S) {
   const rows = S.d.salesDB ? S.d.salesDB.rows : [];
   const pS = S.period;
   if (!rows.some((r) => num(r.qty) < 0 && F5.saleDate(r) !== null && serialToISO(F5.saleDate(r)).slice(0, 7) === pS)) return [];
-  const out = []; let p = pS;
+  const out = [], returned = new Map(); let p = pS;
   for (let k = 0; k < 12; k++) {
     p = prevPeriod(p);
     const pd = await A.loadPeriodData(p).catch(() => null);
     const r5 = pd && pd.step5 && pd.step5.period === p ? pd.step5 : null;
-    if (r5) for (const x of r5.sales || []) if (x.fin === 'FIFO COGS' && num(x.fq) > 0) out.push({ inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period: p });
+    if (!r5) continue;
+    for (const x of r5.sales || []) {
+      if (x.fin === 'FIFO COGS' && num(x.fq) > 0) out.push({ inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period: p });
+      if (x.fin === 'RETURN' && x.status === 'RETURNED' && ttxt(x.origInv) && num(x.fq) < 0) {
+        const key = `${utxt(x.origInv)}|${utxt(x.prod)}`;
+        returned.set(key, (returned.get(key) || 0) + -num(x.fq));
+      }
+    }
   }
-  return out;
+  return out.map((o) => ({ ...o, returned: returned.get(`${utxt(o.inv)}|${utxt(o.prod)}`) || 0 }));
 }
 export async function doRunFIFO() {
   const S = A.S; const d = S.d;
