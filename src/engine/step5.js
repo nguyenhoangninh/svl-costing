@@ -186,6 +186,7 @@ export function runFIFO(ctx) {
   if (!utxt(ctx.step4.overall).startsWith('PASS')) throw new Error(`STEP 4 tổng thể chưa PASS (${ctx.step4.overall}).`);
   const mode = utxt(ctx.mode) === 'STRICT_DATE' ? 'STRICT_DATE' : 'MONTHLY';
   const tol = num(ctx.tol) > 0 ? num(ctx.tol) : 1;
+  if (mode === 'MONTHLY' && activeReworkCount(ctx.register) > 0) throw new Error('Có FG Rework Active trong kỳ. STEP 5 bắt buộc STRICT_DATE để không lấy layer hoàn thành sau ngày xuất rework.');
 
   // ledger: opening layers
   const L = [];
