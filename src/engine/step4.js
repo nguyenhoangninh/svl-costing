@@ -263,13 +263,15 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   }
   // SO fallback
   const soPrice = new Map(), soDate = new Map(), soRank = new Map(), soRowOf = new Map(), soUsed = new Map();
+  let invalidSODate = 0;
   const soRows = (so || []).map((r) => ({ ...r }));
   soRows.forEach((r, i) => {
     const act = utxt(r.active), prod = utxt(r.product), val = num(r.price);
     const inactive = act === 'N' || act === 'NO' || act === 'INACTIVE' || act === '0';
     r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? 'NOT USED - PRODUCT CODE NOT IN COSTING SCOPE THIS PERIOD' : 'CANDIDATE';
     if (inactive || !prod || val <= 0) return;
-    const d = toSerial(r.soDate);
+    const rawDate = ttxt(r.soDate), d = toSerial(r.soDate);
+    if (rawDate && d === null) { r.check = 'BLOCK - INVALID SO DATE'; invalidSODate++; return; }
     const rank = d !== null ? (d <= pEnd ? 3 : 1) : 2;
     let rep = false;
     if (!soRank.has(prod)) rep = true;
@@ -277,15 +279,17 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else if (rank === soRank.get(prod)) { if (rank === 3) rep = d >= soDate.get(prod); if (rank === 2) rep = true; if (rank === 1) rep = d < soDate.get(prod); }
     if (rep) { soRank.set(prod, rank); soPrice.set(prod, val); soRowOf.set(prod, i); soDate.set(prod, d); }
   });
-  const manP = new Map(), manS = new Map(), manN = new Map(), manApproved = new Map();
+  const manP = new Map(), manS = new Map(), manN = new Map(), manApproved = new Map(), manInvalid = new Set();
   for (const m of manual || []) {
     const p = utxt(m.product);
+    const badFrom = ttxt(m.effFrom) && toSerial(m.effFrom) === null, badTo = ttxt(m.effTo) && toSerial(m.effTo) === null;
+    if (p && (badFrom || badTo)) { manInvalid.add(p); continue; }
     if (p && isNumeric(m.price) && num(m.price) > 0 && manualActive(m, pStart, pEnd)) {
       manP.set(p, num(m.price)); manS.set(p, txt(m.source)); manN.set(p, (manN.get(p) || 0) + 1);
       if (ttxt(m.approvedBy)) manApproved.set(p, true);
     }
   }
-  let overlap = 0, afterSO = 0, unapprovedManual = 0;
+  let overlap = 0, afterSO = 0, unapprovedManual = 0, invalidManualDate = manInvalid.size;
   const rows = [], audit = []; let missing = 0, stale = 0; const missingList = [];
   for (const p of prods) {
     let curP = 0, latestP = 0, ytdP = 0, soP = 0, sel = 0, src = '', ref = null;
@@ -297,7 +301,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     }
     if (ytd.has(p) && Math.abs(ytd.get(p)[1]) > 0.0000001) ytdP = ytd.get(p)[0] / ytd.get(p)[1];
     if (soPrice.has(p)) soP = soPrice.get(p);
-    const mp = manP.get(p) || 0, manOverlap = (manN.get(p) || 0) > 1, manOk = !mp || !!manApproved.get(p);
+    const mp = manP.get(p) || 0, manOverlap = (manN.get(p) || 0) > 1, manOk = !mp || !!manApproved.get(p), manDateBad = manInvalid.has(p);
     if (curP > 0) { sel = curP; src = 'CURRENT MONTH ACTUAL'; ref = lastSale.has(p) ? lastSale.get(p) : pEnd; }
     else if (latestP > 0) { sel = latestP; src = 'LATEST ACTUAL ' + latestMonth.get(p); ref = lastSale.get(p) ?? null; }
     else if (ytdP > 0) { sel = ytdP; src = 'YTD ACTUAL'; ref = lastSale.get(p) ?? null; }
@@ -306,7 +310,9 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
       ref = soDate.get(p) ?? null; if (mp <= 0) soUsed.set(p, src);
     }
     const row = { product: p, refPrice: sel, refSource: src, refDetail: ref, manPrice: null, manSource: null, finalPrice: null, finalSource: null, status: '' };
-    if (manOverlap) {
+    if (manDateBad) {
+      row.status = 'BLOCK - MANUAL INVALID DATE';
+    } else if (manOverlap) {
       row.manPrice = mp || null; row.manSource = manS.get(p); row.status = 'BLOCK - MANUAL OVERLAP'; overlap++;
     } else if (mp > 0 && !manOk) {
       row.manPrice = mp; row.manSource = manS.get(p); row.status = 'BLOCK - MANUAL NOT APPROVED'; unapprovedManual++;
@@ -317,6 +323,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     const age = ref !== null && ref !== undefined ? monthsBetween(ref, pEnd) : 0;
     let review;
     if (row.status === 'MISSING PRICE') review = 'MISSING';
+    else if (row.status === 'BLOCK - MANUAL INVALID DATE') review = 'BLOCK - MANUAL INVALID DATE';
     else if (row.status === 'BLOCK - MANUAL OVERLAP') review = `BLOCK - MANUAL OVERLAP (${manN.get(p)} dòng hiệu lực)`;
     else if (row.status === 'BLOCK - SO AFTER PERIOD') review = 'BLOCK - SO AFTER PERIOD';
     else if (row.status === 'BLOCK - MANUAL NOT APPROVED') review = 'BLOCK - MANUAL NOT APPROVED';
@@ -334,8 +341,8 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else r.check = 'NOT USED - SUPERSEDED BY ANOTHER SO ROW';
   });
   return {
-    pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: missing || overlap || afterSO || unapprovedManual ? 'BLOCKED - PRICE POLICY' : 'CURRENT', period },
-    so: soRows, stats: { products: prods.length, missing, stale, missingList, overlap, afterSO, unapprovedManual },
+    pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: missing || overlap || afterSO || unapprovedManual || invalidManualDate || invalidSODate ? 'BLOCKED - PRICE POLICY' : 'CURRENT', period },
+    so: soRows, stats: { products: prods.length, missing, stale, missingList, overlap, afterSO, unapprovedManual, invalidManualDate, invalidSODate },
   };
 }
 
