@@ -891,7 +891,8 @@ export const saleDate = (r) => recognitionDate(r);
 export const FAST_ACCOUNTS = [
   ['a154', '154', 'WIP cuối kỳ (vật tư sau 3B + rework WIP)'],
   ['a155', '155', 'Thành phẩm cuối kỳ'],
-  ['a632', '632', 'Giá vốn trong kỳ (FIFO + 3B DIRECT_632)'],
+  ['a2294', '2294', 'Phát sinh dự phòng giảm giá HTK đã ghi trong kỳ'],
+  ['a632', '632', 'Giá vốn trong kỳ (FIFO + DIRECT_632 + NRV recorded adjustment)'],
   ['a511', '511', 'Doanh thu trong kỳ (Sales Database)'],
 ];
 /** Revenue VND of the period by recognition date (all transaction types, returns negative). */
