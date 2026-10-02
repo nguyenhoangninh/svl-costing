@@ -150,7 +150,9 @@ export function deriveInput(input, map, step3, period) {
 
 // ======================= ENGINE =======================
 /** STEP3B_V4_RebuildEngineCore — static basis rows (current-period PC-P / PC-M). */
-export function rebuildEngine(inputDerived, step2, datasets, period) {
+/** ACTUAL_USAGE basis: 'AMOUNT' (PC-M Total Cost share – owner decision 02/10/2026) or 'QTY' (legacy Excel). Builds made before the choice existed were QTY. */
+export const basisOf = (w) => (w && w.basis ? w.basis : w && w.control && w.control.builtAt ? 'QTY' : 'AMOUNT');
+export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AMOUNT') {
   if (!step2 || step2.period !== period) throw new Error(`STEP 2 chưa chạy cho kỳ ${period}. Chạy STEP 2 trước.`);
   const inpErp = new Map(), inpDesc = new Map(), order = [];
   for (const r of inputDerived) {
@@ -174,6 +176,8 @@ export function rebuildEngine(inputDerived, step2, datasets, period) {
     const ds = datasets[`PC-M-${e}`]; if (!ds) continue;
     const f = (n) => { const c = ds.header.findIndex((h) => ttxt(h).toUpperCase() === n.toUpperCase()); if (c < 0) throw new Error(`Column '${n}' not found in PC-M-${e}.`); return c; };
     const cPC = f('PC No.'), cProd = f('Product Code'), cName = f('Product Name'), cMat = f('Material Code'), cQty = f('Quantity');
+    const cAmt = ds.header.findIndex((h) => ttxt(h).toUpperCase() === 'TOTAL COST');
+    if (basis === 'AMOUNT' && cAmt < 0) throw new Error(`Column 'Total Cost' not found in PC-M-${e} (cần cho phân bổ theo giá trị).`);
     for (const r of ds.rows) {
       const pc = ttxt(r[cPC]);
       if (!pcSet.has(e + '|' + pc)) continue;
@@ -182,17 +186,22 @@ export function rebuildEngine(inputDerived, step2, datasets, period) {
       if (!useD.has(mat)) useD.set(mat, new Map());
       const d = useD.get(mat); const pk = pc + '|' + ttxt(r[cProd]);
       const q = isNumeric(r[cQty]) ? num(r[cQty]) : 0;
-      if (d.has(pk)) d.get(pk)[3] += q; else d.set(pk, [pc, ttxt(r[cProd]), txt(r[cName]), q]);
+      const a = cAmt >= 0 && isNumeric(r[cAmt]) ? num(r[cAmt]) : 0;
+      if (d.has(pk)) { d.get(pk)[3] += q; d.get(pk)[4] += a; } else d.set(pk, [pc, ttxt(r[cProd]), txt(r[cName]), q, a]);
     }
   }
   const rows = []; let nUse = 0, nNo = 0;
   const row = (key, erp, pc, prod, pname, qLot, qTot, bLot, bTot, share, note, type) => rows.push({ key, desc: inpDesc.get(key), erp, pc, prod, pname, qLot, qTot, bLot, bTot, share, note, type });
   for (const key of order) {
     const erp = inpErp.get(key); const d = useD.get(key);
-    let totQ = 0; if (d) for (const v of d.values()) totQ += v[3];
-    if (totQ > 0) {
+    let totQ = 0, totA = 0; if (d) for (const v of d.values()) { totQ += v[3]; totA += v[4]; }
+    const byAmt = basis === 'AMOUNT' && totA > 0 && [...d.values()].every((v) => v[4] >= 0);
+    if (byAmt) {
       nUse++;
-      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, 'Actual PC-M quantity ratio', 'USAGE');
+      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, v[4], totA, v[4] / totA, 'Actual PC-M amount ratio', 'USAGE');
+    } else if (totQ > 0) {
+      nUse++;
+      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, basis === 'AMOUNT' ? 'PC-M quantity ratio (amount = 0 / negative → fallback)' : 'Actual PC-M quantity ratio', 'USAGE');
     } else {
       nNo++;
       const tot = pcpTot[erp] || 0;
@@ -201,7 +210,7 @@ export function rebuildEngine(inputDerived, step2, datasets, period) {
     }
   }
   if (!rows.length) throw new Error('No ENGINE rows could be built.');
-  return { period, rows, nUse, nNo, rebuiltAt: nowISO() };
+  return { period, rows, nUse, nNo, basis, rebuiltAt: nowISO() };
 }
 
 /** Engine formula columns (A, B, F, G, H, Q:V, X:AB) from current INPUT and CONTROL. */
@@ -422,10 +431,10 @@ export function postedByLot(engDyn) {
 
 // ======================= build fingerprint (F-04) =======================
 /** Canonical fingerprint of what a BUILD (and the reviewer decisions on it) is based on: INPUT basis / option, ERP overrides, STEP 2/3 runs. */
-export function buildFingerprint(input, erpMap, step2, step3) {
+export function buildFingerprint(input, erpMap, step2, step3, basis = 'QTY') {
   const inp = (input || []).map((r) => [utxt(r.code), num(r.basisQty), num(r.basisAmt), utxt(r.option)].join('~')).sort().join('|');
   const map = ((erpMap && erpMap.rows) || []).filter((r) => ttxt(r.override)).map((r) => utxt(r.code) + '=' + utxt(r.override)).sort().join('|');
-  const str = [inp, map, step2 ? step2.runAt : '', step3 ? step3.runAt : ''].join('#');
+  const str = [inp, map, step2 ? step2.runAt : '', step3 ? step3.runAt : ''].join('#') + (basis === 'AMOUNT' ? '#AMT' : '');
   let h1 = 0x811c9dc5, h2 = 0x01000193;
   for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = Math.imul(h2 ^ c, 2246822519) >>> 0; }
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
@@ -437,13 +446,14 @@ export function runBuild(state, ctx) {
   if (!step3 || step3.period !== period) throw new Error(`03_WIP_ALLOCATION chưa chạy cho kỳ ${period}. Chạy STEP 3A trước.`);
   const mapRes = refreshErpMap(state.erpMap || { rows: [] }, step3, datasets, period);
   const inputD = deriveInput(state.input, mapRes.map, step3, period);
-  const engine = rebuildEngine(inputD, step2, datasets, period);
+  const basis = state.basis || 'AMOUNT';
+  const engine = rebuildEngine(inputD, step2, datasets, period, basis);
   // BUILD clears reviewer columns before the legacy builder runs, then restores the snapshot.
   const engDyn0 = engineDynamic(engine, inputD, null);
   const detail = buildDetail(engDyn0, inputD);
   const control = buildControl(detail, inputD, state.control);
   // 632 rows that were RECORDED but are no longer approved -> keep only RECORDED rows (B2_ClearUnrecorded632)
   const reg632 = (state.reg632 || []).filter((r) => r.record === 'RECORDED');
-  control.fp = buildFingerprint(state.input, mapRes.map, step2, step3);
+  control.fp = buildFingerprint(state.input, mapRes.map, step2, step3, basis); control.basis = basis;
   return { erpMap: mapRes.map, engine, detail, control, reg632, mapMsg: mapRes.msg, builtAt: control.builtAt };
 }

@@ -1,7 +1,7 @@
 // STEP 5 — FG inventory by production lot, FIFO COGS, FG Rework FIFO (5B), FG History and month close.
 // Port of modSTEP5_FIFO (STEP5_Run_FIFO_COGS …), modSTEP2B_5B_FGRework (RW_RunMonthlyReworkFIFO …),
 // modSTEP5_MonthClose (STEP5_Build_FG_History_B333 / STEP5_Close_Month_B333) and the 05_RECONCILIATION formulas.
-import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, isoToSerial } from './util.js';
+import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, isoToSerial, fp } from './util.js';
 
 export const TOLQ = 0.0001;          // S5_TOLQ
 const TOL_QTY = 0.000001;            // modSTEP5_MonthClose / RW
@@ -13,8 +13,8 @@ export const TPL_HEADERS = ['PC No.', 'Layer Date', 'MO No.', 'Product Code', 'P
 export const TPL_MARKER = 'SVL_FG_OPENING_TEMPLATE';
 export const LEDGER_FIELDS = ['seq', 'lid', 'source', 'srcPeriod', 'pc', 'date', 'mo', 'prod', 'name', 'unit', 'qtyIn', 'rm', 'a622', 'a627', 'tot', 'unitCost', 'qtyOut', 'rmOut', 'o622', 'o627', 'totOut', 'remQ', 'remTot', 'flag'];
 export const LEDGER_HEADERS = ['Seq', 'Layer ID', 'Source', 'Source Period', 'PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Unit', 'Qty In', 'RM', '622', '627', 'Total', 'Total / Unit', 'Qty Out', 'RM Out', '622 Out', '627 Out', 'Total Out', 'Qty Remaining', 'Total Remaining', 'Flag'];
-export const SALES_FIELDS = ['seq', 'date', 'inv', 'cust', 'prod', 'name', 'qty', 'usd', 'vnd', 'type', 'remark', 'def', 'ovr', 'fin', 'fq', 'rm', 'c622', 'c627', 'tot', 'unit', 'status', 'msg', 'key', 'dbRow'];
-export const SALES_HEADERS = ['Seq', 'Invoice Date', 'SI Invoice No.', 'Customer', 'Product Code', 'Product Name', 'Quantity', 'Amount (USD)', 'Amount (VND)', 'Transaction Type', 'Remark', 'Default Treatment', 'Override Treatment', 'Final Treatment', 'FIFO Qty', 'RM COGS', '622 COGS', '627 COGS', 'Total COGS', 'Unit COGS', 'Status', 'Message', 'Line Key', 'Sales DB Row'];
+export const SALES_FIELDS = ['seq', 'date', 'inv', 'cust', 'prod', 'name', 'qty', 'usd', 'vnd', 'type', 'remark', 'def', 'ovr', 'fin', 'fq', 'rm', 'c622', 'c627', 'tot', 'unit', 'status', 'msg', 'key', 'dbRow', 'origInv'];
+export const SALES_HEADERS = ['Seq', 'Invoice Date', 'SI Invoice No.', 'Customer', 'Product Code', 'Product Name', 'Quantity', 'Amount (USD)', 'Amount (VND)', 'Transaction Type', 'Remark', 'Default Treatment', 'Override Treatment', 'Final Treatment', 'FIFO Qty', 'RM COGS', '622 COGS', '627 COGS', 'Total COGS', 'Unit COGS', 'Status', 'Message', 'Line Key', 'Sales DB Row', 'Original Invoice (return)'];
 export const DETAIL_FIELDS = ['seq', 'prod', 'line', 'lid', 'source', 'pc', 'date', 'layerQty', 'qty', 'rm', 'a622', 'a627', 'tot', 'unit', 'take', 'left'];
 export const DETAIL_HEADERS = ['Seq', 'Product Code', 'Sales Line Seq', 'Layer ID', 'Source', 'PC No.', 'Layer Date', 'Layer Qty', 'Qty Taken', 'RM', '622', '627', 'Total', 'Unit Cost', 'Take Type', 'Qty Left In Layer'];
 export const SUM_FIELDS = ['prod', 'name', 'openQ', 'openA', 'prodQ', 'prodA', 'cogsQ', 'cogsRM', 'cogs622', 'cogs627', 'cogsA', 'closeQ', 'closeA', 'eligQ', 'layers', 'status', 'msg', 'rwQ', 'rwRM', 'rw622', 'rw627', 'rwTot', 'rollStatus'];
@@ -221,16 +221,19 @@ export function runFIFO(ctx) {
   const excluded = new Set(Object.entries(ctx.dupDecisions || {}).filter(([, v]) => v === 'EXCLUDE').map(([k]) => k.toUpperCase()));
   const S = []; const keyCount = new Map(); const need = new Map(); const lines = new Map();
   let overridesUsed = 0, reviewLines = 0, sumEligQ = 0, advisory = 0;
+  const returnsOn = ctx.returns !== 'LEGACY';
+  const sellRate = num(ctx.sellCostRate); // NRV: estimated selling cost as a share of the selling price
   const undated = []; // audit F-05: sales rows whose date cannot be read never silently drop out of COGS
   (ctx.salesRows || []).forEach((r, idx) => {
-    const d = dateVal(r.invDate);
+    const d = saleDate(r); // Bill (B/L) date when present, else invoice date (owner decision 02/10/2026)
     if (d === null) { if (utxt(r.product) || num(r.qty) !== 0) undated.push({ dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), qty: num(r.qty), vnd: num(r.amtVND), rawDate: r.invDate === null || r.invDate === undefined ? '' : String(r.invDate) }); return; }
     if (d < pStart || d > pEnd) return;
-    const s = { seq: S.length + 1, date: d, prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
+    const s = { seq: S.length + 1, date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
     s.key = lineKey(r, d, keyCount);
     if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
     else if (!s.prod && s.qty !== 0) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
     else if (!s.prod || s.qty === 0) s.def = 'NO COGS';
+    else if (s.qty < 0 && returnsOn) { s.def = 'RETURN'; } // sales return: restored to FG at the original sale's COGS
     else if (s.qty < 0 || s.type.includes('RETURN')) { s.def = 'REVIEW'; s.msg = 'Return / negative quantity - not processed by FIFO; '; }
     else if (!first.has(s.prod)) { s.def = 'REVIEW'; s.msg = 'No FG layer for this Product Code; '; }
     else s.def = 'FIFO COGS';
@@ -238,7 +241,7 @@ export function runFIFO(ctx) {
     const o = ovr.get(s.key.toUpperCase());
     if (o !== undefined) {
       s.ovr = o;
-      if (['FIFO COGS', 'NO COGS', 'REVIEW'].includes(o)) {
+      if (['FIFO COGS', 'NO COGS', 'REVIEW'].includes(o) || (o === 'RETURN' && returnsOn && s.qty < 0)) {
         s.fin = o; overridesUsed++;
         if (s.fin === 'FIFO COGS' && (s.qty <= 0 || !first.has(s.prod))) { s.fin = 'REVIEW'; s.msg += 'Override FIFO COGS rejected (qty <= 0 or no FG layer); '; }
       }
@@ -256,6 +259,12 @@ export function runFIFO(ctx) {
 
   // FIFO allocation
   const D = []; let shortProducts = 0; const undatedUsed = new Set();
+  const rwByProd = new Map(), rwPlan = [];
+  if (mode !== 'MONTHLY' && ctx.register) ctx.register.rows.forEach((r, i) => {
+    if (utxt(r.active) !== 'Y' || utxt(r.inputCheck).includes('BLOCK') || !(num(r.issueQty) > TOLQ)) return;
+    const p = utxt(r.fg); if (!rwByProd.has(p)) rwByProd.set(p, []);
+    rwByProd.get(p).push({ i, d: dateVal(r.issueDate) || 0, qty: num(r.issueQty) });
+  });
   for (const [prod, list] of lines) {
     if (mode === 'MONTHLY') {
       let nd = need.get(prod), tq = 0, trm = 0, t622 = 0, t627 = 0, ttot = 0;
@@ -279,28 +288,56 @@ export function runFIFO(ctx) {
         cq += s.fq; crm += s.rm; c622 += s.c622; c627 += s.c627; ct += s.tot;
         if (nd > TOLQ) { s.status = 'INSUFFICIENT FG'; s.msg += `Product short by ${vbFmt(nd, 4, true)} units for the period; `; } else s.status = 'OK';
       });
-    } else {
-      const ord = list.map((s) => ({ k: `${pad(s.date, 6)}\x01${pad(s.dbRow, 7)}`, s })).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0)).map((x) => x.s);
-      for (const s of ord) {
-        let nd = s.qty;
-        for (let pos = first.get(prod); pos <= last.get(prod); pos++) {
-          if (nd <= TOLQ) break;
-          const l = sorted[pos];
-          if (l.dt <= s.date || l.dt === 0) {
-            const avail = l.qty - l.oq;
-            if (avail > TOLQ) {
-              const take = avail <= nd + TOLQ ? avail : nd;
-              const d = takeLayer(l, take, D, prod, s.seq);
-              if (l.dt === 0 && l.src !== 'OPENING') { undatedUsed.add(l.lid || `${l.pc}|${prod}`); s.msg += `Used production layer ${l.pc || ''} without completion date; `; } // audit F-11
-              s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
-              nd -= take;
-            }
-          }
-        }
-        if (nd > TOLQ) { s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; } else s.status = 'OK';
+    } else strictProduct(prod, list);
+  }
+  // STRICT_DATE (owner decision 02/10/2026): sales and FG rework issues of a product run through FIFO in one date order;
+  // each event can only use layers dated on/before it. Rework takes are reserved here and booked by runReworkFIFO.
+  function strictProduct(prod, list) {
+    const ev = [...list.map((s) => ({ k: 'S', d: s.date, o: s.dbRow, s })), ...(rwByProd.get(prod) || []).map((e) => ({ k: 'R', d: e.d, o: e.i, e }))]
+      .sort((a, b) => a.d - b.d || (a.k === b.k ? a.o - b.o : a.k === 'R' ? -1 : 1));
+    let short = false;
+    for (const x of ev) {
+      let nd = x.k === 'S' ? x.s.qty : x.e.qty; const takes = [];
+      for (let pos = first.get(prod); pos <= last.get(prod); pos++) {
+        if (nd <= TOLQ) break;
+        const l = sorted[pos];
+        if (!(l.dt <= x.d || l.dt === 0)) continue;
+        const avail = l.qty - l.oq - (l.rq || 0);
+        if (avail <= TOLQ) continue;
+        const take = avail <= nd + TOLQ ? avail : nd;
+        if (l.dt === 0 && l.src !== 'OPENING') undatedUsed.add(l.lid || `${l.pc}|${prod}`); // audit F-11
+        if (x.k === 'S') {
+          const s = x.s; const d = takeLayer(l, take, D, prod, s.seq);
+          if (l.dt === 0 && l.src !== 'OPENING') s.msg += `Used production layer ${l.pc || ''} without completion date; `;
+          s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
+        } else { l.rq = (l.rq || 0) + take; takes.push({ lid: l.lid, qty: take }); }
+        nd -= take;
       }
-      if (ord.some((s) => s.status === 'INSUFFICIENT FG')) shortProducts++;
+      if (x.k === 'S') { const s = x.s; if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; } else s.status = 'OK'; }
+      else rwPlan[x.e.i] = { takes, short: nd > TOLQ ? nd : 0 };
     }
+    if (short) shortProducts++;
+  }
+  if (mode !== 'MONTHLY') for (const prod of rwByProd.keys()) if (!lines.has(prod)) strictProduct(prod, []);
+
+  // sales returns → RETURN layers at the original sale's unit cost
+  let retQ = 0, retA = 0, retN = 0;
+  for (const s of S) {
+    if (s.fin !== 'RETURN') continue;
+    const q = -s.qty;
+    const cand = [...S.filter((x) => x.fin === 'FIFO COGS' && x.prod === s.prod && x.fq > TOLQ).map((x) => ({ inv: x.inv, cust: x.cust, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period })),
+      ...(ctx.priorSales || []).filter((x) => utxt(x.prod) === s.prod && num(x.fq) > TOLQ)];
+    let o = null;
+    if (s.origInv) o = cand.filter((x) => utxt(x.inv) === utxt(s.origInv)).sort((a, b) => b.date - a.date)[0] || null;
+    if (!o) o = cand.filter((x) => utxt(x.cust) === utxt(s.cust) && x.date <= s.date).sort((a, b) => b.date - a.date)[0] || null;
+    if (!o) { s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++; s.msg += `Return: original sale not found${s.origInv ? ' (' + s.origInv + ')' : ''} – set Original Invoice No. or treat manually; `; continue; }
+    const f = q / num(o.fq);
+    s.fq = -q; s.rm = -num(o.rm) * f; s.c622 = -num(o.c622) * f; s.c627 = -num(o.c627) * f; s.tot = -num(o.tot) * f;
+    s.status = 'RETURNED'; s.msg += `Return at original COGS of ${o.inv} (${o.period || period}); `;
+    retN++;
+    const lid = `RT-${period.replace('-', '')}-${s.inv || 'NOINV'}-${pad(retN, 3)}`;
+    sorted.push({ lid, src: 'RETURN', sp: period, pc: o.inv || '', dt: s.date, mo: '', prod: s.prod, name: s.name, loc: '', unit: '', qty: q, rm: -s.rm, a622: -s.c622, a627: -s.c627, tot: -s.tot, price: 0, prov: 0, cons: '', flag: `Sales return ${s.inv}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + retN });
+    retQ += q; retA += -s.tot;
   }
 
   // outputs
@@ -322,6 +359,10 @@ export function runFIFO(ctx) {
     if (l.src === 'OPENING') {
       k.openQ = num(k.openQ) + l.qty; k.openA = num(k.openA) + l.tot; T.openQ += l.qty; T.openA += l.tot;
       cOpen[0] += l.rm; cOpen[1] += l.a622; cOpen[2] += l.a627; cOpen[3] += l.tot;
+    } else if (l.src === 'RETURN') { // a return reduces COGS (net 632) and comes back as a layer
+      k.cogsQ -= l.qty; k.cogsRM -= l.rm; k.cogs622 -= l.a622; k.cogs627 -= l.a627; k.cogsA -= l.tot; k.retQ = num(k.retQ) + l.qty; k.retA = num(k.retA) + l.tot;
+      T.cogsQ -= l.qty; T.cogsA -= l.tot;
+      cCogs[0] -= l.rm; cCogs[1] -= l.a622; cCogs[2] -= l.a627; cCogs[3] -= l.tot;
     } else {
       k.prodQ = num(k.prodQ) + l.qty; k.prodA = num(k.prodA) + l.tot; T.prodQ += l.qty; T.prodA += l.tot;
       cProd[0] += l.rm; cProd[1] += l.a622; cProd[2] += l.a627; cProd[3] += l.tot;
@@ -336,7 +377,9 @@ export function runFIFO(ctx) {
       let provShare = 0;
       if (l.prov !== 0) { provShare = l.prov * remQ / l.qty; c.prov = provShare; }
       const netUnit = (remTot + provShare) / remQ;
-      if (px > 0 && fx > 0 && netUnit > px * fx + 1) { c.status = 'REVIEW - COST > PRICE'; c.msg = `Unit cost after provision ${vbFmt(netUnit, 0, true)} > price ${vbFmt(px * fx, 0, true)} VND (NRV review)`; nrv++; }
+      const nrvUnit = px > 0 && fx > 0 ? px * fx * (1 - sellRate) : 0; // NRV = selling price − estimated selling cost
+      if (nrvUnit > 0) { c.nrvUnit = nrvUnit; c.provNeed = Math.max(0, netUnit - nrvUnit) * remQ; }
+      if (px > 0 && fx > 0 && netUnit > nrvUnit + 1) { c.status = 'REVIEW - COST > PRICE'; c.msg = sellRate ? `Unit cost after provision ${vbFmt(netUnit, 0, true)} > NRV ${vbFmt(nrvUnit, 0, true)} VND (price ${vbFmt(px * fx, 0, true)} − ${(sellRate * 100).toFixed(1)}% selling cost); provision needed ${vbFmt(c.provNeed, 0, true)}` : `Unit cost after provision ${vbFmt(netUnit, 0, true)} > price ${vbFmt(px * fx, 0, true)} VND (NRV review)`; nrv++; }
       else c.status = 'OK';
       if (l.flag) c.msg = `${c.msg} ${l.flag}`.trim();
       closing.push(c);
@@ -359,6 +402,7 @@ export function runFIFO(ctx) {
   const sales = S.map((s) => {
     const o = { seq: s.seq, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
+    else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv });
     return o;
   });
   let sumDetA = 0;
@@ -366,7 +410,7 @@ export function runFIFO(ctx) {
     sumDetA += d.tot;
     return { seq: k + 1, prod: d.prod, line: d.line > 0 ? d.line : null, lid: d.L.lid, source: d.L.src, pc: d.L.pc, date: d.L.dt > 0 ? d.L.dt : null, layerQty: d.L.qty, qty: d.qty, rm: d.rm, a622: d.a622, a627: d.a627, tot: d.tot, unit: d.qty !== 0 ? d.tot / d.qty : null, take: Math.abs(d.qty - d.L.qty) <= TOLQ ? 'FULL' : 'PARTIAL', left: d.L.qty - d.L.oq };
   });
-  const totals = { ...T, cogsRM: cCogs[0], cogs622: cCogs[1], cogs627: cCogs[2], eligQ: sumEligQ, layers: closing.length };
+  const totals = { ...T, cogsRM: cCogs[0], cogs622: cCogs[1], cogs627: cCogs[2], eligQ: sumEligQ, layers: closing.length, retQ, retA, nrvProv: closing.reduce((a, c) => a + num(c.provNeed), 0) };
 
   // reconciliation rows 4..16
   let compDiff = 0;
@@ -382,7 +426,7 @@ export function runFIFO(ctx) {
   putN(8, 0, T.openQ + T.prodQ - T.cogsQ - T.closeQ, TOLQ, '');
   putN(9, 0, T.openA + T.prodA - T.cogsA - T.closeA, tol, '');
   putN(10, 0, compDiff, tol, '');
-  putN(11, sumEligQ, T.cogsQ, TOLQ, `Mode: ${mode}`);
+  putN(11, sumEligQ - retQ, T.cogsQ, TOLQ, `Mode: ${mode}${retQ ? ` · net of returns ${vbFmt(retQ, 4, true)}` : ''}`);
   putN(12, sumDetA, sumLineA, tol, `FIFO detail rows: ${D.length}`);
   putC(13, shortProducts, 'BLOCK', 'See 05_COGS_SUMMARY status INSUFFICIENT FG');
   putC(14, negLayers, 'BLOCK', '');
@@ -392,10 +436,10 @@ export function runFIFO(ctx) {
   return {
     period, runAt: nowISO(), mode, tol, runSeconds: Math.round((Date.now() - t0) / 100) / 10, overridesUsed, openLayers: nO, runResult,
     ledger, sales, detail, closing, summary: sum, totals, rec, sumDetA, sumLineA, step4Qty, step4Cost,
-    stats: { lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size },
+    stats: { lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size, returns: retN, sellRate },
     undated,
     // internal (dropped before saving): layers for the rework pass
-    _sorted: sorted,
+    _sorted: sorted, _rwPlan: mode !== 'MONTHLY' ? rwPlan : null,
   };
 }
 /** 05_SALES_COGS Line Key: Transaction Key (or fallback) + '#' + occurrence within the period. */
@@ -413,7 +457,7 @@ export function duplicateGroups(salesRows, period) {
   const { start, end } = periodBounds(period);
   const keyCount = new Map(); const groups = new Map();
   (salesRows || []).forEach((r, idx) => {
-    const d = dateVal(r.invDate); if (d === null || d < start || d > end) return;
+    const d = saleDate(r); if (d === null || d < start || d > end) return;
     const key = lineKey(r, d, keyCount); const base = key.slice(0, key.lastIndexOf('#')).toUpperCase();
     if (!groups.has(base)) groups.set(base, []);
     groups.get(base).push({ key, occ: +key.slice(key.lastIndexOf('#') + 1), dbRow: idx + 6, date: d, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), name: s5t(r.prodName), qty: num(r.qty), usd: num(r.amtUSD), vnd: num(r.amtVND) });
@@ -430,7 +474,7 @@ export const activeReworkCount = (register) => (register ? register.rows.filter(
 export function chronologyConflicts(register, salesRows, period) {
   if (!register) return 0;
   const pYM = period.replace('-', ''); let n = 0;
-  const S = (salesRows || []).map((r) => ({ prod: ttxt(r.product), qty: num(r.qty), d: num(r.invDate) }));
+  const S = (salesRows || []).map((r) => ({ prod: ttxt(r.product), qty: num(r.qty), d: saleDate(r) || 0 }));
   for (const r of register.rows) {
     if (utxt(r.active) !== 'Y') continue;
     const prod = ttxt(r.fg), iss = num(r.issueDate);
@@ -446,8 +490,7 @@ export function reworkGate(register, salesRows, period, mode) {
   let m = utxt(mode) || 'MONTHLY'; let conflicts = chronologyConflicts(register, salesRows, period);
   if (!activeReworkCount(register)) { m = 'MONTHLY'; conflicts = 0; }
   if (m === 'MONTHLY' && conflicts > 0) return `BLOCK - STRICT DATE REQUIRED: ${conflicts} sự kiện rework có bán hàng cùng sản phẩm từ ngày xuất rework trở đi. Phân bổ MONTHLY sau bán hàng sẽ sai thứ tự FIFO – chuyển sang STRICT_DATE.`;
-  if (m !== 'MONTHLY') return 'BLOCK - STRICT ENGINE REQUIRED: engine rework chỉ hỗ trợ MONTHLY khi kiểm tra thứ tự thời gian PASS.';
-  return '';
+  return ''; // STRICT_DATE runs sales and rework in one date order (owner decision 02/10/2026)
 }
 
 /**
@@ -459,28 +502,38 @@ export function runReworkFIFO(res, register, ctx) {
   const now = nowISO();
   const ledger = res.ledger;
   // events: active Y, input check not BLOCK, qty > tol, stable by issue date
-  const ev = register.rows.filter((r) => utxt(r.active) === 'Y' && !utxt(r.inputCheck).includes('BLOCK') && num(r.issueQty) > TOL_QTY);
-  const evs = ev.map((r, i) => ({ r, d: num(r.issueDate), i })).sort((a, b) => a.d - b.d || a.i - b.i).map((x) => x.r);
-  const rwf = [];
-  for (const r of evs) {
-    const prod = txt(r.fg); let nd = num(r.issueQty);
+  const ev = register.rows.map((r, i) => ({ r, i })).filter(({ r }) => utxt(r.active) === 'Y' && !utxt(r.inputCheck).includes('BLOCK') && num(r.issueQty) > TOL_QTY);
+  const evs = ev.map((x) => ({ ...x, d: num(x.r.issueDate) })).sort((a, b) => a.d - b.d || a.i - b.i);
+  const plan = res._rwPlan || null; // STRICT_DATE: layer takes reserved in date order by runFIFO
+  const ledgerByLid = new Map(ledger.map((l) => [ttxt(l.lid).toUpperCase(), l]));
+  const rwf = []; let lateLayers = 0;
+  for (const { r, i } of evs) {
+    const prod = plan ? utxt(r.fg) : txt(r.fg); let nd = num(r.issueQty);
     let tq = 0, trm = 0, t622 = 0, t627 = 0, tt = 0;
-    for (const l of ledger) {
-      if (nd <= TOL_QTY) break;
-      if (l.prod !== prod) continue;
-      const remQty = num(l.remQ);
-      if (!(remQty > TOL_QTY)) continue;
-      const qIn = num(l.qtyIn);
+    const book = (l, take) => {
+      const remQty = num(l.remQ); const qIn = num(l.qtyIn);
       if (qIn <= TOL_QTY) throw new Error('Invalid FG layer quantity: ' + l.lid);
-      const take = Math.min(nd, remQty);
       const uRM = num(l.rm) / qIn, u622 = num(l.a622) / qIn, u627 = num(l.a627) / qIn, uT = num(l.tot) / qIn;
       l.qtyOut = num(l.qtyOut) + take; l.rmOut = num(l.rmOut) + take * uRM; l.o622 = num(l.o622) + take * u622; l.o627 = num(l.o627) + take * u627; l.totOut = num(l.totOut) + take * uT;
       l.remQ = remQty - take; l.remTot = num(l.tot) - num(l.totOut);
-      rwf.push({ seq: rwf.length + 1, period: r.period, rid: r.rid, issueDate: r.issueDate, fg: prod, pcNo: r.pcNo, outFG: r.outFG, lid: l.lid, layerSrc: l.source, layerDate: l.date, layerQty: qIn, qty: take, rm: take * uRM, a622: take * u622, a627: take * u627, tot: take * uT, unit: uT, rwStatus: r.rwStatus, fifoStatus: 'FIFO OK', mode: 'MONTHLY / POST-SALES SAFE' });
+      const late = !plan && l.source === 'PRODUCTION' && num(l.date) > 0 && num(r.issueDate) > 0 && num(l.date) > num(r.issueDate);
+      if (late) lateLayers++;
+      rwf.push({ seq: rwf.length + 1, period: r.period, rid: r.rid, issueDate: r.issueDate, fg: prod, pcNo: r.pcNo, outFG: r.outFG, lid: l.lid, layerSrc: l.source, layerDate: l.date, layerQty: qIn, qty: take, rm: take * uRM, a622: take * u622, a627: take * u627, tot: take * uT, unit: uT, rwStatus: r.rwStatus, fifoStatus: late ? 'REVIEW - LAYER AFTER ISSUE DATE' : 'FIFO OK', mode: plan ? 'STRICT_DATE / CHRONOLOGICAL' : 'MONTHLY / POST-SALES SAFE' });
       tq += take; trm += take * uRM; t622 += take * u622; t627 += take * u627; tt += take * uT;
       nd -= take;
+    };
+    if (plan) {
+      for (const t of (plan[i] && plan[i].takes) || []) { const l = ledgerByLid.get(ttxt(t.lid).toUpperCase()); if (l) book(l, t.qty); }
+    } else {
+      for (const l of ledger) {
+        if (nd <= TOL_QTY) break;
+        if (l.prod !== prod) continue;
+        const remQty = num(l.remQ);
+        if (!(remQty > TOL_QTY)) continue;
+        book(l, Math.min(nd, remQty));
+      }
     }
-    const fs = nd > TOL_QTY ? 'BLOCK - INSUFFICIENT FG' : 'PASS';
+    const fs = nd > TOL_QTY ? (plan ? 'BLOCK - INSUFFICIENT FG AT ISSUE DATE' : 'BLOCK - INSUFFICIENT FG') : 'PASS';
     r.fifoStatus = fs; r.fifoQty = tq; r.fifoCost = tt;
     if (utxt(r.rwStatus) === 'COMPLETED' && utxt(r.rwType) === 'NORMAL' && fs === 'PASS') { r.closingWIP = 0; r.carryIn = tt; } else { r.closingWIP = tt; r.carryIn = 0; }
     r.lastFifoRun = now;
@@ -561,7 +614,8 @@ export function runReworkFIFO(res, register, ctx) {
     { label: 'Completed Rework carry-in', expected: completed, result: num(step4Carry), diff: num(step4Carry) - completed, status: st(num(step4Carry) - completed, TOL_AMT), note: 'Completed NORMAL Rework FIFO cost posted to target Rework PC' },
     { label: 'Closing Rework WIP', expected: bfCost + RT.tot - completed, result: openWIP, diff: openWIP - (bfCost + RT.tot - completed), status: st(openWIP - (bfCost + RT.tot - completed), TOL_AMT), note: 'B/F Rework WIP + FIFO transfer - Completed carry-in = Closing Rework WIP (outside FG Closing)' },
     { label: 'ERP Stock Out reference amount', expected: erpRef, result: RT.tot, diff: RT.tot - erpRef, status: 'INFO', note: 'Informational difference only. FIFO cost is used for inventory valuation.' },
-    { label: 'Chronology safety', expected: 0, result: conflicts, diff: conflicts, status: conflicts === 0 ? 'PASS' : 'BLOCK' },
+    { label: 'Chronology safety', expected: 0, result: plan ? 0 : conflicts, diff: plan ? 0 : conflicts, status: plan || conflicts === 0 ? 'PASS' : 'BLOCK', note: plan ? `STRICT_DATE: ${conflicts} same-product sales on/after an issue date handled in date order` : '' },
+    ...(plan ? [] : [{ label: 'Rework layers dated after issue date', expected: 0, result: lateLayers, diff: lateLayers, status: lateLayers ? 'REVIEW' : 'PASS', note: 'MONTHLY takes the oldest layer left after sales; use STRICT_DATE for issue-date FIFO' }]),
   ];
   const gate8 = b8.some((r) => r.status === 'CHECK' || r.status === 'BLOCK') ? 'CHECK' : 'PASS';
   const fifoQty = sumOf(rwf, 'qty'), fifoCost = sumOf(rwf, 'tot');
@@ -575,11 +629,11 @@ export function runReworkFIFO(res, register, ctx) {
     { label: 'FIFO Transfer Cost', value: fifoCost, note: 'Authoritative FG carrying cost', status: fifoCost > 0 || srcQty === 0 ? 'PASS' : 'CHECK' },
     { label: 'Closing Rework WIP', value: openWIP, note: 'Remains outside FG Closing', status: 'INFO' },
     { label: 'Completed Carry-In', value: completed, note: 'Mapped to completed NORMAL Rework PC', status: 'INFO' },
-    { label: 'Chronology Conflicts', value: conflicts, note: 'Must be zero in MONTHLY mode', status: conflicts === 0 ? 'PASS' : 'BLOCK' },
+    { label: 'Chronology Conflicts', value: conflicts, note: plan ? 'STRICT_DATE – handled in date order' : 'Must be zero in MONTHLY mode', status: plan || conflicts === 0 ? 'PASS' : 'BLOCK' },
     { label: 'Opening Rework WIP (B/F)', value: bfCost, note: 'From the previous closed period', status: 'INFO' },
     { label: 'Rework WIP Roll-forward Diff', value: rollDiff, note: 'B/F + FIFO Transfer - Completed - Closing = 0', status: Math.abs(rollDiff) <= TOL_AMT ? 'PASS' : 'CHECK' },
   ];
-  res.rework = { rows: rwf, batch8: b8, gate8, control, runAt: now, srcQty, fifoQty, fifoCost, completed, openWIP, bfCost, erpRef, conflicts };
+  res.rework = { rows: rwf, batch8: b8, gate8, control, runAt: now, srcQty, fifoQty, fifoCost, completed, openWIP, bfCost, erpRef, conflicts: plan ? 0 : conflicts, rawConflicts: conflicts, lateLayers, mode: plan ? 'STRICT_DATE' : 'MONTHLY' };
   return res;
 }
 
@@ -596,7 +650,7 @@ export function carryTotal(register) {
 }
 
 /** Strip internals before persisting. */
-export function finalizeRun(res) { delete res._sorted; return res; }
+export function finalizeRun(res) { delete res._sorted; delete res._rwPlan; return res; }
 
 // ---------------------------------------------------------------- 05_FG_ROLLFORWARD
 export function buildRollforward(res, opening, prevItems) {
@@ -613,7 +667,7 @@ export function buildRollforward(res, opening, prevItems) {
   const S = (rows, f, pred) => { const m = new Map(); for (const r of rows) if (pred(r)) { const k = ttxt(r.prod).toUpperCase(); m.set(k, (m.get(k) || 0) + num(r[f])); } return m; };
   const oq = S(res.ledger, 'qtyIn', (l) => l.source === 'OPENING'), oa = S(res.ledger, 'tot', (l) => l.source === 'OPENING');
   const iq = S(res.ledger, 'qtyIn', (l) => l.source === 'PRODUCTION'), ia = S(res.ledger, 'tot', (l) => l.source === 'PRODUCTION');
-  const sq = S(res.sales, 'fq', (s) => s.fin === 'FIFO COGS'), sa = S(res.sales, 'tot', (s) => s.fin === 'FIFO COGS');
+  const sq = S(res.sales, 'fq', (s) => s.fin === 'FIFO COGS' || s.fin === 'RETURN'), sa = S(res.sales, 'tot', (s) => s.fin === 'FIFO COGS' || s.fin === 'RETURN');
   const rq = S(res.ledger, 'remQ', () => true), ra = S(res.ledger, 'remTot', () => true);
   const g = (m, k) => m.get(k) || 0;
   const rows = items.map((it) => {
@@ -792,4 +846,37 @@ export function archiveReworkWIP(register, period) {
     if ((tag === 'Y' || tag === 'B/F') && cost > TOL_AMT) out.push({ archive: period, originPeriod: tag === 'B/F' ? r.originPeriod : period, rid: r.rid, erp: r.erp, doc: r.doc, srcRow: r.srcRow, issueDate: r.issueDate, fg: r.fg, fgName: r.fgName, itemType: r.itemType, loc: r.loc, uom: r.uom, bfQty: tag === 'B/F' ? num(r.bfQty) : num(r.fifoQty), carryCost: cost, reason: r.reason, jobKey: r.jobKey, rwType: r.rwType, rwStatus: r.rwStatus, pcNo: r.pcNo, outFG: r.outFG, compDate: r.compDate, compQty: r.compQty, scrapQty: r.scrapQty, note: r.note });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- FAST general-ledger tie (owner decision 02/10/2026)
+/** Recognition date of a sales row: Bill (B/L) date when present, else invoice date. */
+export const saleDate = (r) => { const b = dateVal(r.billDate); return b !== null ? b : dateVal(r.invDate); };
+export const FAST_ACCOUNTS = [
+  ['a154', '154', 'WIP cuối kỳ (vật tư sau 3B + rework WIP)'],
+  ['a155', '155', 'Thành phẩm cuối kỳ'],
+  ['a632', '632', 'Giá vốn trong kỳ (FIFO + 3B DIRECT_632)'],
+  ['a511', '511', 'Doanh thu trong kỳ (Sales Database)'],
+];
+/** Revenue VND of the period by recognition date (all transaction types, returns negative). */
+export function periodRevenue(salesRows, period) {
+  const { start, end } = periodBounds(period); let s = 0;
+  for (const r of salesRows || []) { const d = saleDate(r); if (d !== null && d >= start && d <= end) s += num(r.amtVND); }
+  return s;
+}
+/**
+ * Engine balances vs FAST balances. A difference (> 1 VND) needs an approval with a note; the approval is bound to the
+ * exact engine + FAST figures (key), so it lapses as soon as either side changes.
+ */
+export function fastTie(engine, tie) {
+  const rows = FAST_ACCOUNTS.map(([k, acc, label]) => {
+    const e = num(engine[k]); const f = tie && tie.fast && tie.fast[k] !== undefined && tie.fast[k] !== null && tie.fast[k] !== '' ? num(tie.fast[k]) : null;
+    const diff = f === null ? null : e - f;
+    return { k, acc, label, engine: e, fast: f, diff, status: f === null ? 'NOT ENTERED' : Math.abs(diff) <= 1 ? 'PASS' : 'DIFF' };
+  });
+  const key = fp(rows.map((r) => `${r.k}|${Math.round(r.engine)}|${r.fast === null ? '' : Math.round(r.fast)}`).join(';'));
+  const entered = rows.every((r) => r.fast !== null);
+  const diffs = rows.filter((r) => r.status === 'DIFF').length;
+  const approved = !!(tie && tie.approval && tie.approval.key === key);
+  const status = !entered ? 'NOT ENTERED' : !diffs ? 'PASS' : approved ? 'APPROVED' : 'REVIEW';
+  return { rows, key, entered, diffs, approved, status, approval: tie && tie.approval ? tie.approval : null };
 }

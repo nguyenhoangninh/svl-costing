@@ -2,6 +2,12 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -11,6 +17,33 @@ jobs:
         with:
           node-version: 20
       - name: Syntax check (all modules)
-        run: for f in $(find src -name '*.js') test/*.mjs; do node --check "$f" || exit 1; done
+        run: for f in $(find src -name '*.js') test/*.mjs sw.js; do node --check "$f" || exit 1; done
       - name: Synthetic control tests
         run: node test/unit.mjs
+      - name: Synthetic end-to-end costing regression (STEP 2 → 5, no company data)
+        run: node test/synth.mjs
+
+  # Publishes the site only after every check passed. Active once
+  # Settings → Pages → Source = "GitHub Actions" and the repository variable PAGES_FROM_ACTIONS = true.
+  deploy:
+    needs: checks
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_FROM_ACTIONS == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Assemble the site (only what the app serves)
+        run: |
+          mkdir _site
+          cp -r index.html manifest.webmanifest sw.js icon.svg .nojekyll src lib icons _site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

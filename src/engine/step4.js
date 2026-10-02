@@ -29,7 +29,7 @@ const fmt4 = (x) => x.toFixed(4);
 export const SALES_FIELDS = ['invDate', 'month', 'customer', 'product', 'prodName', 'fx', 'qty', 'unitPrice', 'amtUSD', 'amtVND', 'remark', 'invNo', 'lineNo', 'tranType'];
 export const SALES_HEADERS = ['Invoice Date', 'Month', 'Customer', 'Product Number', 'Product Name', 'Exchange Rate', 'Quantity', 'Unit Price (USD)', 'Amount (USD)', 'Amount (VND)', 'Remark', 'SI Invoice No.', 'Invoice Line No.', 'Transaction Type'];
 const normH = (s) => txt(s).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-const ALIAS = { PRODUCTNUMBER: ['PRODUCTCODE', 'ITEMCODE'], PRODUCTNAME: ['ITEMNAME', 'DESCRIPTION'], EXCHANGERATE: ['FXRATE', 'RATE'], QUANTITY: ['QTY', 'SALESQTY'], UNITPRICEUSD: ['UNITPRICE', 'SELLINGPRICEUSD'], AMOUNTUSD: ['USDAMOUNT', 'REVENUEUSD'], AMOUNTVND: ['VNDAMOUNT', 'REVENUEVND'], SIINVOICENO: ['INVOICENO', 'SALESINVOICENO', 'SIINVOICE'], INVOICELINENO: ['LINENO', 'INVOICELINE'], TRANSACTIONTYPE: ['TRANTYPE', 'TYPE'] };
+const ALIAS = { PRODUCTNUMBER: ['PRODUCTCODE', 'ITEMCODE'], PRODUCTNAME: ['ITEMNAME', 'DESCRIPTION'], EXCHANGERATE: ['FXRATE', 'RATE'], QUANTITY: ['QTY', 'SALESQTY'], UNITPRICEUSD: ['UNITPRICE', 'SELLINGPRICEUSD'], AMOUNTUSD: ['USDAMOUNT', 'REVENUEUSD'], AMOUNTVND: ['VNDAMOUNT', 'REVENUEVND'], SIINVOICENO: ['INVOICENO', 'SALESINVOICENO', 'SIINVOICE'], INVOICELINENO: ['LINENO', 'INVOICELINE'], TRANSACTIONTYPE: ['TRANTYPE', 'TYPE'] , BILLDATE: ['BLDATE', 'BOLDATE', 'BILLOFLADINGDATE', 'NGYBILL', 'SHIPDATE', 'SHIPMENTDATE', 'ONBOARDDATE', 'FOBDATE'], ORIGINALINVOICENO: ['ORIGINALINVOICE', 'ORIGINVOICE', 'REFINVOICE', 'REFINVOICENO', 'ORIGINALSIINVOICENO', 'HOADONGOC']};
 function salesCol(header, canonical) {
   const c = normH(canonical);
   for (let i = 0; i < header.length; i++) { const n = normH(header[i]); if (n === c || (ALIAS[c] && ALIAS[c].includes(n))) return i; }
@@ -50,6 +50,7 @@ export function importSales(sheets, fileName, mode, period) {
   if (!ws) throw new Error('Không tìm thấy sheet doanh thu có Invoice Date, Product Number, Quantity và Amount (USD).');
   const h = ws[hdr];
   const col = Object.fromEntries([['invDate', 'Invoice Date'], ['month', 'Month'], ['customer', 'Customer'], ['product', 'Product Number'], ['prodName', 'Product Name'], ['fx', 'Exchange Rate'], ['qty', 'Quantity'], ['unitPrice', 'Unit Price USD'], ['amtUSD', 'Amount USD'], ['amtVND', 'Amount VND'], ['remark', 'Remark'], ['invNo', 'SI Invoice No'], ['lineNo', 'Invoice Line No'], ['tranType', 'Transaction Type']].map(([f, n]) => [f, salesCol(h, n)]));
+  const cBill = salesCol(h, 'Bill Date'), cOrig = salesCol(h, 'Original Invoice No');
   const batchID = 'SAL-' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14).replace(/^(\d{8})/, '$1-');
   const importedAt = nowISO();
   const rows = [];
@@ -61,6 +62,8 @@ export function importSales(sheets, fileName, mode, period) {
     const d = toSerial(o.invDate);
     if (d !== null && !ttxt(o.month)) o.month = serialToYMD(d).m;
     o.tranType = col.tranType >= 0 ? utxt(r[col.tranType]) : '';
+    o.billDate = cBill >= 0 ? (r[cBill] ?? null) : null; // Bill (B/L) date – recognition date for COGS (owner decision 02/10/2026)
+    o.origInv = cOrig >= 0 ? (r[cOrig] ?? null) : null; // original invoice of a sales return
     Object.assign(o, { txnKey: '', validStat: '', validMsg: '', saveStat: '', savedAt: '', batchID, sourceFile: fileName, importedAt, sourceRow: i + 1 });
     rows.push(o);
   }
@@ -101,6 +104,14 @@ export function validateSaveSales(staging, salesDB, period) {
       if (d > latest) latest = d;
       if (d > periodEnd) msg += 'Invoice Date after costing period; ';
     } else msg += 'Invalid/blank Invoice Date; ';
+    if (r.billDate !== null && r.billDate !== undefined && r.billDate !== '') {
+      const b = toSerial(r.billDate);
+      if (b === null) msg += 'Invalid Bill Date; ';
+      else {
+        if (d !== null && yyyymm(b) !== yyyymm(d)) msg += `Bill Date in another month than Invoice Date – COGS follows Bill Date (${serialToYMD(b).y}-${String(serialToYMD(b).m).padStart(2, '0')}); `;
+        if (b > periodEnd) msg += 'Bill Date after costing period – COGS in the period of the Bill Date; ';
+      }
+    }
     const cust = ttxt(r.customer), prod = utxt(r.product), pname = ttxt(r.prodName), inv = ttxt(r.invNo), ln = ttxt(r.lineNo);
     let tt = utxt(r.tranType);
     if (!tt) { tt = num(r.qty) < 0 || num(r.amtUSD) < 0 ? 'SALES RETURN' : 'NORMAL SALE'; r.tranType = tt; }
@@ -129,7 +140,7 @@ export function validateSaveSales(staging, salesDB, period) {
     const prod = utxt(r.product);
     const inc = !prod || toSerial(r.invDate) === null ? 'N' : includeInPrice(r.tranType, num(r.qty), num(r.amtUSD));
     r.saveStat = 'SAVED'; r.savedAt = saveAt;
-    return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, validMsg: r.validMsg, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
+    return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, validMsg: r.validMsg, billDate: r.billDate ?? null, origInv: r.origInv ?? null, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
   });
   const cov = salesCoverage(mode, minInv, maxInv, period);
   const old = (salesDB && salesDB.rows) || [];

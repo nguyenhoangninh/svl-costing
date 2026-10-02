@@ -96,11 +96,11 @@ function viewProduct(box, b, prod) {
   const c = b.res ? TR.cogsTrace({ prod, res: b.res, periodEnd: periodEnd(S.period) }) : null;
   const name = (t && t.overview.name) || (c && c.overview.name) || '';
   box.innerHTML = `<div class="tr-head"><div><span class="tr-code">${esc(prod)}</span><span class="tr-name">${esc(name)}</span></div><button class="btn ghost" type="button" id="tr-export">Xuất Excel hồ sơ sản phẩm</button></div>
-    ${tabsHTML(tab, [['cost', `Giá thành sản xuất${t ? ` (${t.lots.length} lô)` : ''}`], ['cogs', 'Giá vốn hàng bán']], 'data-trtab')}<div id="tr-tab"></div>`;
+    ${tabsHTML(tab, [['cost', `Giá thành sản xuất${t ? ` (${t.lots.length} lô)` : ''}`], ['cogs', 'Giá vốn hàng bán'], ['trend', 'Qua các kỳ']], 'data-trtab')}<div id="tr-tab"></div>`;
   box.querySelectorAll('[data-trtab]').forEach((x) => x.addEventListener('click', () => { S.trTab = x.dataset.trtab; A.render(); }));
   box.querySelector('#tr-export').addEventListener('click', () => exportProduct(prod, t, c));
   const tb = box.querySelector('#tr-tab');
-  if (tab === 'cost') costTab(tb, t, prod); else cogsTab(tb, c);
+  if (tab === 'cost') costTab(tb, t, prod); else if (tab === 'cogs') cogsTab(tb, c); else trendTab(tb, prod, t, c);
   box.querySelectorAll('[data-tr-more]').forEach((x) => x.addEventListener('click', () => { S['trOpen' + x.dataset.trMore] = !S['trOpen' + x.dataset.trMore]; A.render(); }));
   curTrace = { t, c, prod };
   box.querySelectorAll('[data-an]').forEach((x) => x.addEventListener('click', () => { const [k, i] = x.dataset.an.split(':'); openDetail(anomStore[k][+i]); }));
@@ -185,6 +185,62 @@ function cogsTab(el, c) {
     const cols = mk([['pc', 'Lô PC', 120], ['srcPeriod', 'Kỳ gốc', 80], ['date', 'Ngày lô', 95, 'date'], ['qty', 'SL', 80, 'qty'], ['tot', 'Giá trị', 130, 'num'], ['unitCost', 'Đơn giá', 110, 'num'], ['price', 'Giá bán USD', 90, 'qty'], ['status', 'Trạng thái', 160, 'status'], ['msg', 'Ghi chú', 300]]);
     A.mountTable(box, { columns: cols, rows: c.closing, height: 380, totals: ['qty', 'tot'] });
   }
+}
+
+// ---------------- trend over periods (from each period's STEP 5 result)
+const TREND_N = 6;
+const trendCache = new Map(); // period → step5 | null | 'loading'
+function periodsBack(p, n) { const out = []; let x = p; for (let i = 0; i < n; i++) { out.unshift(x); x = prevPeriod(x); } return out; }
+function trendTab(el, prod, t, c) {
+  const S = A.S; const ps = periodsBack(S.period, TREND_N);
+  let pending = 0;
+  for (const p of ps) {
+    if (p === S.period) continue;
+    if (!trendCache.has(p)) { trendCache.set(p, 'loading'); A.loadPeriodData(p).then((d) => { trendCache.set(p, d && d.step5 && d.step5.period === p ? d.step5 : null); if (S.view === 'trace' && S.trTab === 'trend') A.render(); }).catch(() => trendCache.set(p, null)); }
+    if (trendCache.get(p) === 'loading') pending++;
+  }
+  const rows = ps.map((p) => {
+    const r5 = p === S.period ? (A.derived().d5 ? A.derived().d5.res : null) : trendCache.get(p);
+    const o = { period: p, qty: null, unit: null, rmU: null, u622: null, u627: null, soldQ: null, cogsU: null, revU: null, gm: null };
+    if (p === S.period && t && t.lots.length) Object.assign(o, { qty: t.overview.qty, unit: t.overview.unit, rmU: t.overview.rmUnit, u622: t.overview.u622, u627: t.overview.u627 });
+    else if (r5 && r5 !== 'loading') {
+      const L = (r5.ledger || []).filter((l) => l.source === 'PRODUCTION' && utxt(l.prod) === prod);
+      const q = L.reduce((a, l) => a + num(l.qtyIn), 0);
+      if (q) Object.assign(o, { qty: q, unit: L.reduce((a, l) => a + num(l.tot), 0) / q, rmU: L.reduce((a, l) => a + num(l.rm), 0) / q, u622: L.reduce((a, l) => a + num(l.a622), 0) / q, u627: L.reduce((a, l) => a + num(l.a627), 0) / q });
+    }
+    const sales = p === S.period && c ? c.sales : r5 && r5 !== 'loading' ? (r5.sales || []).filter((x) => x.prod === prod) : [];
+    const f = sales.filter((x) => x.fin === 'FIFO COGS');
+    const sq = f.reduce((a, x) => a + num(x.fq), 0), st = f.reduce((a, x) => a + num(x.tot), 0), sv = f.reduce((a, x) => a + num(x.vnd), 0);
+    if (sq) Object.assign(o, { soldQ: sq, cogsU: st / sq, revU: sv / sq, gm: sv ? (sv - st) / sv : null });
+    o.state = p === S.period ? 'kỳ đang xem' : trendCache.get(p) === 'loading' ? 'đang tải…' : r5 ? '' : 'chưa có STEP 5';
+    return o;
+  });
+  const have = rows.filter((r) => r.unit !== null || r.cogsU !== null);
+  el.innerHTML = `<p class="muted">Giá thành đơn vị (lô sản xuất), giá vốn và giá bán bình quân / sp của ${esc(prod)} trong ${TREND_N} kỳ gần nhất, lấy từ kết quả STEP 5 từng kỳ${pending ? ` – đang tải ${pending} kỳ…` : ''}.</p>
+    ${have.length >= 2 ? trendSVG(rows) : '<div class="alert info">Cần ít nhất 2 kỳ có số liệu để vẽ xu hướng.</div>'}
+    <div id="tr-trend"></div>`;
+  const cols = [['period', 'Kỳ', 80], ['qty', 'SL sản xuất', 100, 'qty'], ['unit', 'Giá thành/đv', 120, 'num'], ['rmU', 'NVL/đv', 110, 'num'], ['u622', '622/đv', 100, 'num'], ['u627', '627/đv', 100, 'num'], ['soldQ', 'SL bán', 90, 'qty'], ['cogsU', 'Giá vốn/đv', 120, 'num'], ['revU', 'Giá bán/đv (VND)', 130, 'num'], ['gm', 'Lãi gộp %', 90, 'pct1'], ['state', 'Ghi chú', 140]]
+    .map(([key, label, width, type]) => ({ key, label, width, type }));
+  A.mountTable(el.querySelector('#tr-trend'), { columns: cols, rows, height: 30 * rows.length + 90, onExport: A.exportTable(`XU_HUONG_${prod}`, cols) });
+}
+function trendSVG(rows) {
+  const W = 760, H = 220, pl = 70, pr = 16, pt = 14, pb = 34;
+  const series = [['unit', 'Giá thành/đv', 'var(--accent, #2f7d64)'], ['cogsU', 'Giá vốn/đv', '#c58b2b'], ['revU', 'Giá bán/đv', '#7b6ab0']];
+  const vals = rows.flatMap((r) => series.map(([k]) => r[k])).filter((v) => v !== null && isFinite(v));
+  if (!vals.length) return '';
+  let lo = Math.min(...vals), hi = Math.max(...vals); if (hi === lo) { hi += 1; lo -= 1; } const pad = (hi - lo) * 0.1; lo = Math.max(0, lo - pad); hi += pad;
+  const x = (i) => pl + (rows.length === 1 ? 0 : (i * (W - pl - pr)) / (rows.length - 1));
+  const y = (v) => pt + (H - pt - pb) * (1 - (v - lo) / (hi - lo));
+  const grid = [0, 0.5, 1].map((f) => { const v = lo + (hi - lo) * f; return `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule)"/><text x="${pl - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${A.fmtNum(v)}</text>`; }).join('');
+  const lines = series.map(([k, , col]) => {
+    const pts = rows.map((r, i) => (r[k] !== null && isFinite(r[k]) ? [x(i), y(r[k])] : null));
+    const segs = []; let cur = [];
+    for (const p of pts) { if (p) cur.push(p); else if (cur.length) { segs.push(cur); cur = []; } } if (cur.length) segs.push(cur);
+    return segs.map((sg) => `<polyline fill="none" stroke="${col}" stroke-width="2" points="${sg.map((p) => p.join(',')).join(' ')}"/>`).join('') + pts.filter(Boolean).map((p) => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="${col}"/>`).join('');
+  }).join('');
+  const xl = rows.map((r, i) => `<text x="${x(i)}" y="${H - 12}" text-anchor="${i === 0 ? 'start' : i === rows.length - 1 ? 'end' : 'middle'}" font-size="11" fill="var(--muted)">${r.period}</text>`).join('');
+  return `<figure class="trend"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Xu hướng giá thành, giá vốn và giá bán">${grid}${lines}${xl}</svg>
+    <figcaption class="cbar-leg">${series.map(([, l, col]) => `<span><i style="background:${col}"></i>${esc(l)}</span>`).join('')}</figcaption></figure>`;
 }
 
 // ---------------- anomaly drill-down (modal report)

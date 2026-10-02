@@ -156,6 +156,61 @@ import { fp as fpStr } from '../src/engine/util.js';
   eq('F-22 S memo', s3c.rows.filter((r) => r.no === '11' || r.no === '12').map((r) => [r.actual, r.status]), [[30, 'INFO'], [20, 'INFO']]);
 }
 
+// ---- Owner decisions 02/10/2026
+import { rebuildEngine } from '../src/engine/step3b.js';
+{
+  // #4 3B ACTUAL_USAGE by amount: qty 80/20 but amount 40/60 → 40/60
+  const H = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const s2 = { period: P2, pc: [{ erp: 'O', pcNo: 'PC-1', prod: 'A', name: 'A', rmIncl: 100, rowIdx: 1 }, { erp: 'O', pcNo: 'PC-2', prod: 'B', name: 'B', rmIncl: 100, rowIdx: 2 }] };
+  const dsx = { 'PC-M-O': { header: H, rows: [['PC-1', 'A', 'A', 'M1', 80, 40], ['PC-2', 'B', 'B', 'M1', 20, 60]] } };
+  const inp = [{ key: 'M1', erp: 'O', desc: 'm' }];
+  eq('#4 amount basis 40/60', rebuildEngine(inp, s2, dsx, P2, 'AMOUNT').rows.map((r) => r.share), [0.4, 0.6]);
+  eq('#4 legacy qty basis 80/20', rebuildEngine(inp, s2, dsx, P2, 'QTY').rows.map((r) => r.share), [0.8, 0.2]);
+  // #1 STRICT_DATE rework: issue 05/08, production 20/08, no opening → cannot take the later layer
+  const op0 = { period: P2, status: 'LOADED', rows: [] }; F5.validateOpeningFG(op0, P2);
+  const ca1 = [{ pc: 'PC9', date: ser(2026, 8, 20), prod: 'A', name: 'A', qty: 5, totalRM: 300, t622: 100, t627: 100, totalCost: 500, statusText: '' }];
+  const reg = { rows: [{ active: 'Y', rid: 'R1', fg: 'A', issueQty: 2, issueDate: ser(2026, 8, 5), inputCheck: 'PASS', rwStatus: 'OPEN', rwType: 'NORMAL', period: P2 }] };
+  const base = { period: P2, opening: op0, caRows: ca1, salesRows: [], pmRows: [], fx: 25000, overrides: {}, dupDecisions: {}, tol: 1, step4: { current: 'CURRENT', overall: 'PASS', finalCost: 500, qty: 5 } };
+  const rS = F5.runFIFO({ ...base, mode: 'STRICT_DATE', register: reg }); F5.runReworkFIFO(rS, reg, { period: P2, opening: op0, salesRows: [], step4Carry: 0 });
+  eq('#1 STRICT: rework before production → insufficient', [reg.rows[0].fifoStatus, reg.rows[0].fifoQty], ['BLOCK - INSUFFICIENT FG AT ISSUE DATE', 0]);
+  const reg2 = { rows: [{ ...reg.rows[0], issueDate: ser(2026, 8, 25) }] };
+  const rS2 = F5.runFIFO({ ...base, mode: 'STRICT_DATE', register: reg2 }); F5.runReworkFIFO(rS2, reg2, { period: P2, opening: op0, salesRows: [], step4Carry: 0 });
+  eq('#1 STRICT: rework after production takes it', [reg2.rows[0].fifoStatus, Math.round(reg2.rows[0].fifoCost)], ['PASS', 200]);
+  eq('#1 STRICT: gate allows rework', F5.reworkGate(reg2, [], P2, 'STRICT_DATE'), '');
+  // sale on 10/08 then rework 15/08 with only the opening layer of 10 units: sale first, rework gets the rest in date order
+  const reg3 = { rows: [{ ...reg.rows[0], issueQty: 3, issueDate: ser(2026, 8, 15) }] };
+  const sl = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 10), 'S1', 'A', 8, 80)] }, { rows: [] }, P2).db.rows;
+  const rS3 = F5.runFIFO({ ...base, opening, salesRows: sl, mode: 'STRICT_DATE', register: reg3 }); F5.runReworkFIFO(rS3, reg3, { period: P2, opening, salesRows: sl, step4Carry: 0 });
+  eq('#1 STRICT: sale 8 then rework only 2 left', [Math.round(rS3.totals.cogsQ), reg3.rows[0].fifoQty, reg3.rows[0].fifoStatus], [8, 2, 'BLOCK - INSUFFICIENT FG AT ISSUE DATE']);
+  // #5 Bill date drives the period
+  const bl = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 7, 30), 'B1', 'A', 2, 20), billDate: ser(2026, 8, 2) }] }, { rows: [] }, P2).db.rows;
+  eq('#5 bill date in period → costed', Math.round(F5.runFIFO({ ...ctx({}), salesRows: bl }).totals.cogsQ), 2);
+  eq('#5 revenue by bill date', F5.periodRevenue(bl, P2), 20 * 25000);
+  // #6 return at the original sale's COGS (opening layer 100/unit), with Original Invoice No.
+  const rt = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), origInv: 'X1' }] }, { rows: [] }, P2).db.rows;
+  const rr = F5.runFIFO({ ...ctx({}), salesRows: rt });
+  const ln = rr.sales.find((x) => x.inv === 'CN1');
+  eq('#6 return restored at original cost', [ln.fin, ln.status, Math.round(ln.tot)], ['RETURN', 'RETURNED', -100]);
+  eq('#6 net COGS and roll-forward', [Math.round(rr.totals.cogsQ), Math.round(rr.totals.cogsA), rr.rec[8].status, rr.rec[9].status, rr.rec[10].status, rr.rec[11].status], [2, 200, 'PASS', 'PASS', 'PASS', 'PASS']);
+  eq('#6 return layer in closing', rr.closing.some((c) => c.source === 'RETURN' && c.qty === 1), true);
+  const rn = F5.runFIFO({ ...ctx({}), salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN2', 'A', -1, -10), origInv: 'NOPE' }] }, { rows: [] }, P2).db.rows });
+  eq('#6 original not found → REVIEW', rn.sales[0].fin, 'REVIEW');
+  // #7 NRV with 1.5 % selling cost: unit cost 100, price 4 USD × 25000 = 100000 → NRV 98500; here cost 100 VND so no provision; force price low
+  const nv = F5.runFIFO({ ...ctx({}), pmRows: [{ product: 'A', finalPrice: 0.004 }], sellCostRate: 0.015 }); // price 100 VND, NRV 98.5
+  const cl = nv.closing.find((c) => c.prod === 'A');
+  eq('#7 NRV provision = (100 − 98.5) × qty', Math.round(cl.provNeed * 100) / 100, Math.round(1.5 * cl.qty * 100) / 100);
+  // #3 FAST tie: difference needs approval bound to the figures
+  const eng = { a154: 1000, a155: 2000, a632: 3000, a511: 4000 };
+  const t0 = F5.fastTie(eng, null);
+  eq('#3 not entered', t0.status, 'NOT ENTERED');
+  const tie = { fast: { a154: 1000, a155: 2000, a632: 2990, a511: 4000 } };
+  const t1 = F5.fastTie(eng, tie);
+  eq('#3 diff → REVIEW', [t1.status, t1.diffs], ['REVIEW', 1]);
+  const t2 = F5.fastTie(eng, { ...tie, approval: { key: t1.key, by: 'x', note: 'ok' } });
+  eq('#3 approved', t2.status, 'APPROVED');
+  eq('#3 approval lapses when figures change', F5.fastTie({ ...eng, a155: 2001 }, { ...tie, approval: { key: t1.key } }).status, 'REVIEW');
+}
+
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
 import fs from 'node:fs';
 import path from 'node:path';

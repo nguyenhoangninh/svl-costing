@@ -54,6 +54,11 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.locator('.anoms [data-an]').first().click(); await page.waitForSelector('#tr-modal'); await page.waitForTimeout(200);
 await page.screenshot({ path: path.join(outDir, '57-trace-detail-phone.png') });
 await page.click('#trm-close'); await page.setViewportSize({ width: 1440, height: 900 });
+// trend over periods (only the current period has data in the sandbox → table + note)
+await page.goto(base + '#trace=OLI-5020VU'); await page.waitForSelector('.tr-head'); await page.click('[data-trtab="trend"]'); await page.waitForTimeout(800);
+console.log('trend:', (await txt('#tr-tab')).slice(0, 200));
+await page.screenshot({ path: path.join(outDir, '58-trace-trend.png') });
+await page.click('[data-trtab="cost"]'); await page.waitForTimeout(200);
 // deep link from Step 4 table
 await page.goto(base + '#step4'); await page.waitForSelector('.tr-link'); await page.click('.tr-link'); await page.waitForTimeout(500);
 console.log('deep link:', page.url().split('#')[1], '|', await txt('.tr-head'));

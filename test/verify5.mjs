@@ -21,7 +21,7 @@ const inG = G('03_WIP_DIRECT_ADJ_INPUT'); const input = [];
 for (let r = 9; r < inG.length; r++) { const x = inG[r] || []; if (!ttxt(x[1])) continue; input.push({ code: x[1], desc: x[2], basisQty: x[6], basisAmt: x[7], option: x[8], reason: x[9], note: x[10] }); }
 const ctG = G('03_WIP_DIRECT_ADJ_CONTROL'); const oldControl = { rows: [] };
 for (let r = 9; r < ctG.length; r++) { const x = ctG[r] || []; if (!ttxt(x[2])) continue; oldControl.rows.push({ period: x[1], code: x[2], basisQty: x[5], basisAmt: x[6], method: x[7], decision: x[21], note: x[22], gate: x[23] }); }
-const b = runBuild({ erpMap, input, control: oldControl, reg632: [] }, { step3: base.s3, step2: base.s2, datasets, period: PERIOD });
+const b = runBuild({ erpMap, input, control: oldControl, reg632: [], basis: 'QTY' }, { step3: base.s3, step2: base.s2, datasets, period: PERIOD });
 const inD = deriveInput(input, b.erpMap, base.s3, PERIOD);
 b.control.rows.forEach((r) => { if (!r.decision) r.decision = 'REVIEW'; });
 applyControl(b.control, base.s3, 'Re-checking');

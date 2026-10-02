@@ -22,7 +22,7 @@ export function derive(S) {
     let engPosted = 0; for (const v of posted.values()) engPosted += v.amt;
     const balancePass = w.control ? B.balancePassCount(w.control, d.step3) : 0;
     const step4Posted = d.step4 && d.step4.snap ? d.step4.snap.posted3B : null;
-    const buildStale = !!(w.control && w.control.fp && w.control.fp !== B.buildFingerprint(w.input, d.erpMap, d.step2, d.step3));
+    const buildStale = !!(w.control && w.control.fp && w.control.fp !== B.buildFingerprint(w.input, d.erpMap, d.step2, d.step3, B.basisOf(w)));
     const controls = step3bControls({ erpMap: d.erpMap, period, input: w.input, inputD, engine: w.engine, engDyn, detail: w.detail, control: w.control, reg632: w.reg632, wf, balancePass, step3: d.step3, step4Posted, buildStale });
     out.d3b = { inputD, engDyn, wf, posted, engPosted, balancePass, controls, buildStale };
   }
@@ -116,6 +116,7 @@ export function view3b(el) {
       <div class="result"><span>Kết quả</span>${A.pill(c.status)}<small>${esc(c.okText)}</small></div></header>
     <div class="row">
       <button class="btn ghost" data-act="3b-sync" type="button">Đồng bộ INPUT với WIP âm${sync.inSync ? '' : ' •'}</button>
+      <label>Phân bổ ACTUAL_USAGE <select id="b3-basis" ${A.canEdit() ? '' : 'disabled'}><option value="AMOUNT" ${B.basisOf(w) === 'AMOUNT' ? 'selected' : ''}>theo giá trị tiêu hao (PC-M Total Cost)</option><option value="QTY" ${B.basisOf(w) === 'QTY' ? 'selected' : ''}>theo số lượng (như Excel cũ)</option></select></label>
       <button class="btn" data-act="3b-build" type="button">1 · BUILD / REFRESH</button>
       <button class="btn" data-act="3b-apply" type="button">2 · APPLY &amp; SYNC</button>
       <span class="muted">Build ${A.fmtTs(w.control && w.control.builtAt)} · Apply ${A.fmtTs(w.control && w.control.appliedAt)}${w.control && w.control.noAdj ? ` · Đóng không điều chỉnh: ${esc(w.control.noAdj.reason)}` : ''}</span>
@@ -128,6 +129,8 @@ export function view3b(el) {
     <div id="t3b"></div>
   </section>`;
   el.querySelectorAll('[data-tab3b]').forEach((b) => b.addEventListener('click', () => { S.tab3b = b.dataset.tab3b; A.render(); }));
+  const bs = el.querySelector('#b3-basis');
+  if (bs) bs.addEventListener('change', () => { if (!A.guardEdit()) { A.render(); return; } const wa = S.d.wipadj || (S.d.wipadj = { input: [] }); wa.basis = bs.value; A.audit('STEP 3B - BASIS', bs.value); A.markDirty('wipadj', 'audit'); A.toast(`Đã chọn phân bổ theo ${bs.value === 'AMOUNT' ? 'giá trị' : 'số lượng'}. Chạy lại BUILD → duyệt → APPLY, rồi STEP 4.`, 'review'); A.render(); });
   const box = el.querySelector('#t3b');
   const edit = A.canEdit();
   if (tab === 'input') {
@@ -188,9 +191,10 @@ export function do3bSync() {
 export function do3bBuild() {
   const S = A.S; const w = S.d.wipadj || (S.d.wipadj = { input: [] });
   if (!(w.input || []).length) { const chk = B.inputSyncCheck([], S.d.step3); if (!chk.neg.length) { A.toast('Không có vật tư CHECK NEGATIVE – kỳ này không cần điều chỉnh WIP.', 'pass'); return; } w.input = B.writeInput([], S.d.step3, false); A.toast(`INPUT trống – đã tự điền ${w.input.length} vật tư WIP âm.`, 'info'); }
-  const r = B.runBuild({ erpMap: S.d.erpMap, input: w.input, control: w.control, reg632: w.reg632 }, { step3: S.d.step3, step2: S.d.step2, datasets: S.d.datasets, period: S.period });
+  w.basis = B.basisOf(w);
+  const r = B.runBuild({ erpMap: S.d.erpMap, input: w.input, control: w.control, reg632: w.reg632, basis: w.basis }, { step3: S.d.step3, step2: S.d.step2, datasets: S.d.datasets, period: S.period });
   S.d.erpMap = r.erpMap; Object.assign(w, { engine: r.engine, detail: r.detail, control: r.control, reg632: r.reg632 });
-  A.audit('STEP 3B - BUILD', `Usage=${r.engine.nUse}; NoUsage=${r.engine.nNo}; Engine=${r.engine.rows.length}; Detail=${r.detail.length} · ${r.mapMsg}`);
+  A.audit('STEP 3B - BUILD', `Basis=${w.basis}; Usage=${r.engine.nUse}; NoUsage=${r.engine.nNo}; Engine=${r.engine.rows.length}; Detail=${r.detail.length} · ${r.mapMsg}`);
   A.markDirty('wipadj', 'erpMap', 'audit');
   A.toast(`BUILD xong: ${r.detail.length} dòng detail, ${r.control.rows.filter((x) => x.status === 'PASS').length}/${r.control.rows.length} vật tư PASS. ${r.mapMsg}`, 'pass');
 }
@@ -241,7 +245,8 @@ export function viewSales(el) {
   el.querySelectorAll('[data-tabs]').forEach((b) => b.addEventListener('click', () => { S.tabSales = b.dataset.tabs; A.render(); }));
   el.querySelectorAll('[data-tab-dup]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); S.tabSales = 'dup'; A.render(); }));
   const box = el.querySelector('#ts'); const edit = A.canEdit();
-  const salesCols = [...F.SALES_FIELDS.map((f, i) => ({ key: f, label: F.SALES_HEADERS[i], type: f === 'invDate' ? 'date' : ['fx', 'qty', 'unitPrice'].includes(f) ? 'qty' : ['amtUSD', 'amtVND'].includes(f) ? 'num' : 'text', width: f === 'prodName' ? 220 : f === 'customer' ? 180 : 110 }))];
+  const salesCols = [...F.SALES_FIELDS.map((f, i) => ({ key: f, label: F.SALES_HEADERS[i], type: f === 'invDate' ? 'date' : ['fx', 'qty', 'unitPrice'].includes(f) ? 'qty' : ['amtUSD', 'amtVND'].includes(f) ? 'num' : 'text', width: f === 'prodName' ? 220 : f === 'customer' ? 180 : 110 })),
+    { key: 'billDate', label: 'Bill Date', type: 'date', width: 100 }, { key: 'origInv', label: 'Original Invoice No.', width: 140 }];
   if (tab === 'import') {
     box.innerHTML = `<div class="row"><label>Chế độ <select id="s-mode"><option>YTD</option><option>MONTHLY</option></select></label>
       <label class="btn">Chọn file doanh thu…<input type="file" id="f-sales" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label>
@@ -440,6 +445,32 @@ export function view4(el) {
   }
 }
 
+/**
+ * Owner decision 02/10/2026 (audit F-07): STEP 4 and CLOSE MONTH are blocked until STEP 3B is fully resolved –
+ * negative WIP taken into 3B, BUILD current, every line decided (APPROVE / HOLD / REVIEW), approvals APPLIED;
+ * for the close also every DIRECT_632 entry RECORDED in FAST.
+ */
+export function threeBBlock(S, d3b, { forClose = false } = {}) {
+  const d = S.d; if (!d.step3) return '';
+  const w = d.wipadj || {};
+  const neg = d.step3.rows.filter((m) => num(m.closingQty) < -0.000001).length;
+  const inN = (w.input || []).filter((r) => ttxt(r.code)).length;
+  if (neg && !inN) return `${neg} vật tư WIP âm chưa đưa vào STEP 3B – SYNC → BUILD → duyệt (APPROVE / HOLD) → APPLY.`;
+  if (!inN) return '';
+  const ctl = w.control;
+  if (!ctl || !ctl.builtAt) return 'STEP 3B chưa BUILD.';
+  if ((d3b && d3b.buildStale) || ctl.builtAt < d.step3.runAt) return 'STEP 3B: INPUT / ERP map / STEP 3A đổi sau BUILD – BUILD lại.';
+  const rows = ctl.rows || [];
+  const blank = rows.filter((r) => !ttxt(r.decision)).length;
+  if (blank) return `STEP 3B còn ${blank} dòng chưa có quyết định (APPROVE / HOLD / REVIEW).`;
+  const wait = rows.filter((r) => r.gate === 'APPROVED - AWAIT APPLY').length;
+  if (wait) return `STEP 3B có ${wait} dòng đã APPROVE nhưng chưa APPLY.`;
+  if (forClose) {
+    const p632 = (w.reg632 || []).filter((r) => r.record === 'READY FOR ACCOUNTING' || r.record === 'PENDING RECORD INFO').length;
+    if (p632) return `STEP 3B còn ${p632} bút toán DIRECT_632 chưa ghi FAST (cột Record phải là RECORDED).`;
+  }
+  return '';
+}
 function gateMsg(S) {
   const d = S.d;
   return F.step4Gate({ period: S.period, salesImport: d.salesImport, pm: d.pm, gl: d.gl, step2: d.step2, step3: d.step3, opening: d.opening, latestImport: A.latestImport(), manual: d.manualPrice, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '' });
@@ -452,7 +483,7 @@ export function runLotCheck() {
 }
 export function doStep4() {
   const S = A.S; const d = S.d;
-  const g = gateMsg(S) || (derive(S).d3b && derive(S).d3b.buildStale ? 'STEP 3B: INPUT / ERP map đã đổi sau BUILD – chạy lại BUILD (và APPLY nếu có duyệt).' : '');
+  const g = gateMsg(S) || threeBBlock(S, derive(S).d3b);
   if (g) { A.toast('STEP 4 bị chặn: ' + g, 'block'); return; }
   try {
     const s4 = F.runStep4({ period: S.period, step2: d.step2, step3: d.step3, pm: d.pm, gl: d.gl, directAdj: d.directAdj });
@@ -487,7 +518,8 @@ export function migratePhase2(g, S, period) {
   d.wipadj = w;
   let msg3b = '';
   if (d.step3 && w.input.length) {
-    const r = B.runBuild({ erpMap: d.erpMap, input: w.input, control: oldCtl, reg632 }, { step3: d.step3, step2: d.step2, datasets: d.datasets, period });
+    w.basis = 'QTY'; // a migrated period keeps the Excel method so it reconciles to the workbook
+    const r = B.runBuild({ erpMap: d.erpMap, input: w.input, control: oldCtl, reg632, basis: 'QTY' }, { step3: d.step3, step2: d.step2, datasets: d.datasets, period });
     d.erpMap = r.erpMap; Object.assign(w, { engine: r.engine, detail: r.detail, control: r.control, reg632: r.reg632 });
     const anyApprove = r.control.rows.some((x) => utxt(x.decision) === 'APPROVE');
     const noAdjReason = ttxt(cell(cg, 5, 31)).split(' | ')[0];

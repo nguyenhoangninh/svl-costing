@@ -29,7 +29,7 @@ const oldControl = { rows: [] };
 for (let r = 9; r < ctG.length; r++) { const x = ctG[r] || []; if (!ttxt(x[2])) continue; oldControl.rows.push({ period: x[1], code: x[2], basisQty: x[5], basisAmt: x[6], method: x[7], decision: x[21], note: x[22], gate: x[23] }); }
 
 const st = { erpMap, input, control: oldControl, reg632: [] };
-const b = runBuild(st, { step3: base.s3, step2: base.s2, datasets, period: PERIOD });
+const b = runBuild({ ...st, basis: 'QTY' }, { step3: base.s3, step2: base.s2, datasets, period: PERIOD });
 expect('map rows', b.erpMap.rows.length, erpMap.rows.length, 0);
 const inD = deriveInput(input, b.erpMap, base.s3, PERIOD);
 inD.forEach((r, i) => {

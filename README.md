@@ -87,6 +87,22 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 | Cầu nối 154 (F-17) | STEP 5 checkpoint 15a = công thức F200 của Excel (WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối − rework WIP cuối). |
 | Cảnh báo REVIEW (F-10…F-24) | Dòng ERP ngày ngoài kỳ, file không có kỳ trong tên, file NO DATA có số liệu (bị từ chối), Stock Out phân bổ dự phòng rộng > 5%, vật tư đổi hệ ERP, giá từ SO sau kỳ, giá thủ công trùng thời gian, lớp không ngày ở STRICT_DATE, ghi chú hệ S (MI-M-S / PC-M-S). |
 
+### Quyết định của chủ quy trình 02/10/2026 (v1.8)
+
+| Nội dung | Cách hoạt động |
+|---|---|
+| Chặn theo 3B (F-07) | STEP 4 và CLOSE MONTH bị chặn khi: còn WIP âm chưa đưa vào 3B, chưa BUILD / BUILD cũ, còn dòng chưa quyết định, đã APPROVE chưa APPLY. Riêng đóng kỳ: mọi bút toán DIRECT_632 phải RECORDED. |
+| Đối chiếu FAST (F-17) | STEP 5.3 → tab *Đối chiếu FAST*: nhập số dư 154, 155, phát sinh 632, 511. Lệch > 1 VND phải được xác nhận kèm giải trình (người có quyền chỉnh sửa); xác nhận hết hiệu lực khi số liệu đổi. Chưa nhập / chưa xác nhận thì không đóng kỳ. |
+| 3B theo giá trị (F-01) | ACTUAL_USAGE chia theo giá trị tiêu hao PC-M (Total Cost). Chọn lại "theo số lượng" ở màn hình 3B nếu cần; kỳ chuyển từ Excel giữ cách cũ để khớp file. |
+| FIFO theo ngày (F-04) | STRICT_DATE: dòng bán và phiếu xuất rework chạy chung theo ngày; mỗi sự kiện chỉ dùng lớp có ngày ≤ ngày của nó. MONTHLY giữ như Excel, có cảnh báo khi rework lấy lớp hoàn thành sau ngày xuất. |
+| Ngày Bill (F-08) | File doanh thu có cột *Bill Date* (hoặc B/L Date, Ship Date…) thì giá vốn và doanh thu 511 theo ngày Bill; không có thì theo ngày hoá đơn. |
+| Hàng bán trả lại (F-09) | Dòng SL âm: nhập lại FG theo giá vốn của hoá đơn gốc (cột *Original Invoice No.*; không có thì hoá đơn gần nhất cùng khách – sản phẩm, tìm cả 12 kỳ trước). Không tìm được → REVIEW. Giá vốn 632 là số thuần sau trả lại. |
+| NRV (F-14) | NRV = giá bán × tỷ giá × (1 − 1,5% chi phí bán hàng; sửa được ở STEP 5.2). Bảng tồn cuối có *Dự phòng đề xuất*. |
+| Truy xuất qua các kỳ | Tab *Qua các kỳ*: giá thành, giá vốn, giá bán / sp 6 kỳ gần nhất, có biểu đồ. |
+| Kiểm thử | `node test/synth.mjs`: dữ liệu ERP giả lập, chạy STEP 2 → 5 (cả MONTHLY và STRICT_DATE, rework, trả lại, NRV), kiểm các cầu nối 154/155 và so ảnh chụp kết quả – chạy trên CI mỗi lần đẩy code. |
+
+**Phát hành chỉ sau khi test PASS:** Settings → Pages → Source = *GitHub Actions*; Settings → Secrets and variables → Actions → Variables → thêm `PAGES_FROM_ACTIONS` = `true`. Từ đó web chỉ được cập nhật khi CI xanh.
+
 ## Bảo mật dữ liệu
 
 - Repo này chỉ chứa **code**. Không commit file ERP, file Costing Master hay dữ liệu xuất ra (`.gitignore` đã chặn `*.xlsx`, `*.xlsm`, `*.xls`).

@@ -45,6 +45,15 @@ await page.goto(base + '#step4'); await page.click('[data-act=run-step4]'); awai
 await page.goto(base + '#step5'); await page.click('[data-act=s5-run]'); await page.waitForTimeout(1500);
 await page.goto(base + '#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-hist]'); await page.waitForTimeout(1200);
+// FAST tie: before entry the close is blocked; enter the web figures but 632 off by 1.000 → approve with a note
+console.log('close before FAST:', ((await txt('main')).match(/Chưa đóng được:.{0,120}/) || [''])[0]);
+await page.click('[data-tabh="fast"]'); await page.waitForSelector('#f-fast');
+const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => tr.children[2].textContent.replace(/\./g, '').replace(',', '.')));
+for (const [i, k] of ['a154', 'a155', 'a632', 'a511'].entries()) await page.fill(`#f-fast input[name=${k}]`, k === 'a632' ? String(Math.round(+engVals[i]) - 1000) : String(Math.round(+engVals[i])));
+await page.click('#f-fast button[type=submit]'); await page.waitForTimeout(400);
+console.log('FAST after entry:', ((await txt('main')).match(/\d+ tài khoản lệch FAST/) || ['(khớp)'])[0]);
+await page.fill('#f-fast-ok input[name=note]', 'Kiểm thử: chênh làm tròn bút toán 632'); await page.click('#f-fast-ok button'); await page.waitForTimeout(400);
+console.log('FAST approved:', ((await txt('main')).match(/Chênh lệch đã được xác nhận.{0,60}/) || ['?'])[0]);
 await page.goto(base + '#cc'); await page.waitForTimeout(400);
 for (const k of ['Cầu nối TK 154', 'Cầu nối TK 155', 'thiếu / sai ngày', 'cảnh báo kiểm tra dữ liệu bán', 'Hệ S: xuất', 'dự phòng rộng', 'Giá bán cần xác nhận', 'ERP map: vật tư đổi']) console.log('CP', k, '|', ((await txt('main')).match(new RegExp(k + '.{0,90}')) || ['(không thấy)'])[0]);
 await page.goto(base + '#close'); await page.waitForSelector('.result');
