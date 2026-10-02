@@ -102,7 +102,11 @@ export function derive(S, p2) {
   }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
     if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 (STEP 5.3 → tab Đối chiếu FAST).';
-    else if (tie.diffs && !tie.approved) closeReason = `Số liệu lệch FAST ở ${tie.diffs} tài khoản chưa được xác nhận (STEP 5.3 → Đối chiếu FAST → Xác nhận chênh lệch).`;
+    else {
+      const r511 = tie.rows.find((r) => r.acc === '511');
+      if (r511 && Math.abs(num(r511.engine)) <= 1 && Math.abs(num(r511.fast)) > 1) closeReason = `Sales completeness BLOCK: web không có doanh thu 511 trong kỳ nhưng FAST = ${A.fmtNum(r511.fast)} VND. Không được override bằng approval – kiểm tra file doanh thu / Bill Date / phạm vi import.`;
+      else if (tie.diffs && !tie.approved) closeReason = `Số liệu lệch FAST ở ${tie.diffs} tài khoản chưa được xác nhận (STEP 5.3 → Đối chiếu FAST → Xác nhận chênh lệch).`;
+    }
   }
   return { res, fresh, stale, dups, hg, recon, controls, closeReason, tie };
 }
@@ -341,15 +345,16 @@ function recTable(rec, keys, labels) {
     ${keys.filter((k) => rec[k]).map((k) => { const r = rec[k]; return `<tr><td>${esc(r.label || labels[k] || k)}</td><td class="r">${A.cpVal(r.expected)}</td><td class="r">${A.cpVal(r.result)}</td><td class="r">${r.diff === '' ? '' : A.cpVal(r.diff)}</td><td>${A.pill(r.status)}</td><td class="muted">${esc(r.note || '')}</td></tr>`; }).join('')}</tbody></table>`;
 }
 
-/** Aggregated invoice+product FIFO origins of up to 12 earlier periods – authoritative source cost for Sales Return. */
+/** Aggregated invoice+product FIFO origins from all known earlier periods – authoritative source cost for Sales Return. */
 async function priorSalesFor(S) {
   const rows = S.d.salesDB ? S.d.salesDB.rows : [];
   const pS = S.period;
   if (!rows.some((r) => utxt(r.tranType) === 'SALES RETURN' && num(r.qty) < 0 && F5.saleDate(r) !== null && serialToISO(F5.saleDate(r)).slice(0, 7) === pS)) return [];
-  const origins = new Map(), returned = new Map(); let p = pS;
+  const origins = new Map(), returned = new Map();
   const keyOf = (inv, prod) => `${utxt(inv)}|${utxt(prod)}`;
-  for (let k = 0; k < 12; k++) {
-    p = prevPeriod(p);
+  const known = (S.periods || []).filter((p) => /^\d{4}-\d{2}$/.test(p) && p < pS).sort().reverse();
+  const periods = known.length ? known : (() => { const a = []; let p = pS; for (let k = 0; k < 60; k++) { p = prevPeriod(p); a.push(p); } return a; })();
+  for (const p of periods) {
     const pd = await A.loadPeriodData(p).catch(() => null);
     const r5 = pd && pd.step5 && pd.step5.period === p ? pd.step5 : null;
     if (!r5) continue;
@@ -361,8 +366,8 @@ async function priorSalesFor(S) {
           o.date = Math.min(num(o.date), num(x.date));
         } else origins.set(key, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), period: p });
       }
-      if (x.fin === 'RETURN' && x.status === 'RETURNED' && ttxt(x.origInv) && num(x.fq) < 0) {
-        const key = keyOf(x.origInv, x.prod);
+      if (x.fin === 'RETURN' && x.status === 'RETURNED' && ttxt(x.origInv || x.matchedOrigInv) && num(x.fq) < 0) {
+        const key = keyOf(x.origInv || x.matchedOrigInv, x.prod);
         returned.set(key, (returned.get(key) || 0) + -num(x.fq));
       }
     }
