@@ -48,7 +48,8 @@ service cloud.firestore {
           // Explicit REOPEN: admin only, CLOSED → open, and the only manifest change is the closed-state blob.
           (isAdmin() && closedOf(resource.data) != null && closedOf(request.resource.data) == null
             && request.resource.data.blobs.diff(resource.data.blobs).affectedKeys().hasOnly(['closed'])
-            && request.resource.data.summary.diff(resource.data.summary).affectedKeys().hasOnly(['closed']))
+            && request.resource.data.summary.diff(resource.data.summary).affectedKeys().hasOnly(['closed', 'everClosed'])
+            && request.resource.data.summary.get('everClosed', false) == true)
         );
       // A period that has ever been CLOSED is an accounting record and may not be hard-deleted.
       allow delete: if isAdmin() && closedOf(resource.data) == null
