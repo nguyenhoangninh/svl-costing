@@ -213,13 +213,21 @@ export const PM_AUDIT_HEADERS = ['Product Code', 'Current Month WAvg', 'Latest A
 export const MANUAL_FIELDS = ['product', 'price', 'effFrom', 'effTo', 'source', 'approvedBy', 'updatedAt'];
 export const SO_FIELDS = ['active', 'product', 'soDate', 'soNo', 'customer', 'qty', 'price', 'note', 'check'];
 
-export function requiredProducts(step2) {
+export function requiredProducts(step2, salesDB = null, period = '') {
   const order = []; const set = new Set();
+  const add = (code) => { code = utxt(code); if (code && !set.has(code)) { set.add(code); order.push(code); } };
   for (const e of ['T', 'O']) {
-    for (const p of step2.pc.filter((x) => x.erp === e).sort((a, b) => a.rowIdx - b.rowIdx)) {
+    for (const p of ((step2 && step2.pc) || []).filter((x) => x.erp === e).sort((a, b) => a.rowIdx - b.rowIdx)) {
       if (ttxt(p.pcNo).toUpperCase().slice(0, 3) !== 'PC-') continue;
-      const code = utxt(p.prod);
-      if (code && !set.has(code)) { set.add(code); order.push(code); }
+      add(p.prod);
+    }
+  }
+  // A month can legitimately have no production but still sell opening FG.
+  if (!order.length && salesDB && period) {
+    const pEnd = periodEndSerial(period);
+    for (const r of salesDB.rows || []) {
+      const d = recognitionDate(r);
+      if (d !== null && d <= pEnd && num(r.qty) !== 0) add(r.product);
     }
   }
   return order;
@@ -234,8 +242,8 @@ const monthsBetween = (a, b) => { const x = serialToYMD(a), y = serialToYMD(b); 
 /** STEP4_Update_Price_Master. manual = persistent override list, so = SO fallback list. */
 export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   const pEnd = periodEndSerial(period), pStart = periodStartSerial(period), ytdStart = ymdSerial(+period.slice(0, 4), 1, 1);
-  const prods = requiredProducts(step2);
-  if (!prods.length) throw new Error('Không có Product Code nào trong PC-P-T / PC-P-O.');
+  const prods = requiredProducts(step2, salesDB, period);
+  if (!prods.length) throw new Error('Không có Product Code trong PC-P hoặc Sales Database của kỳ.');
   const req = new Set(prods);
   if (!salesDB || !salesDB.rows.length) throw new Error('Sales Database đang trống. Hãy Validate & Save doanh thu trước.');
   const add = (m, key, a, q) => { const v = m.get(key) || [0, 0]; v[0] += a; v[1] += q; m.set(key, v); };
@@ -258,7 +266,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   soRows.forEach((r, i) => {
     const act = utxt(r.active), prod = utxt(r.product), val = num(r.price);
     const inactive = act === 'N' || act === 'NO' || act === 'INACTIVE' || act === '0';
-    r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? 'NOT USED - PRODUCT CODE NOT IN PC-P THIS PERIOD' : 'CANDIDATE';
+    r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? 'NOT USED - PRODUCT CODE NOT IN COSTING SCOPE THIS PERIOD' : 'CANDIDATE';
     if (inactive || !prod || val <= 0) return;
     const d = toSerial(r.soDate);
     const rank = d !== null ? (d <= pEnd ? 3 : 1) : 2;
@@ -282,7 +290,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     }
     if (ytd.has(p) && Math.abs(ytd.get(p)[1]) > 0.0000001) ytdP = ytd.get(p)[0] / ytd.get(p)[1];
     if (soPrice.has(p)) soP = soPrice.get(p);
-    const mp = manP.get(p) || 0;
+    const mp = manP.get(p) || 0, manOverlap = (manN.get(p) || 0) > 1;
     if (curP > 0) { sel = curP; src = 'CURRENT MONTH ACTUAL'; ref = lastSale.has(p) ? lastSale.get(p) : pEnd; }
     else if (latestP > 0) { sel = latestP; src = 'LATEST ACTUAL ' + latestMonth.get(p); ref = lastSale.get(p) ?? null; }
     else if (ytdP > 0) { sel = ytdP; src = 'YTD ACTUAL'; ref = lastSale.get(p) ?? null; }
@@ -291,15 +299,18 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
       ref = soDate.get(p) ?? null; if (mp <= 0) soUsed.set(p, src);
     }
     const row = { product: p, refPrice: sel, refSource: src, refDetail: ref, manPrice: null, manSource: null, finalPrice: null, finalSource: null, status: '' };
-    if (mp > 0) { row.manPrice = mp; row.manSource = manS.get(p); row.finalPrice = mp; row.finalSource = manS.get(p) || 'MANUAL OVERRIDE'; row.status = 'OK - MANUAL'; }
-    else if (sel > 0) { row.finalPrice = sel; row.finalSource = src; row.status = 'OK'; }
+    if (manOverlap) {
+      row.manPrice = mp || null; row.manSource = manS.get(p); row.status = 'BLOCK - MANUAL OVERLAP'; overlap++;
+    } else if (mp > 0) { row.manPrice = mp; row.manSource = manS.get(p); row.finalPrice = mp; row.finalSource = manS.get(p) || 'MANUAL OVERRIDE'; row.status = 'OK - MANUAL'; }
+    else if (sel > 0 && src !== 'SALES ORDER (AFTER PERIOD)') { row.finalPrice = sel; row.finalSource = src; row.status = 'OK'; }
+    else if (sel > 0 && src === 'SALES ORDER (AFTER PERIOD)') { row.status = 'BLOCK - SO AFTER PERIOD'; afterSO++; }
     else { row.status = 'MISSING PRICE'; missing++; missingList.push(p); }
     const age = ref !== null && ref !== undefined ? monthsBetween(ref, pEnd) : 0;
     let review;
     if (row.status === 'MISSING PRICE') review = 'MISSING';
-    else if (mp > 0 && manN.get(p) > 1) { review = `REVIEW - MANUAL OVERLAP (${manN.get(p)} dòng hiệu lực, dòng cuối được dùng)`; overlap++; } // audit F-21
+    else if (row.status === 'BLOCK - MANUAL OVERLAP') review = `BLOCK - MANUAL OVERLAP (${manN.get(p)} dòng hiệu lực)`;
+    else if (row.status === 'BLOCK - SO AFTER PERIOD') review = 'BLOCK - SO AFTER PERIOD';
     else if (mp > 0) review = 'MANUAL';
-    else if (src === 'SALES ORDER (AFTER PERIOD)') { review = 'REVIEW - SO AFTER PERIOD'; afterSO++; } // audit F-15
     else if (age > 6) { review = 'REVIEW - STALE >6M'; stale++; }
     else if (age > 3) { review = 'REVIEW - STALE 4-6M'; stale++; }
     else review = 'OK';
@@ -313,7 +324,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else r.check = 'NOT USED - SUPERSEDED BY ANOTHER SO ROW';
   });
   return {
-    pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: 'CURRENT', period },
+    pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: missing || overlap || afterSO ? 'BLOCKED - PRICE POLICY' : 'CURRENT', period },
     so: soRows, stats: { products: prods.length, missing, stale, missingList, overlap, afterSO },
   };
 }
@@ -397,7 +408,7 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
       lots.push(l);
     }
   }
-  if (!lots.length) throw new Error('Không có lô PC hợp lệ trong PC-P-T / PC-P-O.');
+  const zeroProduction = !lots.length;
   const totalRM = totalPCRm + totalSO;
   if (Math.abs(totalSO - step2SO) >= 0.01) throw new Error(`Stock Out phân bổ trên PC-P không khớp STEP 2. Chênh lệch ${(totalSO - step2SO).toFixed(2)}`);
   if (Math.abs(totalRM - step3Bridge) >= 0.01) throw new Error(`RM STEP 4 không khớp cầu nối WIP STEP 3. Chênh lệch ${(totalRM - step3Bridge).toFixed(2)}`);
@@ -434,7 +445,15 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
   const common622 = gl622 - dt622, common627 = gl627 - dt627;
   const glSummary = { direct622: dt622, direct627: dt627, common622, common627 };
   const blocked = !inputOK || missingPrice > 0 || directBad > 0 || common622 < -0.01 || common627 < -0.01;
-  const base = { period, runAt: nowISO(), lots: lots.length, totalQty, totalPCRm, totalSO, totalRM, step2SO, step3Bridge, missingPrice, fxOK: fx > 0, inputOK, gl622, gl627, fx, glStatus, glSummary, directOut, directBad, activeDirect: activeCount, reviewCount };
+  const base = { period, runAt: nowISO(), lots: lots.length, totalQty, totalPCRm, totalSO, totalRM, step2SO, step3Bridge, missingPrice, fxOK: fx > 0, inputOK, gl622, gl627, fx, glStatus, glSummary, directOut, directBad, activeDirect: activeCount, reviewCount, zeroProduction };
+  if (zeroProduction) {
+    const zeroBad = Math.abs(totalRM) > 0.01 || Math.abs(step3Bridge) > 0.01 || Math.abs(gl622) > 0.01 || Math.abs(gl627) > 0.01 || activeCount > 0 || directBad > 0;
+    base.blocked = !inputOK || missingPrice > 0 || zeroBad;
+    base.zeroReason = zeroBad ? 'Kỳ không có PC lot nhưng vẫn có RM / 622 / 627 / direct allocation cần xử lý.' : 'Kỳ không phát sinh sản xuất; STEP 5 chỉ chạy tồn đầu kỳ / bán hàng.';
+    base.rows = []; base.alloc622 = 0; base.alloc627 = 0; base.sumCost = 0; base.nonPositive = 0;
+    base.recon = reconcile({ ...base, weightExpected: 0, weightResult: 0, outD622: 0, outD627: 0, costExpected: totalRM + gl622 + gl627, costResult: 0, blocked: base.blocked });
+    return base;
+  }
   if (blocked) {
     base.blocked = true;
     base.recon = reconcile({ ...base, alloc622: 0, alloc627: 0, weightExpected: 0, weightResult: 0, outD622: 0, outD627: 0, costExpected: totalRM + gl622 + gl627, costResult: 0, blocked: true });
