@@ -14,6 +14,19 @@ export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_SALES_RETURN
 export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist']);
 
 // ======================= derived =======================
+const salesReturnsInPeriod = (S) => ((S.d.salesDB && S.d.salesDB.rows) || []).filter((r) => {
+  if (utxt(r.tranType) !== 'SALES RETURN') return false;
+  const d = F5.saleDate(r);
+  return d !== null && serialToISO(d).slice(0, 7) === S.period;
+});
+export function returnStepStatus(S, D5) {
+  const n = salesReturnsInPeriod(S).length;
+  if (!n) return 'PASS';
+  if (!D5 || !D5.res) return 'NOT RUN';
+  if (D5.fresh !== 'CURRENT') return 'RERUN REQUIRED';
+  const rc = D5.res.returnControl;
+  return rc && rc.status === 'BLOCK' ? 'BLOCK' : 'PASS';
+}
 /** Engine side of the FAST tie. */
 export function engineBalances(S, p2, res) {
   const d = S.d; const reg = d.register ? d.register.rows : [];
@@ -188,8 +201,9 @@ export function railStatus(S, D5) {
   const s5o = !op ? 'NOT RUN' : op.status === 'VALIDATED' ? 'PASS' : op.status === 'VALIDATED WITH REVIEW' ? 'PASS WITH REVIEW' : op.status === 'BLOCKED' ? 'BLOCK' : 'NOT VALIDATED';
   const closed = S.d.closed && S.d.closed.period === S.period;
   const s5 = !D5.res ? 'NOT RUN' : D5.fresh !== 'CURRENT' ? 'RERUN REQUIRED' : D5.recon.e18;
+  const s5r = returnStepStatus(S, D5);
   const s5c = closed ? 'CLOSED' : !D5.res ? 'NOT RUN' : D5.hg.gate !== 'PASS' ? 'RERUN HISTORY' : D5.recon.finalStatus;
-  return { s5o, s5, s5c };
+  return { s5o, s5, s5r, s5c };
 }
 
 // ======================= 5.1 Opening FG =======================
@@ -298,7 +312,7 @@ export function viewFIFO(el) {
     ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn FIFO (632)', T.cogsA, true)}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
     <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}</details>
-    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['returns', 'STEP 5R · Hàng bán trả lại'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
+    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
     <div id="t5"></div></section>`;
   const modeSel = el.querySelector('#s5-mode');
   const rateIn = el.querySelector('#s5-rate');
@@ -358,6 +372,29 @@ export function viewFIFO(el) {
     box.innerHTML = recTable(res.rec, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], REC_LABELS) + `<p class="muted">Run snapshot: chế độ ${esc(res.mode)} · ${res.openLayers} lớp đầu kỳ · override dùng ${res.overridesUsed} · kết quả ${esc(res.runResult)}</p>`;
   }
 }
+export function viewReturns(el) {
+  const S = A.S; const D5 = A.derived().d5; const res = D5 && D5.res;
+  const src = salesReturnsInPeriod(S);
+  const status = returnStepStatus(S, D5);
+  const rc = res && res.returnControl ? res.returnControl : { rows: [], total: 0, processed: 0, blocked: 0, qty: 0, cogsReversal: 0, status: src.length ? 'NOT RUN' : 'PASS' };
+  el.innerHTML = `<section class="page">
+    <header class="ph"><div><h1>STEP 5R · Hàng bán bị trả lại</h1><p class="lead">Bước kiểm soát riêng cho SALES RETURN vật lý. Hệ thống match invoice gốc, giới hạn số lượng trả lũy kế, reverse đúng RM / 622 / 627 / COGS gốc và tạo Returned FG Layer theo ngày trả hàng. CREDIT NOTE không làm tăng tồn kho.</p></div>
+      <div class="result"><span>Kết quả STEP 5R</span>${A.pill(status)}<small>${src.length} giao dịch SALES RETURN trong kỳ</small></div></header>
+    <div class="row"><a class="btn ghost" href="#sales">Mở nguồn Sales Database</a><a class="btn" href="#step5">Mở STEP 5.2 · RUN FIFO COGS</a><span class="muted">STEP 5R dùng cùng chronological FIFO engine với STEP 5.2 để không làm sai thứ tự layer.</span></div>
+    <div class="kpis">${A.kpiN('Sales Return nguồn', src.length)}${A.kpiN('Processed', rc.processed)}${A.kpiN('Blocked', rc.blocked)}${A.kpiN('Return qty', rc.qty)}${A.kpi('COGS reversal', rc.cogsReversal, true)}<div class="kpi"><span>Return control</span><b>${A.pill(rc.status)}</b></div></div>
+    ${!src.length ? A.emptyNote('Kỳ này không có SALES RETURN vật lý trong Sales Database.')
+      : !res ? '<div class="alert review"><b>Chưa chạy FIFO.</b> STEP 5R chỉ hoàn tất sau RUN FIFO COGS vì phải lấy đúng giá vốn của invoice/layer gốc.</div>'
+        : D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>STEP 5R OUTDATED.</b> ${esc(D5.stale || 'Dữ liệu đầu vào đã thay đổi')}. Chạy lại STEP 5.2.</div>`
+          : rc.blocked ? `<div class="alert block"><b>Còn ${rc.blocked} Sales Return bị BLOCK.</b> Kiểm tra Original Invoice No., product, số lượng còn được trả và lịch sử invoice gốc.</div>`
+            : '<div class="alert pass"><b>STEP 5R PASS.</b> Toàn bộ Sales Return đã match invoice gốc và reverse COGS thành công.</div>'}
+    <div id="t5r-main"></div>
+  </section>`;
+  if (!res || !rc.rows.length) return;
+  const rt = { seq: 'int', date: 'date', returnQty: 'qty', cogsRM: 'num', cogs622: 'num', cogs627: 'num', cogsTotal: 'num', status: 'status' };
+  const cols = colsOf(F5.RETURN_FIELDS, F5.RETURN_HEADERS, rt, { returnInv: 140, customer: 180, productName: 220, originalInv: 160, layerId: 220, message: 320 });
+  A.mountTable(el.querySelector('#t5r-main'), { columns: cols, rows: rc.rows, filterKey: 'status', height: 560, totals: ['returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal'], onExport: A.exportTable('05_SALES_RETURN', cols) });
+}
+
 const REC_LABELS = { 4: 'Opening FG validation', 5: 'STEP 4 output current & passed', 6: 'Production layers vs STEP 4 total cost', 7: 'Production qty vs STEP 4 complete qty', 8: 'Qty roll-forward', 9: 'Amount roll-forward', 10: 'Component roll-forward RM / 622 / 627', 11: 'FIFO qty = eligible sales qty', 12: 'Sales line COGS = FIFO detail total', 13: 'Products with insufficient FG', 14: 'Layers with negative remaining qty', 15: 'Sales lines needing review', 16: 'Closing lots with unit cost above selling price' };
 function recTable(rec, keys, labels) {
   return `<table class="cp"><thead><tr><th>Kiểm soát</th><th class="r">Kỳ vọng / Nguồn</th><th class="r">Kết quả</th><th class="r">Chênh lệch</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead><tbody>
