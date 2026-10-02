@@ -16,7 +16,8 @@ const priorCache = new Map();
 function ctxBase() {
   const S = A.S; const D = A.derived();
   const fl = D.d4 ? D.d4.fl : null; const res = D.d5 ? D.d5.res : null;
-  const key = [S.period, Object.keys(S.d.datasets).length, S.d.step4 && S.d.step4.runAt, res && res.runAt, S.d.wipadj && S.d.wipadj.control && S.d.wipadj.control.appliedAt].join('|');
+  const importKey = Object.values(S.d.datasets || {}).map((d) => d && d.importedAt || '').sort().join(',');
+  const key = [S.period, Object.keys(S.d.datasets).length, importKey, S.d.step4 && S.d.step4.runAt, res && res.runAt, S.d.wipadj && S.d.wipadj.control && S.d.wipadj.control.appliedAt].join('|');
   if (cache.key !== key) cache = { key, index: TR.buildIndex(S.d.datasets), list: null, counts: null };
   return { S, D, fl, res, index: cache.index };
 }
