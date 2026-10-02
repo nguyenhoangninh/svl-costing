@@ -136,6 +136,7 @@ export async function saveAccess(members) {
 
 const pdoc = (period) => fb.F.doc(fb.fs, CLOUD_COLLECTION, period);
 const cdoc = (period, id) => fb.F.doc(fb.fs, CLOUD_COLLECTION, period, 'chunks', id);
+const rdoc = (period, id) => fb.F.doc(fb.fs, CLOUD_COLLECTION, period, 'revisions', id);
 const CHUNK = 700000;
 /** Chunk id of blob `name` part k. New saves use content-addressed keys (name@hash) so a save never overwrites
  *  chunks that the committed manifest still points to; legacy manifests (no key) use name__k. */
@@ -177,21 +178,24 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
     for (let k = 0; k < n; k++) { await F.setDoc(cdoc(period, chunkId(name, m, k)), { d: b64.slice(k * CHUNK, (k + 1) * CHUNK) }); written.push(chunkId(name, m, k)); }
     manifest[name] = m;
   }
-  const meta = { period, rev: curRev + 1, blobs: manifest, summary: summary || {}, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
+  const manifestHash = await sha(JSON.stringify(manifest));
+  const meta = { period, rev: curRev + 1, blobs: manifest, manifestHash, summary: summary || {}, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
+  const revisionId = `${String(meta.rev).padStart(6, '0')}-${manifestHash}`;
   try {
     await F.runTransaction(fb.fs, async (t) => {
       const s2 = await t.get(pdoc(period));
       const r2 = s2.exists() ? s2.data().rev || 0 : 0;
       if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
       t.set(pdoc(period), meta);
+      t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
     });
   } catch (e) {
     // nothing committed: remove the chunks this attempt wrote (best effort, admins only)
     if (isAdmin()) for (const id of written) { if (!referenced(old, id)) await F.deleteDoc(cdoc(period, id)).catch(() => {}); }
     throw e;
   }
-  // committed: clean chunks that no manifest references any more (admins only; harmless leftovers otherwise)
-  if (isAdmin()) await sweepChunks(period, manifest).catch(() => {});
+  // Do not sweep superseded content-addressed chunks: immutable revision manifests may still reference them.
+  // Retention can be managed by a separate archival policy after the accounting retention period.
   return meta;
 }
 function referenced(manifest, id) {
@@ -201,6 +205,13 @@ function referenced(manifest, id) {
 async function sweepChunks(period, manifest) {
   const q = await fb.F.getDocs(fb.F.collection(fb.fs, CLOUD_COLLECTION, period, 'chunks'));
   for (const d of q.docs) if (!referenced(manifest, d.id)) await fb.F.deleteDoc(d.ref);
+}
+
+export async function cloudRevisions(period, limitN = 100) {
+  if (!cloud.user) return [];
+  const F = fb.F, col = F.collection(fb.fs, CLOUD_COLLECTION, period, 'revisions');
+  const q = await F.getDocs(F.query(col, F.orderBy('rev', 'desc'), F.limit(limitN)));
+  return q.docs.map((d) => ({ id: d.id, ...d.data(), at: d.data().at && d.data().at.toDate ? d.data().at.toDate().toISOString() : d.data().clientAt }));
 }
 
 export async function cloudMeta(period) {
