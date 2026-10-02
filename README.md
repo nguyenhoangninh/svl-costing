@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.10.1 Cloud + STEP 5R UI hotfix (02/10/2026):** sửa Firestore contract cho **CLOSE / REOPEN**: OPEN→CLOSED và CLOSED→OPEN là transition rõ ràng; REOPEN được phép cập nhật live `summary.step5` cùng `closed/everClosed` nhưng vẫn chỉ thay đổi blob `closed` trong accounting manifest. Thêm preflight/diagnostic khi cloud và local lệch trạng thái hoặc Rules/role Admin chưa đúng. **STEP 5R Sales Return** nay là một bước riêng trên sidebar và Control Center với màn hình Return Register độc lập; engine vẫn chạy chung chronological FIFO với STEP 5.2 để giữ đúng COGS/layer. Màn hình đăng nhập được thiết kế lại riêng cho iPhone/iPad/tablet, bỏ rail/kỳ báo cáo trước khi login và dùng card đăng nhập responsive.
+
 > **v1.10.0 STEP 5R & Close Integrity (02/10/2026):** tách Sales Return thành module/function độc lập **STEP 5R** với Return Register, strict original-invoice matching, cumulative return cap, original COGS reversal và Returned FG Layer; Return History và Close reconciliation dùng cùng một contract. Mọi FG Rework Active bắt buộc STRICT_DATE; Production layer thiếu completion date bị chặn trong STRICT_DATE; Sales MONTHLY/YTD bị hard-block nếu sai phạm vi recognition period; STEP 4/5 dùng chung canonical Bill/B.L. Recognition Date. NRV RECORDED được bridge vào FAST 2294 + 632. Cloud dùng immutable content-addressed chunks, exact revision snapshot, ever-closed retention và Close exception package; CSP được bổ sung; CI có accounting + retention contract tests.
 
 > **v1.9.1 Closed-period integrity patch (02/10/2026):** REOPEN được cloud-confirm trước khi ghi audit cục bộ; Firestore chỉ cho admin stage blob `closed@…` khi kỳ đang CLOSED, parent revision chỉ được đổi trạng thái closed tương ứng, và immutable revision phải bind đúng `rev + manifestHash` của parent sau transaction. Đây là hardening cho tính bất biến kỳ đã đóng; các costing-policy controls của v1.9.0 giữ nguyên.
@@ -41,8 +43,9 @@ Engine ban đầu được port từ VBA v30.9 và vẫn giữ **legacy regressi
 10. **4.3 Phân bổ giá thành**: *Chạy STEP 4* → xem giá thành theo lô, đối chiếu, kiểm tra đơn giá lô.
 11. **5.1 FG đầu kỳ**: roll forward từ FG cuối kỳ trước (kỳ trước phải đã đóng) hoặc import template → *Validate*.
 12. **5.2 FIFO giá vốn**: *RUN FIFO COGS* (tự chạy luôn FIFO rework nếu sổ 2B có dòng). Nếu báo rework hoàn thành làm đổi giá thành STEP 4, chạy lại một lần nữa.
-13. **5.3 FG History & đóng kỳ**: *BUILD FG HISTORY* → *CLOSE MONTH*. Sau đó tạo kỳ mới: FG đầu kỳ, Opening WIP, Rework WIP B/F, FG History, Sales DB, giá… được mang sang tự động.
-14. Xuất Excel từng bảng hoặc cả kỳ khi cần lưu trữ.
+13. **5R Sales Return**: mở bước riêng để kiểm Return Register, Original Invoice, số lượng trả còn lại và COGS reversal. Nếu STEP 5R BLOCK thì chưa được đóng kỳ.
+14. **5.3 FG History & đóng kỳ**: *BUILD FG HISTORY* → *CLOSE MONTH*. Sau đó tạo kỳ mới: FG đầu kỳ, Opening WIP, Rework WIP B/F, FG History, Sales DB, giá… được mang sang tự động.
+15. Xuất Excel từng bảng hoặc cả kỳ khi cần lưu trữ.
 
 **Chuyển từ Excel sang web:** *Kỳ, cloud & chuyển đổi → Nạp một kỳ từ file Costing Master (.xlsm)* đọc 21 sheet ERP, WIP_OPENING, sổ rework, các sheet STEP 3B / 4 / 5 (ERP map, quyết định duyệt, doanh thu, giá, GL, FG đầu kỳ, override, FG History), chạy lại STEP 2–5 và hiện bảng đối chiếu Web ↔ Excel.
 
@@ -51,7 +54,7 @@ Engine ban đầu được port từ VBA v30.9 và vẫn giữ **legacy regressi
 Ứng dụng dùng project Firebase riêng **SVL-Costing** (`svl-costing`). Dữ liệu giá thành nằm trong **Firestore** và bắt buộc đăng nhập Google.
 
 1. Firebase Console → **Build → Firestore Database → Create database** (chọn vùng `asia-southeast1`, chế độ production).
-2. Firestore → **Rules**: dán nội dung `firestore.rules` → **Publish**. Đây là bước release bắt buộc mỗi khi file rules thay đổi; deploy GitHub Pages không tự publish Firestore Rules. v1.9 thêm immutable revision manifests và CLOSED-period immutability nên phải publish rules v1.9 trước khi coi cloud-control release là hoàn tất.
+2. Firestore → **Rules**: dán nội dung `firestore.rules` → **Publish**. Đây là bước release bắt buộc mỗi khi file rules thay đổi; deploy GitHub Pages không tự publish Firestore Rules. v1.10.1 sửa contract CLOSE/REOPEN; phải publish đúng `firestore.rules` của v1.10.1 trước khi deploy web v1.10.1.
 3. **Authentication → Sign-in method → Google → Enable**.
 4. **Authentication → Settings → Authorized domains → Add domain**: `nguyenhoangninh.github.io`.
 5. Trong rules, thay `YOUR_EMAIL@gmail.com` bằng email Google của chủ sở hữu (luôn có quyền Quản trị). Người dùng khác được thêm/xoá ngay trên web: **Kỳ, cloud & chuyển đổi → Người dùng & phân quyền** (Quản trị / Chỉnh sửa / Chỉ xem).
