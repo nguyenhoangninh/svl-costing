@@ -27,10 +27,10 @@ jobs:
       - name: Release / PWA / security contract tests
         run: node test/release-contract.mjs
 
-  # Production deploy temporarily paused during v1.10.0 remediation.
+  # Production deploy: publish main only after every accounting/control check passes.
   deploy:
     needs: checks
-    if: false
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
