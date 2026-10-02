@@ -1,9 +1,9 @@
 {
   "name": "svl-costing",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "SVL Costing Master on the web",
   "scripts": {
-    "test": "node test/unit.mjs && node test/synth.mjs",
+    "test": "node test/unit.mjs && node test/synth.mjs && node test/rules-contract.mjs",
     "test:golden": "node test/verify.mjs ../costing.xlsm ../fixtures/erp && node test/verify2.mjs ../costing.xlsm ../fixtures/erp ../fixtures/sales_2026.xlsx && node test/verify5.mjs ../costing.xlsm ../fixtures/erp ../fixtures/sales_2026.xlsx"
   },
   "author": "",
