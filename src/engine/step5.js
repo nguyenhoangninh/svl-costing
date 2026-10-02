@@ -1,7 +1,7 @@
 // STEP 5 — FG inventory by production lot, FIFO COGS, FG Rework FIFO (5B), FG History and month close.
 // Port of modSTEP5_FIFO (STEP5_Run_FIFO_COGS …), modSTEP2B_5B_FGRework (RW_RunMonthlyReworkFIFO …),
 // modSTEP5_MonthClose (STEP5_Build_FG_History_B333 / STEP5_Close_Month_B333) and the 05_RECONCILIATION formulas.
-import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, isoToSerial, fp } from './util.js';
+import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, cellDateSerial, fp } from './util.js';
 
 export const TOLQ = 0.0001;          // S5_TOLQ
 const TOL_QTY = 0.000001;            // modSTEP5_MonthClose / RW
@@ -28,16 +28,10 @@ export const XNT_HEADERS = ['Item code', 'Item Name(English)', 'Base Unit', 'Qty
 
 // ---------------------------------------------------------------- helpers
 const s5t = (v) => ttxt(v);
-/** S5DateVal on a Value2 cell: serials 20000..80000 → Int, ISO / dd/mm/yyyy strings → serial. */
+/** Strict STEP 5 date parser; impossible calendar dates are rejected instead of normalized. */
 export function dateVal(v) {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v === 'number') return v > 20000 && v < 80000 ? Math.floor(v) : null;
-  const s = String(v).trim();
-  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
-  if (m) return isoToSerial(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`);
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
-  if (m) return isoToSerial(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`);
-  return null;
+  const d = cellDateSerial(v);
+  return d !== null && d > 20000 && d < 80000 ? d : null;
 }
 /** VBA Format$ for "0.####" / "#,##0.####" / "#,##0" / "0" (incl. the trailing "." quirk of optional decimals). */
 export function vbFmt(x, maxDec = 0, group = false) {
@@ -231,10 +225,16 @@ export function runFIFO(ctx) {
     const s = { seq: S.length + 1, date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
     s.key = lineKey(r, d, keyCount);
     if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
-    else if (!s.prod && s.qty !== 0) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
+    else if (!s.prod && s.qty !== 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(s.type)) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
+    else if (s.type === 'SALES RETURN') {
+      if (s.qty < 0 && returnsOn) s.def = 'RETURN'; // physical return: reverse original COGS and restore FG
+      else { s.def = 'REVIEW'; s.msg = 'SALES RETURN requires negative quantity and the return engine; '; }
+    }
+    else if (s.type === 'CREDIT NOTE' || s.type === 'NON-PRODUCT REVENUE') { s.def = 'NO COGS'; s.msg = s.type + ' – financial/revenue transaction, no physical FG movement; '; }
+    else if (s.type === 'OTHER' || s.type === 'ADJUSTMENT') { s.def = 'REVIEW'; s.msg = s.type + ' requires explicit accounting treatment; '; }
+    else if (s.qty < 0) { s.def = 'REVIEW'; s.msg = 'Negative quantity is not a SALES RETURN; '; }
     else if (!s.prod || s.qty === 0) s.def = 'NO COGS';
-    else if (s.qty < 0 && returnsOn) { s.def = 'RETURN'; } // sales return: restored to FG at the original sale's COGS
-    else if (s.qty < 0 || s.type.includes('RETURN')) { s.def = 'REVIEW'; s.msg = 'Return / negative quantity - not processed by FIFO; '; }
+    else if (!['NORMAL SALE', 'FOC', 'SAMPLE'].includes(s.type)) { s.def = 'REVIEW'; s.msg = 'Unsupported inventory Transaction Type; '; }
     else if (!first.has(s.prod)) { s.def = 'REVIEW'; s.msg = 'No FG layer for this Product Code; '; }
     else s.def = 'FIFO COGS';
     s.fin = s.def;
@@ -320,12 +320,21 @@ export function runFIFO(ctx) {
         const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
         const cand = [...currentOrigins(), ...prior];
         let o = null;
-        if (s.origInv) o = cand.filter((z) => utxt(z.inv) === utxt(s.origInv)).sort((a, b) => b.date - a.date)[0] || null;
-        if (!o) o = cand.filter((z) => utxt(z.cust) === utxt(s.cust)).sort((a, b) => b.date - a.date)[0] || null;
-        if (!o) {
-          s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
-          s.msg += `Return: original sale not found${s.origInv ? ' (' + s.origInv + ')' : ''} – set Original Invoice No.; `;
-          continue;
+        if (s.origInv) {
+          o = cand.filter((z) => utxt(z.inv) === utxt(s.origInv)).sort((a, b) => b.date - a.date)[0] || null;
+          if (!o) {
+            s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
+            s.msg += `Return: Original Invoice ${s.origInv} not found for product ${prod}; no automatic fallback is allowed; `;
+            continue;
+          }
+        } else {
+          const same = cand.filter((z) => utxt(z.cust) === utxt(s.cust)).sort((a, b) => b.date - a.date);
+          if (same.length === 1) o = same[0];
+          else {
+            s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
+            s.msg += same.length ? 'Return: multiple possible original invoices – enter Original Invoice No.; ' : 'Return: original sale not found – enter Original Invoice No.; ';
+            continue;
+          }
         }
         const ok = originKey(o), already = num(o.returned) + (returnedNow.get(ok) || 0), avail = Math.max(0, num(o.fq) - already);
         if (q > avail + TOLQ) {
@@ -340,6 +349,7 @@ export function runFIFO(ctx) {
         returnedNow.set(ok, (returnedNow.get(ok) || 0) + q);
         retN++; retQ += q; retA += -s.tot;
         const l = { lid: `RT-${period.replace('-', '')}-${s.inv || 'NOINV'}-${pad(retN, 3)}`, src: 'RETURN', sp: period, pc: o.inv || '', dt: s.date, mo: '', prod, name: s.name, loc: '', unit: '', qty: q, rm: -s.rm, a622: -s.c622, a627: -s.c627, tot: -s.tot, price: 0, prov: 0, cons: '', flag: `Sales return ${s.inv}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + retN };
+        s.returnLid = l.lid;
         sorted.push(l); prodLayers.push(l);
         prodLayers.sort((a, b) => a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
         continue;
@@ -364,7 +374,14 @@ export function runFIFO(ctx) {
         const s = x.s;
         if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; }
         else s.status = 'OK';
-        if (s.fq > TOLQ && s.inv) originNow.set(originKey({ inv: s.inv, prod }), { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
+        if (s.fq > TOLQ && s.inv) {
+          const ok = originKey({ inv: s.inv, prod });
+          const p = originNow.get(ok);
+          if (p) {
+            p.fq += s.fq; p.rm += s.rm; p.c622 += s.c622; p.c627 += s.c627; p.tot += s.tot;
+            p.date = Math.min(p.date, s.date);
+          } else originNow.set(ok, { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
+        }
       } else rwPlan[x.e.i] = { takes, short: nd > TOLQ ? nd : 0 };
     }
     if (short) shortProducts++;
@@ -437,7 +454,7 @@ export function runFIFO(ctx) {
   }
   let sumLineA = 0;
   const sales = S.map((s) => {
-    const o = { seq: s.seq, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow };
+    const o = { seq: s.seq, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
     else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv });
     return o;
@@ -749,6 +766,13 @@ export function buildHistory(res, prevRows, ctx) {
     h.price = price; h.provVND = prov; h.net = num(d.tot) - prov; h.cons = cons;
     out.push(h);
   }
+  // Sales Return is a negative COGS history event. Without this reversal, FG History would not reconcile to net 632.
+  for (const s of res.sales || []) {
+    if (s.fin !== 'RETURN' || s.status !== 'RETURNED' || !(num(s.fq) < -TOL_QTY)) continue;
+    nCOGS++;
+    const lid = ttxt(s.returnLid) || `RET-${period.replace('-', '')}-${ttxt(s.inv) || s.seq}`;
+    out.push({ pc: ttxt(s.origInv || ''), date: s.date, mo: '', prod: ttxt(s.prod), name: ttxt(s.name), loc: '', unit: '', qty: num(s.fq), rmSrc: num(s.rm), rmST: 0, tot: num(s.tot), rm: num(s.rm), a622: num(s.c622), a627: num(s.c627), price: 0, costMonth, provUSD: 0, pl7: 0, srcPeriod: period, provVND: 0, net: num(s.tot), cons: 0, hStatus: 'CURRENT COGS', archive: period, lid, source: 'SALES RETURN REVERSAL' });
+  }
   for (const c of res.closing) {
     if (!ttxt(c.lid)) continue;
     nClose++;
@@ -767,7 +791,8 @@ export function historyGate(hist, res, period) {
   const sum = (rows, f) => rows.reduce((a, r) => a + num(r[f]), 0);
   const cogs = cur('CURRENT COGS'), cl = cur('CLOSING FG');
   const T = res ? res.totals : {};
-  const exp8 = res ? res.detail.filter((d) => ttxt(d.lid)).length + res.closing.length : 0;
+  const retHistN = res ? (res.sales || []).filter((s) => s.fin === 'RETURN' && s.status === 'RETURNED' && num(s.fq) < -TOL_QTY).length : 0;
+  const exp8 = res ? res.detail.filter((d) => ttxt(d.lid)).length + retHistN + res.closing.length : 0;
   const rows = [
     { label: 'History COGS Qty', hist: sum(cogs, 'qty'), step5: num(T.cogsQ) },
     { label: 'History COGS Amount', hist: sum(cogs, 'tot'), step5: num(T.cogsA) },
