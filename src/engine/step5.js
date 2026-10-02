@@ -193,9 +193,10 @@ export function runFIFO(ctx) {
     L.push({ lid: s5t(r.lid), src: 'OPENING', sp: s5t(r.srcPeriod), pc: s5t(r.pc), dt: dateVal(r.date) || 0, mo: s5t(r.mo), prod: utxt(r.prod), name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty: num(r.qty), rm: num(r.rm), a622: num(r.a622), a627: num(r.a627), tot: num(r.tot), price: num(r.price), prov: num(r.prov), cons: s5t(r.cons), flag: utxt(r.status) === 'REVIEW' ? 'OPENING REVIEW: ' + s5t(r.msg) : '' });
   }
   const nO = L.length;
-  if (!ctx.caRows || !ctx.caRows.length) throw new Error('04_COST_ALLOCATION chưa có lô sản xuất.');
+  const caRows = ctx.caRows || [];
+  if (!caRows.length && (Math.abs(num(ctx.step4.finalCost)) > tol || Math.abs(num(ctx.step4.qty)) > TOLQ)) throw new Error('STEP 4 có giá thành / sản lượng nhưng 04_COST_ALLOCATION không có lô sản xuất.');
   let step4Qty = 0, step4Cost = 0;
-  for (const r of ctx.caRows) {
+  for (const r of caRows) {
     const prod = utxt(r.prod), qty = num(r.qty);
     if (!s5t(r.pc) || !prod || !(qty > 0)) continue;
     const n = L.length + 1 - nO;
