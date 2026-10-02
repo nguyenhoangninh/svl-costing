@@ -19,7 +19,7 @@ const S = {
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, rwArchive: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -135,7 +135,7 @@ async function pushCloud() {
 function summaryForCloud() {
   const st = statusAll();
   const r5 = S.d.step5 && S.d.step5.period === S.period ? S.d.step5.totals : null;
-  return { step1: st.s1c.result, step2: st.s2c.status, step3: st.s3c.status, step4: st.s4c.status, step5: st.s5c.status, closingWIP: S.d.step3 ? S.d.step3.summary.closingAmt : null, cogs: r5 ? r5.cogsA : null, closingFG: r5 ? r5.closeA : null, closed: S.d.closed && S.d.closed.period === S.period ? S.d.closed.closedAt : null };
+  return { step1: st.s1c.result, step2: st.s2c.status, step3: st.s3c.status, step4: st.s4c.status, step5: st.s5c.status, closingWIP: S.d.step3 ? S.d.step3.summary.closingAmt : null, cogs: r5 ? r5.cogsA : null, closingFG: r5 ? r5.closeA : null, closed: S.d.closed && S.d.closed.period === S.period ? S.d.closed.closedAt : null, everClosed: !!S.d.closedEver || !!(S.d.closed && S.d.closed.period === S.period) };
 }
 
 async function openPeriod(p, { preferCloud = false } = {}) {
@@ -1099,7 +1099,8 @@ document.addEventListener('click', async (e) => {
     case 's5-reopen': await P3.doReopen(); render(); break;
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
-      if (isClosed()) { toast(`Kỳ ${S.period} đã CLOSED và là hồ sơ kế toán bất biến. Muốn xoá phải Mở lại kỳ trước; thao tác REOPEN sẽ để lại revision/audit riêng.`, 'block'); break; }
+      if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN.`, 'block'); break; }
+      if (isClosed()) { toast(`Kỳ ${S.period} đang CLOSED và không được xoá.`, 'block'); break; }
       if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ OPEN này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${S.period}/`)) await store.localDel(k);
         await store.localSet('periods', ((await store.localGet('periods')) || []).filter((p) => p !== S.period));
