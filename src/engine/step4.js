@@ -2,7 +2,7 @@
 // 3B final layer + FG rework carry-in, lot unit-cost check.
 // Port of modSTEP4 (STEP4_Import_Sales_Revenue, STEP4_Validate_Save_Sales, STEP4_Update_Price_Master,
 // STEP4_Run_Cost_Allocation[_Gated]), V3_RefreshPCAndStep4, RW_SyncCompletedToStep4, SVL_LotCostCheck_Build.
-import { txt, ttxt, utxt, num, isNumeric, isPeriod, serialToYMD, nowISO, cellDateSerial } from './util.js';
+import { txt, ttxt, utxt, num, isNumeric, isPeriod, serialToYMD, nowISO, cellDateSerial, recognitionDate as recognitionDateShared } from './util.js';
 
 const EPOCH = Date.UTC(1899, 11, 30);
 const ymdSerial = (y, m, d) => (Date.UTC(y, m - 1, d) - EPOCH) / 86400000;
@@ -11,12 +11,8 @@ export function periodStartSerial(p) { return ymdSerial(+p.slice(0, 4), +p.slice
 
 /** Strict accounting date parser. Impossible calendar dates return null. */
 export function toSerial(v) { return cellDateSerial(v); }
-/** Canonical accounting recognition date: when Bill/B.L. Date is supplied it is authoritative; fallback to Invoice Date only when Bill Date is blank. */
-export const recognitionDate = (r) => {
-  const rawBill = r && r.billDate;
-  if (rawBill !== null && rawBill !== undefined && ttxt(rawBill) !== '') return toSerial(rawBill);
-  return toSerial(r && r.invDate);
-};
+/** Canonical accounting recognition date shared with STEP 5 / FAST. */
+export const recognitionDate = recognitionDateShared;
 const yyyymm = (serial) => { const d = serialToYMD(serial); return `${d.y}${String(d.m).padStart(2, '0')}`; };
 const yyyymmdd = (serial) => { const d = serialToYMD(serial); return `${d.y}${String(d.m).padStart(2, '0')}${String(d.d).padStart(2, '0')}`; };
 const fmt4 = (x) => x.toFixed(4);
