@@ -10,7 +10,7 @@ const tabsHTML = (cur, tabs, attr) => `<div class="tabs" role="tablist">${tabs.m
 const colsOf = (fields, headers, types = {}, widths = {}) => fields.map((f, i) => ({ key: f, label: headers[i], type: types[f] || 'text', width: widths[f] || (types[f] === 'num' ? 140 : types[f] === 'qty' ? 100 : f === 'prod' ? 150 : 120), trace: f === 'prod' }));
 
 export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'closedEver', 'rwArchive', 'fastTie', 'nrvDecision'];
-export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
+export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_SALES_RETURN', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
 export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist']);
 
 // ======================= derived =======================
@@ -551,7 +551,7 @@ export async function doClose() {
   let msg = `Đóng kỳ kế toán ${S.period}?\n\nFinal Production Status: ${recon.finalStatus}\nMonth Close Gate: ${recon.closeGate}\nFG History: PASS\nBatch 7: PASS`;
   if (recon.finalStatus.includes('REVIEW') || recon.closeGate.includes('REVIEW')) msg += '\n\nKỳ này còn mục REVIEW. Xác nhận đã được quản lý review trước khi đóng.';
   if (!confirm(msg)) return;
-  const prevArchive = d.rwArchive;
+  const prevArchive = d.rwArchive, prevClosedEver = d.closedEver;
   const exceptions = [];
   for (const [no, r] of Object.entries(recon.rows || {})) if (String(r && r.status || '').startsWith('REVIEW')) exceptions.push({ control: no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.result ?? '', diff: r.diff ?? '', note: r.note || '' });
   if (D5.tie && D5.tie.diffs) exceptions.push({ control: 'FAST', label: 'FAST reconciliation', status: D5.tie.status, result: D5.tie.rows.filter((r) => r.status === 'DIFF').map((r) => `${r.acc}:${r.diff}`).join('; '), note: D5.tie.approval ? D5.tie.approval.note : '' });
@@ -568,9 +568,9 @@ export async function doClose() {
     A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
     const r = await A.syncNow();
     if (!r.ok) {
-      d.closed = null; d.rwArchive = prevArchive;
+      d.closed = null; d.closedEver = prevClosedEver; d.rwArchive = prevArchive;
       A.audit('STEP 5 - CLOSE MONTH FAILED', `Cloud chưa xác nhận: ${r.error}`);
-      A.markDirty('closed', 'rwArchive', 'audit');
+      A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
       A.toast(`CHƯA đóng kỳ: cloud không xác nhận (${r.error}). Kiểm tra kết nối / xung đột rồi CLOSE MONTH lại.`, 'block');
       A.render(); return;
     }
