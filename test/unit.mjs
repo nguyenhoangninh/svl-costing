@@ -227,7 +227,7 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('#6 return reversal included in FG History', rh.rows.some((h) => h.source === 'SALES RETURN REVERSAL' && h.qty === -1 && Math.round(h.tot) === -100), true);
   eq('#6 return → FG History gate PASS', F5.historyGate(rh, rr, P2).gate, 'PASS');
   eq('#6 STEP 5R register processed', [rr.returnControl.status, rr.returnControl.total, rr.returnControl.processed, rr.returnRegister[0].originalInv], ['PASS', 1, 1, 'X1']);
-  const rfl = { rows: ca, totals: { totalCost: 500, totalRM: 300, wipAdj: 0 }, gate6: 'PASS' };
+  const rfl = { rows: ca.map((r) => ({ ...r, baseRM: r.totalRM, baseCost: r.totalCost, wipAdj: 0 })), totals: { totalCost: 500, totalRM: 300, wipAdj: 0 }, gate6: 'PASS' };
   const rrec = F5.step5Recon({ period: P2, res: rr, freshness: 'CURRENT', hist: rh, histGate: F5.historyGate(rh, rr, P2), gl: { ytd622: null, ytd627: null }, fl: rfl, s4: { alloc622: 100, alloc627: 100 }, gate6: 'PASS' });
   eq('#6 return → STEP5 reconciliation row 36 PASS', rrec.rows[36].status, 'PASS');
   eq('#6 return → Close Gate can become READY', rrec.closeGate.startsWith('READY'), true);
