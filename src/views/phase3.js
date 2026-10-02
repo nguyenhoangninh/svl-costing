@@ -584,8 +584,9 @@ export async function doReopen() {
       A.render(); return;
     }
   }
+  S.d.closedEver = true;
   A.audit('STEP 5 - REOPEN PERIOD', `${reason} (đóng lúc ${was ? was.closedAt : '?'} bởi ${was ? was.closedBy : '?'})`);
-  A.markDirty('audit');
+  A.markDirty('closedEver', 'audit');
   A.toast(`Đã mở lại kỳ ${S.period}${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Sau khi sửa: RUN FIFO → BUILD FG HISTORY → CLOSE MONTH.`, 'pass');
 }
 
