@@ -579,8 +579,11 @@ VIEWS.step2 = (el) => {
 function doStep2() {
   const periodIssues = outOfPeriodRows(S.d.datasets, S.period);
   if (periodIssues.length) {
-    const sample = periodIssues.slice(0, 3).map((x) => `${x.key}: ${x.n} dòng [${x.months.join(', ')}]`).join('; ');
-    toast(`STEP 2 bị chặn: có dòng ERP ngoài kỳ ${S.period}. ${sample}${periodIssues.length > 3 ? '…' : ''}. Sửa / xuất lại báo cáo rồi import lại.`, 'block');
+    const sample = periodIssues.slice(0, 3).map((x) => {
+      const p = []; if (x.outside) p.push(`ngoài kỳ ${x.outside}`); if (x.blank) p.push(`trống ngày ${x.blank}`); if (x.invalid) p.push(`ngày lỗi ${x.invalid}`); if (x.missingDateColumn) p.push(`thiếu cột Date ${x.missingDateColumn}`);
+      return `${x.key}: ${p.join(', ')}${x.months && x.months.length ? ' [' + x.months.join(', ') + ']' : ''}`;
+    }).join('; ');
+    toast(`STEP 2 bị chặn bởi kiểm soát ngày ERP kỳ ${S.period}. ${sample}${periodIssues.length > 3 ? '…' : ''}. Sửa / xuất lại báo cáo rồi import lại.`, 'block');
     return;
   }
   try {
