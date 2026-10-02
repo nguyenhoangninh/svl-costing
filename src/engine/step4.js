@@ -21,6 +21,11 @@ export function toSerial(v) {
   if (m) return ymdSerial(+m[3], +m[2], +m[1]);
   return null;
 }
+/** Canonical accounting recognition date: Bill/B.L. date when valid, otherwise Invoice Date. */
+export const recognitionDate = (r) => {
+  const b = toSerial(r && r.billDate);
+  return b !== null ? b : toSerial(r && r.invDate);
+};
 const yyyymm = (serial) => { const d = serialToYMD(serial); return `${d.y}${String(d.m).padStart(2, '0')}`; };
 const yyyymmdd = (serial) => { const d = serialToYMD(serial); return `${d.y}${String(d.m).padStart(2, '0')}${String(d.d).padStart(2, '0')}`; };
 const fmt4 = (x) => x.toFixed(4);
@@ -87,7 +92,7 @@ export function includeInPrice(tranType, qty, amt) {
 }
 const KNOWN_TYPES = ['NORMAL SALE', 'SALES RETURN', 'CREDIT NOTE', 'FOC', 'SAMPLE', 'OTHER', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'];
 
-/** STEP4_Validate_Save_Sales — advisory validation, replace DB rows within the file's date coverage. */
+/** STEP4_Validate_Save_Sales — advisory validation; Sales DB coverage follows canonical recognition date (Bill/B.L. date, else Invoice Date). */
 export function validateSaveSales(staging, salesDB, period) {
   if (!staging || !staging.rows.length) throw new Error('Chưa có dữ liệu doanh thu trong vùng staging.');
   const periodEnd = periodEndSerial(period);
@@ -96,7 +101,8 @@ export function validateSaveSales(staging, salesDB, period) {
   let minInv = 0, maxInv = 0, latest = 0, pass = 0, review = 0, dup = 0;
   for (const r of staging.rows) {
     let msg = '';
-    const d = toSerial(r.invDate);
+    const invD = toSerial(r.invDate);
+    const d = recognitionDate(r);
     if (d !== null) {
       r.month = serialToYMD(d).m;
       if (!minInv || d < minInv) minInv = d;
@@ -130,7 +136,7 @@ export function validateSaveSales(staging, salesDB, period) {
     if (qtyOK && amtOK && qty !== 0 && unitP !== 0 && amt !== 0) { const diff = Math.abs(qty * unitP - amt); const tol = Math.max(Math.abs(amt) * 0.005, 1); if (diff > tol) msg += 'Qty x Unit Price differs from Amount USD; '; }
     if (amtOK && fx > 0 && amt !== 0 && vnd !== 0) { const diff = Math.abs(amt * fx - vnd); const tol = Math.max(Math.abs(vnd) * 0.002, 1000); if (diff > tol) msg += 'USD x FX differs from Amount VND; '; }
     else if (vnd !== 0 && fx <= 0) msg += 'Missing/invalid Exchange Rate; ';
-    const key = txnKey(r.invDate, inv, ln, prod, cust, qty, amt);
+    const key = txnKey(d, inv, ln, prod, cust, qty, amt);
     r.txnKey = key;
     if (batchKeys.has(key)) { msg += 'Possible duplicate transaction in current import batch; '; dup++; } else batchKeys.add(key);
     r.validStat = msg ? 'REVIEW' : 'PASS'; r.validMsg = msg; msg ? review++ : pass++;
@@ -138,7 +144,7 @@ export function validateSaveSales(staging, salesDB, period) {
   const saveAt = nowISO();
   const newRows = staging.rows.map((r) => {
     const prod = utxt(r.product);
-    const inc = !prod || toSerial(r.invDate) === null ? 'N' : includeInPrice(r.tranType, num(r.qty), num(r.amtUSD));
+    const inc = !prod || recognitionDate(r) === null ? 'N' : includeInPrice(r.tranType, num(r.qty), num(r.amtUSD));
     r.saveStat = 'SAVED'; r.savedAt = saveAt;
     return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, validMsg: r.validMsg, billDate: r.billDate ?? null, origInv: r.origInv ?? null, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
   });
@@ -147,18 +153,18 @@ export function validateSaveSales(staging, salesDB, period) {
   let replaced = 0; const kept = [];
   let droppedUndated = 0;
   for (const r of old) {
-    const d = toSerial(r.invDate);
+    const d = recognitionDate(r);
     if (d !== null && cov && d >= cov.from && d <= cov.to) replaced++;
     else if (d === null) droppedUndated++; // audit F-05: undated rows of an earlier save are replaced by the new batch, not kept forever
     else kept.push(r);
   }
   staging.status = 'VALIDATED & SAVED - ADVISORY';
   const rows = kept.concat(newRows);
-  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, droppedUndated, undated: newRows.filter((r) => toSerial(r.invDate) === null && (r.product || num(r.qty) !== 0)).length, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
+  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, droppedUndated, undated: newRows.filter((r) => recognitionDate(r) === null && (r.product || num(r.qty) !== 0)).length, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
 }
 
 /**
- * Date range of the Sales DB that a new file replaces (F-05). Defined by the mode, not by the first/last invoice actually present,
+ * Date range of the Sales DB that a new file replaces (F-05). Recognition date = Bill/B.L. date when valid, else Invoice Date; defined by the mode, not by the first/last invoice actually present,
  * so a transaction deleted at the edge of the source range disappears from the DB too.
  * MONTHLY: whole calendar months spanned by the file. YTD: 1 Jan of the file's first year → max(last invoice, costing period end).
  */
@@ -174,9 +180,9 @@ export function salesCoverage(mode, minInv, maxInv, period) {
 export function salesSavePreview(staging, salesDB, period) {
   const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
   let minInv = 0, maxInv = 0;
-  for (const r of staging.rows) { const d = toSerial(r.invDate); if (d === null) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
+  for (const r of staging.rows) { const d = recognitionDate(r); if (d === null) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
   const cov = salesCoverage(mode, minInv, maxInv, period);
-  const replaced = cov ? ((salesDB && salesDB.rows) || []).filter((r) => { const d = toSerial(r.invDate); return d !== null && d >= cov.from && d <= cov.to; }).length : 0;
+  const replaced = cov ? ((salesDB && salesDB.rows) || []).filter((r) => { const d = recognitionDate(r); return d !== null && d >= cov.from && d <= cov.to; }).length : 0;
   return { mode, from: cov ? cov.from : null, to: cov ? cov.to : null, replaced, inserted: staging.rows.length, kept: ((salesDB && salesDB.rows) || []).length - replaced };
 }
 
@@ -217,7 +223,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   const cur = new Map(), ytd = new Map(), mon = new Map(), latestMonth = new Map(), lastSale = new Map();
   for (const r of salesDB.rows) {
     if (utxt(r.include) !== 'Y') continue;
-    const d = toSerial(r.invDate); if (d === null || d < ytdStart || d > pEnd) continue;
+    const d = recognitionDate(r); if (d === null || d < ytdStart || d > pEnd) continue;
     const p = utxt(r.product);
     if (!p || !isNumeric(r.qty) || !isNumeric(r.amtUSD) || r.qty === null || r.amtUSD === null) continue;
     const q = num(r.qty), a = num(r.amtUSD);
