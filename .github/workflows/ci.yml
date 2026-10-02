@@ -24,6 +24,8 @@ jobs:
         run: node test/synth.mjs
       - name: Firestore accounting-retention contract tests
         run: node test/rules-contract.mjs
+      - name: Release / PWA / security contract tests
+        run: node test/release-contract.mjs
 
   # Production deploy temporarily paused during v1.10.0 remediation.
   deploy:
