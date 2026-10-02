@@ -95,6 +95,7 @@ export function derive(S, p2) {
   if (!closeReason && res && (S.prevDrift || []).length && !(d.closed && d.closed.period === S.period)) closeReason = `Số dư đầu kỳ đã lệch so với kỳ trước: ${S.prevDrift[0]}`;
   if (!closeReason && res && res.undated && res.undated.length) closeReason = `Sales Database có ${res.undated.length} dòng thiếu / sai ngày hoá đơn (vd. ${res.undated.slice(0, 3).map((u) => u.inv || 'dòng ' + u.dbRow).join(', ')}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.`;
   if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
+  if (!closeReason && res && res.returnControl && res.returnControl.status === 'BLOCK') closeReason = `STEP 5R Sales Return còn ${res.returnControl.blocked} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).`;
   if (!closeReason && res && num(res.totals && res.totals.nrvProv) > 1 && !(d.closed && d.closed.period === S.period)) {
     const nd = d.nrvDecision, key = nrvKey(res);
     if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
@@ -127,6 +128,8 @@ function step5Controls(S, x) {
     add('09a', 'Dòng bán thiếu / sai ngày hoá đơn', 0, und, und ? 'BLOCK' : 'PASS', 'Không xác định được kỳ → chưa tính giá vốn. Sửa ngày ở nguồn rồi import & lưu lại (4.1)');
     if (res.mode === 'STRICT_DATE') { const ul = num(res.stats && res.stats.undatedLayers); add('09c', 'STRICT_DATE: lớp sản xuất không có ngày hoàn thành đã được dùng', 0, ul, ul ? 'REVIEW' : 'PASS', 'PC-P thiếu Date → không chứng minh được thứ tự thời gian'); }
     add('09b', 'Dòng FIFO có cảnh báo kiểm tra dữ liệu bán', 0, adv, adv ? 'REVIEW' : 'PASS', 'Thiếu khách hàng, SL×đơn giá lệch, loại OTHER… (không chặn)');
+    const rc = res.returnControl || { total: 0, processed: 0, blocked: 0, status: 'PASS' };
+    add('09r', 'STEP 5R · Sales Return đã match & reverse COGS', rc.total, rc.processed, rc.blocked ? 'BLOCK' : 'PASS', rc.total ? `Unresolved=${rc.blocked}; Return qty=${A.fmtNum(rc.qty)}; COGS reversal=${A.fmtNum(rc.cogsReversal)}` : 'Không có Sales Return');
   }
   add('10', `Lô cuối kỳ giá vốn > NRV (giá bán − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% CPBH)`, R(16).expected, R(16).result, R(16).status, res && res.totals && res.totals.nrvProv ? `Dự phòng giảm giá đề xuất (TK 2294): ${A.fmtNum(res.totals.nrvProv)} VND – xem STEP 5.2 → Tồn cuối` : 'Review NRV (sau dự phòng)');
   if (res && res.stats && res.stats.returns) add('10b', 'Hàng bán bị trả lại nhập lại kho', 'INFO', res.stats.returns, 'INFO', `${A.fmtNum(res.totals.retQ)} sp · ${A.fmtNum(res.totals.retA)} VND giảm giá vốn (theo giá vốn hoá đơn gốc)`);
