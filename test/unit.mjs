@@ -1,5 +1,5 @@
 // Synthetic control tests (no private fixtures needed) — run in CI on every push / PR.
-import { parseUserNumber, cellDateSerial } from '../src/engine/util.js';
+import { parseUserNumber, cellDateSerial, num } from '../src/engine/util.js';
 import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.js';
 import { buildFingerprint } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
@@ -99,7 +99,7 @@ import * as TR from '../src/engine/trace.js';
 }
 
 // ---- Audit 2026-10 group A
-import { directKey, postedKey } from '../src/views/phase2.js';
+import { directKey, postedKey, directApprovalBlock } from '../src/views/phase2.js';
 import { flKey, engineBalances, nrvKey } from '../src/views/phase3.js';
 import { updatePriceMaster } from '../src/engine/step4.js';
 import { refreshErpMap } from '../src/engine/step3b.js';
@@ -113,6 +113,10 @@ import { fp as fpStr } from '../src/engine/util.js';
   eq('F-02 direct key: same rows any order', directKey([dA[1], dA[0]]), directKey(dA));
   eq('F-02 direct key: PC moved → changes', directKey(dB) !== directKey(dA), true);
   eq('F-02 direct key: inactive row ignored', directKey([...dA, { ...dA[0], active: 'N', pc: 'PC-9' }]), directKey(dA));
+  const dState = { d: { directAdj: dA, directApproval: { key: directKey(dA), by: 'checker' } } };
+  eq('F-02 current direct approval passes', directApprovalBlock(dState), '');
+  dState.d.directAdj = dB;
+  eq('F-02 direct approval lapses when allocation changes', directApprovalBlock(dState).includes('chưa có maker-checker approval'), true);
   eq('F-02 posted 3B key: amount moved → changes', postedKey(new Map([['O|PC-1|A', { amt: 10 }], ['O|PC-2|B', { amt: 0 }]])) !== postedKey(new Map([['O|PC-1|A', { amt: 0 }], ['O|PC-2|B', { amt: 10 }]])), true);
   // F-03: same total, cost moved between lots → STEP 5 key changes
   const L = (a, b) => ({ rows: [{ erp: 'O', pc: 'PC-1', prod: 'A', qty: 1, totalRM: a, t622: 0, t627: 0, totalCost: a }, { erp: 'O', pc: 'PC-2', prod: 'B', qty: 1, totalRM: b, t622: 0, t627: 0, totalCost: b }] });
