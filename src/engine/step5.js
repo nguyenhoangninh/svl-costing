@@ -465,10 +465,11 @@ export function runFIFO(ctx) {
   putC(14, negLayers, 'BLOCK', '');
   putC(15, reviewLines, 'REVIEW', '05_SALES_COGS Final Treatment = REVIEW');
   putC(16, nrv, 'REVIEW', '05_FG_CLOSING status REVIEW - COST > PRICE');
-  const runResult = anyBlock ? 'BLOCKED' : anyReview ? 'PASS WITH REVIEW' : 'PASS';
+  const returnControl = RET.controls(sales);
+  const runResult = anyBlock || returnControl.status === 'BLOCK' ? 'BLOCKED' : anyReview ? 'PASS WITH REVIEW' : 'PASS';
   return {
     period, runAt: nowISO(), mode, tol, runSeconds: Math.round((Date.now() - t0) / 100) / 10, overridesUsed, openLayers: nO, runResult,
-    ledger, sales, detail, closing, summary: sum, totals, rec, sumDetA, sumLineA, step4Qty, step4Cost,
+    ledger, sales, returnRegister: returnControl.rows, returnControl, detail, closing, summary: sum, totals, rec, sumDetA, sumLineA, step4Qty, step4Cost,
     stats: { lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size, returns: retN, sellRate },
     undated,
     // internal (dropped before saving): layers for the rework pass
