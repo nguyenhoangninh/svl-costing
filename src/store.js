@@ -184,7 +184,9 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
     manifest[name] = m;
   }
   const manifestHash = await sha(JSON.stringify(manifest));
-  const meta = { period, rev: curRev + 1, blobs: manifest, manifestHash, summary: summary || {}, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
+  const safeSummary = { ...(summary || {}) };
+  if ((cur && cur.summary && (cur.summary.everClosed || cur.summary.closed)) || safeSummary.closed) safeSummary.everClosed = true;
+  const meta = { period, rev: curRev + 1, blobs: manifest, manifestHash, summary: safeSummary, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
   const revisionId = `${String(meta.rev).padStart(6, '0')}-${manifestHash}`;
   try {
     await F.runTransaction(fb.fs, async (t) => {
