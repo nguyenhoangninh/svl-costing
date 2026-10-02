@@ -20,7 +20,9 @@ export function engineBalances(S, p2, res) {
   const wf = p2 && p2.d3b ? p2.d3b.wf : null;
   const w632 = ((d.wipadj && d.wipadj.reg632) || []).filter((r) => r.record === 'RECORDED').reduce((a, r) => a + num(r.impact), 0);
   return {
-    a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0),
+    // DIRECT_632 impact > 0 = Dr 632 / Cr 154; impact < 0 = Dr 154 / Cr 632.
+    // Therefore the recorded entry changes both balances with opposite signs.
+    a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0) - w632,
     a155: res ? res.totals.closeA : 0,
     a632: (res ? res.totals.cogsA : 0) + w632,
     a511: F5.periodRevenue(d.salesDB ? d.salesDB.rows : [], S.period),
