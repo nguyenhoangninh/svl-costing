@@ -42,13 +42,19 @@ service cloud.firestore {
         && (isAdmin() || closedOf(request.resource.data) == null);
       allow update: if canWrite() && request.resource.data.rev == resource.data.get('rev', 0) + 1
         && (
-          // Normal work while the existing period is open. Editors cannot close a period.
-          (closedOf(resource.data) == null && (isAdmin() || closedOf(request.resource.data) == null))
+          // Normal OPEN-period work. Editors and admins may save, but the period stays OPEN.
+          (closedOf(resource.data) == null && closedOf(request.resource.data) == null)
           ||
-          // Explicit REOPEN: admin only, CLOSED → open, and the only manifest change is the closed-state blob.
+          // Explicit CLOSE: admin only, OPEN → CLOSED. The close revision may legitimately change
+          // closed/closedEver/rwArchive/audit blobs and the calculated period summary.
+          (isAdmin() && closedOf(resource.data) == null && closedOf(request.resource.data) != null)
+          ||
+          // Explicit REOPEN: admin only, CLOSED → OPEN. The accounting blobs remain immutable except
+          // removing the active 'closed' blob. summary.step5 changes from CLOSED back to the live gate,
+          // so it must be allowed together with closed/everClosed.
           (isAdmin() && closedOf(resource.data) != null && closedOf(request.resource.data) == null
             && request.resource.data.blobs.diff(resource.data.blobs).affectedKeys().hasOnly(['closed'])
-            && request.resource.data.summary.diff(resource.data.summary).affectedKeys().hasOnly(['closed', 'everClosed'])
+            && request.resource.data.summary.diff(resource.data.summary).affectedKeys().hasOnly(['closed', 'everClosed', 'step5'])
             && request.resource.data.summary.get('everClosed', false) == true)
         );
       // A period that has ever been CLOSED is an accounting record and may not be hard-deleted.
