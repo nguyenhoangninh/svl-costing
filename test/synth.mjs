@@ -95,11 +95,12 @@ const fl = finalLayer(s4, postedByLot(eng), register);
 const fgOpen = { period: P, status: 'LOADED', rows: [['SPX-100', 10, 9000000], ['OLX-300', 8, 300000]].map(([prod, qty, tot], i) => ({ period: P, srcPeriod: '2026-07', lid: `OP-${i}`, source: 'OPENING', pc: `PC-2607-${i}`, date: (Date.UTC(2026, 6, 20) - Date.UTC(1899, 11, 30)) / 86400000, mo: '', prod, name: 'x', loc: '', unit: 'PCS', qty, rm: tot * 0.6, a622: tot * 0.25, a627: tot * 0.15, tot, price: 0, prov: 0, cons: '' })) };
 F5.validateOpeningFG(fgOpen, P);
 const run = (mode) => {
-  const reg = JSON.parse(JSON.stringify(register));
+  // MONTHLY remains covered for ordinary sales-only costing. Any active rework is now an explicit STRICT_DATE workflow.
+  const reg = mode === 'MONTHLY' ? { period: P, rows: [] } : JSON.parse(JSON.stringify(register));
   const salesRows = mode === 'MONTHLY' ? salesDB.rows.filter((r) => num(r.qty) >= 0) : salesDB.rows;
   const res = F5.runFIFO({ period: P, opening: fgOpen, caRows: fl.rows, salesRows, pmRows: pm.rows, fx: FX, overrides: {}, dupDecisions: {}, mode, tol: 1, register: reg, sellCostRate: 0.015,
     step4: { current: 'CURRENT', overall: fl.overall, finalCost: fl.totals.totalCost, qty: s4.recon.rows[1].result } });
-  F5.runReworkFIFO(res, reg, { period: P, opening: fgOpen, salesRows, step4Carry: fl.totals.carryIn });
+  if (F5.reworkCount(reg)) F5.runReworkFIFO(res, reg, { period: P, opening: fgOpen, salesRows, step4Carry: fl.totals.carryIn });
   F5.finalizeRun(res);
   return { res, reg };
 };
@@ -114,8 +115,13 @@ ok('3B WIP bridge', wf.bridgeStatus === 'PASS', wf.bridgeStatus);
 ok('step4 overall PASS', String(fl.overall).startsWith('PASS'), fl.overall);
 for (const [n, x] of [['MONTHLY', M], ['STRICT', St]]) for (const k of [8, 9, 10, 11, 12]) ok(`${n} rec ${k}`, x.res.rec[k].status === 'PASS', JSON.stringify(x.res.rec[k]));
 ok('return restored in STRICT_DATE', St.res.sales.some((s) => s.fin === 'RETURN' && s.status === 'RETURNED'));
+const hStrict = F5.buildHistory(St.res, [], { period: P, opening: fgOpen, caRows: fl.rows });
+const hgStrict = F5.historyGate(hStrict, St.res, P);
+const recStrict = F5.step5Recon({ period: P, res: St.res, freshness: 'CURRENT', hist: hStrict, histGate: hgStrict, gl: { ytd622: null, ytd627: null }, fl, s4, gate6: fl.gate6 || 'PASS' });
+ok('STEP 5R return → FG History PASS', hgStrict.gate === 'PASS', hgStrict.gate);
+ok('STEP 5R return → reconciliation row 36 PASS', recStrict.rows[36] && recStrict.rows[36].status === 'PASS', JSON.stringify(recStrict.rows[36]));
 ok('all accepted sales recognition dates are inside the costing period', salesDB.rows.every((r) => { const d = F5.saleDate(r); return d !== null && d <= ser(31); }));
-const f154 = (x) => num(s3.openingAmt) + s3.summary.miAmt + s3.summary.soAmt + s4.alloc622 + s4.alloc627 + x.res.rework.fifoCost - s3.summary.mrAmt - fl.totals.totalCost - wf.finalClosing - x.reg.rows.reduce((a, r) => a + num(r.closingWIP), 0);
+const f154 = (x) => num(s3.openingAmt) + s3.summary.miAmt + s3.summary.soAmt + s4.alloc622 + s4.alloc627 + num(x.res.rework && x.res.rework.fifoCost) - s3.summary.mrAmt - fl.totals.totalCost - wf.finalClosing - x.reg.rows.reduce((a, r) => a + num(r.closingWIP), 0);
 ok('154 bridge MONTHLY', Math.abs(f154(M)) <= 1, f154(M));
 ok('154 bridge STRICT', Math.abs(f154(St)) <= 1, f154(St));
 const f155 = (x) => x.res.totals.openA + fl.totals.totalCost - x.res.totals.cogsA - num(x.res.totals.rwTot) - x.res.totals.closeA;
