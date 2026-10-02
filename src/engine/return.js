@@ -107,3 +107,35 @@ export function historyRows(sales, period, costMonth) {
 }
 
 export const historyCount = (sales) => (sales || []).filter((s) => utxt(s.fin) === 'RETURN' && utxt(s.status) === 'RETURNED' && num(s.fq) < -RETURN_TOL).length;
+
+export const RETURN_FIELDS = ['seq', 'date', 'returnInv', 'customer', 'product', 'productName', 'originalInv', 'returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal', 'layerId', 'status', 'message'];
+export const RETURN_HEADERS = ['Seq', 'Return Date', 'Return Invoice', 'Customer', 'Product', 'Product Name', 'Original Invoice', 'Return Qty', 'RM Reversal', '622 Reversal', '627 Reversal', 'COGS Reversal', 'Returned FG Layer', 'Status', 'Message'];
+
+export function registerRows(sales) {
+  const out = [];
+  for (const s of sales || []) {
+    if (utxt(s.type) !== 'SALES RETURN') continue;
+    out.push({
+      seq: s.seq, date: s.date, returnInv: ttxt(s.inv), customer: ttxt(s.cust), product: utxt(s.prod), productName: ttxt(s.name),
+      originalInv: ttxt(s.origInv || s.matchedOrigInv), returnQty: Math.abs(num(s.qty)), cogsRM: num(s.rm), cogs622: num(s.c622),
+      cogs627: num(s.c627), cogsTotal: num(s.tot), layerId: ttxt(s.returnLid), status: utxt(s.status) === 'RETURNED' ? 'PROCESSED' : 'BLOCK',
+      message: ttxt(s.msg),
+    });
+  }
+  return out;
+}
+
+export function controls(sales) {
+  const rows = registerRows(sales);
+  const processed = rows.filter((r) => r.status === 'PROCESSED');
+  const blocked = rows.filter((r) => r.status !== 'PROCESSED');
+  return {
+    rows,
+    total: rows.length,
+    processed: processed.length,
+    blocked: blocked.length,
+    qty: processed.reduce((a, r) => a + num(r.returnQty), 0),
+    cogsReversal: processed.reduce((a, r) => a + num(r.cogsTotal), 0),
+    status: blocked.length ? 'BLOCK' : 'PASS',
+  };
+}
