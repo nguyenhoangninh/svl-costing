@@ -175,7 +175,12 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
     const b64 = toB64(await gzip(json));
     const n = Math.ceil(b64.length / CHUNK) || 1;
     const m = { key: `${name}@${hash}`, hash, n, size: json.length, savedAt: new Date().toISOString() };
-    for (let k = 0; k < n; k++) { await F.setDoc(cdoc(period, chunkId(name, m, k)), { d: b64.slice(k * CHUNK, (k + 1) * CHUNK) }); written.push(chunkId(name, m, k)); }
+    for (let k = 0; k < n; k++) {
+      const id = chunkId(name, m, k), ref = cdoc(period, id);
+      // Content-addressed chunks are immutable. Reusing an old hash means reusing the existing chunk, never overwriting it.
+      const ex = await F.getDoc(ref);
+      if (!ex.exists()) { await F.setDoc(ref, { d: b64.slice(k * CHUNK, (k + 1) * CHUNK) }); written.push(id); }
+    }
     manifest[name] = m;
   }
   const manifestHash = await sha(JSON.stringify(manifest));
@@ -244,6 +249,10 @@ export async function cloudPeriods() {
 export async function cloudDelete(period) {
   if (!isAdmin()) throw new Error('Chỉ quản trị viên được xoá kỳ trên cloud.');
   const meta = await cloudMeta(period); if (!meta) return;
+  if (meta.summary && meta.summary.everClosed) throw new Error('Kỳ này đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete. Chỉ REOPEN để điều chỉnh rồi CLOSE lại.');
+  // Backward-compatible protection for periods closed before everClosed was introduced.
+  const revs = await cloudRevisions(period, 1000);
+  if (revs.some((r) => r.summary && r.summary.closed)) throw new Error('Kỳ này đã từng CLOSED trong revision history; không được hard-delete.');
   await sweepChunks(period, {});
   await fb.F.deleteDoc(pdoc(period));
 }
