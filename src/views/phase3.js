@@ -289,7 +289,7 @@ export function viewFIFO(el) {
     ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn FIFO (632)', T.cogsA, true)}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
     <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}</details>
-    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
+    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['returns', 'STEP 5R · Hàng bán trả lại'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
     <div id="t5"></div></section>`;
   const modeSel = el.querySelector('#s5-mode');
   const rateIn = el.querySelector('#s5-rate');
@@ -306,6 +306,16 @@ export function viewFIFO(el) {
     box.innerHTML = '<p class="muted">Cột Override Treatment là ô nhập duy nhất (FIFO COGS / NO COGS / REVIEW), giữ theo Line Key khi chạy lại. Thay đổi có hiệu lực ở lần RUN FIFO COGS tiếp theo.</p><div id="t5s"></div>';
     A.mountTable(box.querySelector('#t5s'), { columns: cols, rows, filterKey: 'status', height: 520, totals: ['qty', 'usd', 'vnd', 'fq', 'rm', 'c622', 'c627', 'tot'], onExport: A.exportTable('05_SALES_COGS', cols),
       onEdit: !edit ? undefined : (row, key, val) => { const o = S.d.fifoOverrides || (S.d.fifoOverrides = {}); if (val) o[row.key] = val; else delete o[row.key]; row.ovr = val; A.audit('STEP 5 OVERRIDE', `${row.key} = ${val || '(xoá)'}`); A.markDirty('fifoOverrides', 'audit'); } });
+  } else if (tab === 'returns') {
+    const rc = res.returnControl || { rows: [], total: 0, processed: 0, blocked: 0, qty: 0, cogsReversal: 0, status: 'PASS' };
+    box.innerHTML = `<div class="kpis">${A.kpiN('Return transactions', rc.total)}${A.kpiN('Processed', rc.processed)}${A.kpiN('Blocked', rc.blocked)}${A.kpiN('Return qty', rc.qty)}${A.kpi('COGS reversal', rc.cogsReversal, true)}<div class="kpi"><span>STEP 5R status</span><b>${A.pill(rc.status)}</b></div></div>
+      <p class="muted">STEP 5R match hàng trả lại với invoice gốc, kiểm remaining returnable quantity, reverse đúng RM / 622 / 627 / COGS gốc và tạo Returned FG Layer theo ngày trả hàng. CREDIT NOTE không đi qua chức năng này.</p><div id="t5ret"></div>`;
+    if (!rc.rows.length) { box.querySelector('#t5ret').innerHTML = A.emptyNote('Kỳ này không có SALES RETURN vật lý.'); }
+    else {
+      const rt = { seq: 'int', date: 'date', returnQty: 'qty', cogsRM: 'num', cogs622: 'num', cogs627: 'num', cogsTotal: 'num', status: 'status' };
+      const cols = colsOf(F5.RETURN_FIELDS, F5.RETURN_HEADERS, rt, { returnInv: 140, customer: 180, productName: 220, originalInv: 160, layerId: 220, message: 320 });
+      A.mountTable(box.querySelector('#t5ret'), { columns: cols, rows: rc.rows, filterKey: 'status', height: 520, totals: ['returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal'], onExport: A.exportTable('05_SALES_RETURN', cols) });
+    }
   } else if (tab === 'detail') {
     const cols = colsOf(F5.DETAIL_FIELDS, F5.DETAIL_HEADERS, { date: 'date', layerQty: 'qty', qty: 'qty', rm: 'num', a622: 'num', a627: 'num', tot: 'num', unit: 'num', left: 'qty', seq: 'int', line: 'int' }, { lid: 220 });
     A.mountTable(box, { columns: cols, rows: res.detail, filterKey: 'take', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot'], onExport: A.exportTable('05_FIFO_DETAIL', cols) });
