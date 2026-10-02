@@ -186,15 +186,35 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const bl = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 7, 30), 'B1', 'A', 2, 20), billDate: ser(2026, 8, 2) }] }, { rows: [] }, P2).db.rows;
   eq('#5 bill date in period → costed', Math.round(F5.runFIFO({ ...ctx({}), salesRows: bl }).totals.cogsQ), 2);
   eq('#5 revenue by bill date', F5.periodRevenue(bl, P2), 20 * 25000);
+  const pmBill = updatePriceMaster({ salesDB: { rows: bl, savedAt: 'x' }, so: [], manual: [], step2: { pc: [{ erp: 'O', pcNo: 'PC-1', prod: 'A', rowIdx: 1 }] }, period: P2 }).pm;
+  eq('#5 Price Master uses bill-date recognition month', pmBill.rows.find((x) => x.product === 'A').finalPrice, 10);
   // #6 return at the original sale's COGS (opening layer 100/unit), with Original Invoice No.
   const rt = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), origInv: 'X1' }] }, { rows: [] }, P2).db.rows;
-  const rr = F5.runFIFO({ ...ctx({}), salesRows: rt });
+  let mret = ''; try { F5.runFIFO({ ...ctx({}), salesRows: rt }); } catch (e) { mret = e.message; }
+  eq('#6 MONTHLY return requires STRICT_DATE', mret.includes('STRICT_DATE'), true);
+  const rr = F5.runFIFO({ ...ctx({}), salesRows: rt, mode: 'STRICT_DATE' });
   const ln = rr.sales.find((x) => x.inv === 'CN1');
   eq('#6 return restored at original cost', [ln.fin, ln.status, Math.round(ln.tot)], ['RETURN', 'RETURNED', -100]);
   eq('#6 net COGS and roll-forward', [Math.round(rr.totals.cogsQ), Math.round(rr.totals.cogsA), rr.rec[8].status, rr.rec[9].status, rr.rec[10].status, rr.rec[11].status], [2, 200, 'PASS', 'PASS', 'PASS', 'PASS']);
   eq('#6 return layer in closing', rr.closing.some((c) => c.source === 'RETURN' && c.qty === 1), true);
-  const rn = F5.runFIFO({ ...ctx({}), salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN2', 'A', -1, -10), origInv: 'NOPE' }] }, { rows: [] }, P2).db.rows });
+  const rn = F5.runFIFO({ ...ctx({}), mode: 'STRICT_DATE', salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN2', 'A', -1, -10), origInv: 'NOPE' }] }, { rows: [] }, P2).db.rows });
   eq('#6 original not found → REVIEW', rn.sales[0].fin, 'REVIEW');
+  // return becomes an inventory layer at its return date and can feed a later sale in STRICT_DATE
+  const rtFlow = validateSaveSales({ mode: 'MONTHLY', rows: [
+    row(ser(2026, 8, 5), 'R-ORIG', 'A', 10, 100),
+    { ...row(ser(2026, 8, 10), 'R-CN', 'A', -5, -50), origInv: 'R-ORIG' },
+    row(ser(2026, 8, 20), 'R-NEXT', 'A', 5, 50),
+  ] }, { rows: [] }, P2).db.rows;
+  const rFlow = F5.runFIFO({ ...ctx({}), salesRows: rtFlow, caRows: [], mode: 'STRICT_DATE', step4: { current: 'CURRENT', overall: 'PASS', finalCost: 0, qty: 0 } });
+  eq('#6 STRICT return layer reused by later sale', [rFlow.sales.find((x) => x.inv === 'R-NEXT').status, Math.round(rFlow.totals.cogsQ), Math.round(rFlow.totals.closeQ)], ['OK', 10, 0]);
+  // cumulative returns cannot exceed the original sale
+  const rtOver = validateSaveSales({ mode: 'MONTHLY', rows: [
+    row(ser(2026, 8, 5), 'R2-ORIG', 'A', 3, 30),
+    { ...row(ser(2026, 8, 10), 'R2-CN1', 'A', -2, -20), origInv: 'R2-ORIG' },
+    { ...row(ser(2026, 8, 11), 'R2-CN2', 'A', -2, -20), origInv: 'R2-ORIG' },
+  ] }, { rows: [] }, P2).db.rows;
+  const rOver = F5.runFIFO({ ...ctx({}), salesRows: rtOver, mode: 'STRICT_DATE' });
+  eq('#6 cumulative return above sold qty → REVIEW', rOver.sales.find((x) => x.inv === 'R2-CN2').fin, 'REVIEW');
   // #7 NRV with 1.5 % selling cost: unit cost 100, price 4 USD × 25000 = 100000 → NRV 98500; here cost 100 VND so no provision; force price low
   const nv = F5.runFIFO({ ...ctx({}), pmRows: [{ product: 'A', finalPrice: 0.004 }], sellCostRate: 0.015 }); // price 100 VND, NRV 98.5
   const cl = nv.closing.find((c) => c.prod === 'A');
