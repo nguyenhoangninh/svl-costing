@@ -350,7 +350,7 @@ const xlRound0 = (x) => (x < 0 ? -Math.round(-x) : Math.round(x)); // WorksheetF
 /** Gates of STEP4_Run_Cost_Allocation_Gated + S4FreshnessChainOK. Returns '' or a blocking message. */
 export function step4Gate(st) {
   const { period, salesImport, pm, gl, step2, step3, opening, latestImport, manual } = st;
-  if (salesImport && salesImport.rows && salesImport.rows.length && salesImport.status !== 'VALIDATED & SAVED - ADVISORY') return 'Dữ liệu doanh thu đã import nhưng chưa Validate & Save.';
+  if (salesImport && salesImport.rows && salesImport.rows.length && !String(salesImport.status || '').startsWith('VALIDATED & SAVED')) return 'Dữ liệu doanh thu đã import nhưng chưa Validate & Save hoặc còn dòng BLOCK.';
   if (!pm || pm.status !== 'CURRENT') return `Price Master chưa CURRENT (${pm ? pm.status : 'chưa cập nhật'}). Chạy Update Price Master sau lần Validate & Save gần nhất.`;
   if (!step2) return 'Chưa chạy STEP 2.';
   if (!step3) return 'Chưa chạy STEP 3.';
