@@ -518,7 +518,7 @@ export function doReopen() {
 }
 
 // ======================= migration / carry-forward =======================
-export function migratePhase3(g, S, period) {
+export async function migratePhase3(g, S, period) {
   const d = S.d; const cell = (gr, r, c) => (gr && gr[r - 1] ? gr[r - 1][c - 1] : null);
   const oG = g['05_FG_OPENING'];
   if (oG) {
@@ -542,7 +542,7 @@ export function migratePhase3(g, S, period) {
   let msg = '';
   try {
     if (d.fgOpen && String(d.fgOpen.status).startsWith('VALIDATED') && d.step4 && !d.step4.blocked) {
-      doRunFIFO();
+      await doRunFIFO();
       if (d.step5 && histThrough === period) doBuildHistory();
     } else msg = 'STEP 5: FG đầu kỳ chưa VALIDATED hoặc STEP 4 chưa chạy được – chưa chạy FIFO.';
   } catch (e) { msg = 'STEP 5: ' + e.message; }
