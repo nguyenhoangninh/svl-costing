@@ -1,5 +1,5 @@
 // Control Center checkpoints (port of 00_CONTROL_CENTER formulas rows 9-70)
-import { ttxt, num, headerCol, isNumeric, cellYM } from './util.js';
+import { ttxt, num, headerCol, headerColAny, isNumeric, cellYM, cellDateSerial } from './util.js';
 
 const abs = Math.abs;
 export const FALLBACK_REVIEW = 0.05;
@@ -21,20 +21,41 @@ function overall(rows, nextOk, nextBad) {
 const cp = (no, label, expected, actual, diff, status, rule) => ({ no, label, expected, actual, diff, status, rule });
 const later = (a, b) => (a || '') >= (b || ''); // ISO timestamps
 
-/** audit F-10: rows of an ERP report dated in another month than the costing period (blank dates = total lines, ignored). */
+/** ERP transaction-date integrity: out-of-period, blank, invalid and missing Date column all block STEP 2. */
 const dateCache = new WeakMap();
 export function outOfPeriodRows(datasets, period) {
   const out = [];
+  const keyNames = ['Code', 'PC No.', 'MI No.', 'MR No.', 'Material Code', 'Item Code', 'Product Code'];
+  const qtyNames = ['Quantity', 'Base Qty', 'Current Complete Qty', 'Current Issue Qty', 'Bad Quantity'];
   for (const [k, ds] of Object.entries(datasets || {})) {
     if (!ds || !ds.rows || !ds.header) continue;
-    let c = dateCache.get(ds);
-    if (!c || c.period !== period) {
+    let x = dateCache.get(ds);
+    if (!x || x.period !== period) {
       const dc = headerCol(ds.header, 'Date'), ac = headerCol(ds.header, 'Total Cost');
-      let n = 0, amt = 0; const months = new Set();
-      if (dc >= 0) for (const r of ds.rows) { const ym = cellYM(r[dc]); if (ym && ym !== period) { n++; months.add(ym); if (ac >= 0 && isNumeric(r[ac])) amt += num(r[ac]); } }
-      c = { period, n, amt, months: [...months].sort() }; dateCache.set(ds, c);
+      const kc = keyNames.map((n) => headerCol(ds.header, n)).filter((i) => i >= 0);
+      const qc = qtyNames.map((n) => headerCol(ds.header, n)).filter((i) => i >= 0);
+      let outside = 0, blank = 0, invalid = 0, missingDateColumn = 0, amt = 0; const months = new Set();
+      const tx = (r) => {
+        const keys = kc.map((i) => ttxt(r[i])).filter(Boolean);
+        if (keys.some((v) => /^(TOTAL|NOTICE)$/i.test(v) || /^TOTAL\b/i.test(v))) return false;
+        if (keys.length) return true;
+        if (ac >= 0 && isNumeric(r[ac]) && Math.abs(num(r[ac])) > 0.000001) return true;
+        return qc.some((i) => isNumeric(r[i]) && Math.abs(num(r[i])) > 0.000001);
+      };
+      for (const r of ds.rows) {
+        if (!tx(r)) continue;
+        if (dc < 0) { missingDateColumn++; if (ac >= 0 && isNumeric(r[ac])) amt += num(r[ac]); continue; }
+        const raw = r[dc];
+        if (raw === null || raw === undefined || ttxt(raw) === '') { blank++; if (ac >= 0 && isNumeric(r[ac])) amt += num(r[ac]); continue; }
+        const serial = cellDateSerial(raw);
+        if (serial === null) { invalid++; if (ac >= 0 && isNumeric(r[ac])) amt += num(r[ac]); continue; }
+        const ym = cellYM(raw);
+        if (ym !== period) { outside++; months.add(ym); if (ac >= 0 && isNumeric(r[ac])) amt += num(r[ac]); }
+      }
+      x = { period, n: outside + blank + invalid + missingDateColumn, outside, blank, invalid, missingDateColumn, amt, months: [...months].filter(Boolean).sort() };
+      dateCache.set(ds, x);
     }
-    if (c.n) out.push({ key: k, n: c.n, amt: c.amt, months: c.months });
+    if (x.n) out.push({ key: k, ...x });
   }
   return out;
 }
@@ -47,8 +68,8 @@ export function step1Controls(s1, accessLimited = 0, dateIssues = []) {
     coreReady: `${imported + noData} / 21`, sysReady: `${sysReady} / 3`,
     status: dateIssues.length ? 'BLOCK' : sysReady === 3 && imported + noData === 21 ? 'PASS' : missing === 21 ? 'NOT RUN' : 'REVIEW',
     imported, noData, missing, totalRows: s1.checklist.reduce((a, c) => a + c.dataRows, 0), accessLimited,
-    next: missing === 0 ? (dateIssues.length ? `Sửa / xuất lại ${dateIssues.length} báo cáo có dòng ngoài kỳ trước khi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
-    result: missing === 0 ? (dateIssues.length ? 'BLOCK - ERP ROW PERIOD' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
+    next: missing === 0 ? (dateIssues.length ? `Sửa / xuất lại ${dateIssues.length} báo cáo có lỗi ngày giao dịch trước khi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
+    result: missing === 0 ? (dateIssues.length ? 'BLOCK - ERP DATE CONTROL' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
     dateIssues,
   };
 }
