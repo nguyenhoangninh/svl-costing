@@ -178,8 +178,11 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
     for (let k = 0; k < n; k++) {
       const id = chunkId(name, m, k), ref = cdoc(period, id);
       // Content-addressed chunks are immutable. Reusing an old hash means reusing the existing chunk, never overwriting it.
+      const part = b64.slice(k * CHUNK, (k + 1) * CHUNK);
       const ex = await F.getDoc(ref);
-      if (!ex.exists()) { await F.setDoc(ref, { d: b64.slice(k * CHUNK, (k + 1) * CHUNK) }); written.push(id); }
+      if (ex.exists()) {
+        if (ex.data().d !== part) throw new Error(`Chunk ${id} đã tồn tại nhưng nội dung không khớp content hash – dừng commit để bảo vệ revision history.`);
+      } else { await F.setDoc(ref, { d: part }); written.push(id); }
     }
     manifest[name] = m;
   }
