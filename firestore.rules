@@ -1,7 +1,7 @@
 rules_version = '2';
 // Firestore rules for SVL Costing Web.
 //
-// OWNER: replace YOUR_EMAIL@gmail.com with the owner's Google email (lowercase). Owners are always admins,
+// OWNER: kamenguyen@gmail.com. Owners are always admins,
 // so they can never lock themselves out. Everybody else is managed in the app:
 //   Cài đặt → Người dùng & phân quyền  (stored in svl_costing_config/access)
 // Roles: admin (everything + manage users) · editor (import, run steps, edit) · viewer (read only).
@@ -14,7 +14,7 @@ service cloud.firestore {
       return request.auth.token.email.lower();
     }
     function isOwner() {
-      return signedIn() && myEmail() in ['YOUR_EMAIL@gmail.com'];
+      return signedIn() && myEmail() in ['kamenguyen@gmail.com'];
     }
     function accessPath() {
       return /databases/$(database)/documents/svl_costing_config/access;
