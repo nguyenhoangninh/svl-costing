@@ -512,9 +512,15 @@ export async function doClose() {
   A.toast(`Kỳ ${S.period} đã ĐÓNG${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Rework WIP chuyển kỳ: ${d.rwArchive.length} dòng / ${A.fmtNum(arcCost)} VND. Bước tiếp: tạo kỳ ${nextP(S.period)} → Roll forward.`, 'pass');
   A.render();
 }
-export function doReopen() {
+export async function doReopen() {
   const S = A.S;
   if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được mở lại kỳ đã đóng.', 'review'); return; }
+  const np = nextP(S.period);
+  const nd = await A.loadPeriodData(np).catch(() => null);
+  if (nd && nd.closed && nd.closed.period === np) {
+    A.toast(`Không thể mở lại ${S.period}: kỳ kế tiếp ${np} đã ĐÓNG và đang phụ thuộc số dư cuối kỳ này. Mở lại ${np} trước, sau đó mới mở lại ${S.period}.`, 'block');
+    return;
+  }
   const reason = (prompt(`Mở lại kỳ ${S.period} đã đóng (để sửa số liệu). Nhập lý do:`, '') || '').trim();
   if (!reason) return;
   const was = S.d.closed;
