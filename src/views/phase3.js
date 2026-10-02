@@ -9,7 +9,7 @@ const esc = (s) => A.esc(s);
 const tabsHTML = (cur, tabs, attr) => `<div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" role="tab" class="tab ${id === cur ? 'on' : ''}" ${attr}="${id}" aria-selected="${id === cur}">${esc(label)}</button>`).join('')}</div>`;
 const colsOf = (fields, headers, types = {}, widths = {}) => fields.map((f, i) => ({ key: f, label: headers[i], type: types[f] || 'text', width: widths[f] || (types[f] === 'num' ? 140 : types[f] === 'qty' ? 100 : f === 'prod' ? 150 : 120), trace: f === 'prod' }));
 
-export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'rwArchive', 'fastTie'];
+export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'rwArchive', 'fastTie', 'nrvDecision'];
 export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
 export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist']);
 
@@ -39,6 +39,8 @@ export const ovKey = (S) => fpRows(Object.entries(S.d.fifoOverrides || {}).filte
 const cfg = (S) => S.d.s5cfg || { mode: 'MONTHLY', tol: 1 };
 /** NRV estimated selling cost (share of selling price); owner decision 02/10/2026: 1.5 % unless changed. */
 export const sellRate = (S) => { const c = cfg(S); return c.sellCostRate === undefined || c.sellCostRate === null || c.sellCostRate === '' ? 0.015 : num(c.sellCostRate); };
+/** Approval key for NRV decision. Any changed closing layer / provision amount invalidates the prior decision. */
+export const nrvKey = (res) => fpRows((res && res.closing) || [], (r) => [ttxt(r.lid), utxt(r.prod), num(r.qty).toFixed(4), num(r.tot).toFixed(0), num(r.prov).toFixed(0), num(r.provNeed).toFixed(0)].join('|'));
 /** Repeated sales lines of the period and how many still need a KEEP / EXCLUDE decision (F-03). */
 export function dupStatus(S) {
   const groups = F5.duplicateGroups(S.d.salesDB ? S.d.salesDB.rows : [], S.period);
@@ -92,6 +94,10 @@ export function derive(S, p2) {
   if (!closeReason && res && (S.prevDrift || []).length && !(d.closed && d.closed.period === S.period)) closeReason = `Số dư đầu kỳ đã lệch so với kỳ trước: ${S.prevDrift[0]}`;
   if (!closeReason && res && res.undated && res.undated.length) closeReason = `Sales Database có ${res.undated.length} dòng thiếu / sai ngày hoá đơn (vd. ${res.undated.slice(0, 3).map((u) => u.inv || 'dòng ' + u.dbRow).join(', ')}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.`;
   if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
+  if (!closeReason && res && num(res.totals && res.totals.nrvProv) > 1 && !(d.closed && d.closed.period === S.period)) {
+    const nd = d.nrvDecision, key = nrvKey(res);
+    if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
+  }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
     if (!tie.entered) closeReason = 'Chưa nhập số dư FAST 154 / 155 / 632 / 511 (STEP 5.3 → tab Đối chiếu FAST).';
     else if (tie.diffs && !tie.approved) closeReason = `Số liệu lệch FAST ở ${tie.diffs} tài khoản chưa được xác nhận (STEP 5.3 → Đối chiếu FAST → Xác nhận chênh lệch).`;
@@ -402,6 +408,13 @@ function refreshFgRef(S) {
 }
 
 // ======================= 5.3 FG History & close =======================
+function nrvDecisionHTML(S, res, closed) {
+  const amt = num(res.totals && res.totals.nrvProv), key = nrvKey(res);
+  const d = S.d.nrvDecision, current = d && d.key === key;
+  const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · ${A.fmtNum(d.amount)} VND · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
+  if (closed || !A.isAdmin() || !A.canEdit()) return summary;
+  return summary + `<form id="f-nrv-decision" class="inline"><label>NRV decision <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Accounting Ref<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
+}
 export function viewClose(el) {
   const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
   const closed = d.closed && d.closed.period === S.period;
@@ -417,10 +430,23 @@ export function viewClose(el) {
       <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
     </div>
     ${!closed && D5.closeReason && res ? `<div class="alert review"><b>Chưa đóng được:</b> ${esc(D5.closeReason)}</div>` : ''}
+    ${res && num(res.totals && res.totals.nrvProv) > 1 ? nrvDecisionHTML(S, res, closed) : ''}
     <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
     ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
     <div id="th"></div></section>`;
-  el.querySelectorAll('[data-tabh]').forEach((b) => b.addEventListener('click', () => { S.tabH = b.dataset.tabh; A.render(); }));
+  const nf = el.querySelector('#f-nrv-decision');
+  if (nf) nf.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!A.isAdmin() || !A.canEdit()) { A.toast('Chỉ Quản trị viên được xác nhận xử lý NRV.', 'block'); return; }
+    const status = utxt(nf.elements.status.value), ref = nf.elements.ref.value.trim(), note = nf.elements.note.value.trim();
+    if (!['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(status)) { A.toast('Chọn quyết định NRV.', 'review'); return; }
+    if (status === 'RECORDED' && ref.length < 3) { A.toast('NRV RECORDED cần Accounting Reference / Journal No.', 'review'); return; }
+    if (note.length < 5) { A.toast('Nhập giải trình NRV ít nhất 5 ký tự.', 'review'); return; }
+    S.d.nrvDecision = { key: nrvKey(res), status, ref, note, amount: num(res.totals.nrvProv), by: A.who(), at: nowISO() };
+    A.audit('NRV DECISION', `${status}; amount=${A.fmtNum(res.totals.nrvProv)}; ref=${ref || '-'}; ${note}`);
+    A.markDirty('nrvDecision', 'audit'); A.render();
+  });
+    el.querySelectorAll('[data-tabh]').forEach((b) => b.addEventListener('click', () => { S.tabH = b.dataset.tabh; A.render(); }));
   const box = el.querySelector('#th');
   if (tab === 'gate') {
     box.innerHTML = `<h2>Đối chiếu YTD 622 / 627 (chỉ review)</h2>${recTable(recon.rows, [20, 21, 22], {})}
