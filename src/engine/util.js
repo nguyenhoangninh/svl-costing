@@ -106,6 +106,14 @@ export function prevPeriod(p) {
 
 // ---------- Excel serial dates ----------
 const EPOCH = Date.UTC(1899, 11, 30);
+const strictSerial = (y, m, d) => {
+  y = +y; m = +m; d = +d;
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d) || y < 1900 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const ms = Date.UTC(y, m - 1, d);
+  const x = new Date(ms);
+  if (x.getUTCFullYear() !== y || x.getUTCMonth() + 1 !== m || x.getUTCDate() !== d) return null; // reject 31/04, non-leap 29/02, etc.
+  return (ms - EPOCH) / 86400000;
+};
 export function serialToYMD(serial) {
   const d = new Date(EPOCH + Math.floor(serial) * 86400000);
   return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() };
@@ -115,26 +123,31 @@ export function serialToISO(serial) {
   const { y, m, d } = serialToYMD(serial);
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
-export function isoToSerial(iso) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
-  if (!m) return null;
-  return (Date.UTC(+m[1], +m[2] - 1, +m[3]) - EPOCH) / 86400000;
-}
-/** yyyy-mm of a cell holding a date (serial, ISO string, dd/mm/yyyy string, Date). '' if not a date. */
-export function cellYM(v) {
-  if (v === null || v === undefined || v === '') return '';
-  if (typeof v === 'number') {
-    if (v < 1 || v > 2958465) return '';
-    const { y, m } = serialToYMD(v);
-    return `${y}-${String(m).padStart(2, '0')}`;
+/** Strict date parser shared by ERP, Sales and FIFO. Blank/invalid → null; impossible calendar dates are rejected. */
+export function cellDateSerial(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isFinite(v) && v >= 1 && v <= 2958465 ? Math.floor(v) : null;
+  if (v instanceof Date) {
+    if (!isFinite(v.getTime())) return null;
+    return strictSerial(v.getFullYear(), v.getMonth() + 1, v.getDate());
   }
-  if (v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}`;
   const s = String(v).trim();
-  let m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(s);
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}`;
-  m = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/.exec(s);
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}`; // dd/mm/yyyy (VN locale)
-  return '';
+  let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\D|$)/.exec(s);
+  if (m) return strictSerial(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:\D|$)/.exec(s);
+  if (m) return strictSerial(+m[3], +m[2], +m[1]); // dd/mm/yyyy (VN locale)
+  return null;
+}
+export function isoToSerial(iso) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:\D|$)/.exec(iso || '');
+  return m ? strictSerial(+m[1], +m[2], +m[3]) : null;
+}
+/** yyyy-mm of a valid date cell. '' for blank or invalid dates. */
+export function cellYM(v) {
+  const s = cellDateSerial(v);
+  if (s === null) return '';
+  const { y, m } = serialToYMD(s);
+  return `${y}-${String(m).padStart(2, '0')}`;
 }
 export const dateInPeriod = (v, p) => cellYM(v) === p;
 
