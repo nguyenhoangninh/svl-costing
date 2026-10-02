@@ -97,11 +97,11 @@ import * as TR from '../src/engine/trace.js';
 
 // ---- Audit 2026-10 group A
 import { directKey, postedKey } from '../src/views/phase2.js';
-import { flKey } from '../src/views/phase3.js';
+import { flKey, engineBalances } from '../src/views/phase3.js';
 import { updatePriceMaster } from '../src/engine/step4.js';
 import { refreshErpMap } from '../src/engine/step3b.js';
 import { buildDataset } from '../src/engine/step1.js';
-import { step2Controls, step3Controls, outOfPeriodRows, fallbackAlloc } from '../src/engine/controls.js';
+import { step1Controls, step2Controls, step3Controls, outOfPeriodRows, fallbackAlloc } from '../src/engine/controls.js';
 import { fp as fpStr } from '../src/engine/util.js';
 {
   // F-02: moving a direct 622 amount to another PC with the same total changes the key
@@ -146,6 +146,8 @@ import { fp as fpStr } from '../src/engine/util.js';
   // F-10: rows dated outside the period are reported
   const dsD = { 'MI-M-O': { header: ['Date', 'Material Code', 'Total Cost'], rows: [[ser(2026, 8, 2), 'M', 5], [ser(2026, 7, 30), 'M', 7], [null, '', 12]] } };
   eq('F-10 out-of-period rows', outOfPeriodRows(dsD, P2).map((x) => [x.key, x.n, x.amt, x.months.join()]), [['MI-M-O', 1, 7, '2026-07']]);
+  const s1Stub = { checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } };
+  eq('F-10 STEP 1 blocks when ERP rows are outside period', step1Controls(s1Stub, 0, outOfPeriodRows(dsD, P2)).result, 'BLOCK - ERP ROW PERIOD');
   // F-12: broad fallback amount visible in STEP 2 controls
   const s2 = { period: P2, runAt: 'z', status: 'PASS', total: { src: 100, alloc: 100, unalloc: 0 }, detail: [['O', 'X', '', 1, 100, '', 'O', 'ALL', 'PC-1', '', '', '', '', 1, 1, 100, 'ALLOCATED', 'O fallback ALL.']] };
   eq('F-12 fallback amount', fallbackAlloc(s2), 100);
@@ -231,6 +233,8 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const t2 = F5.fastTie(eng, { ...tie, approval: { key: t1.key, by: 'x', note: 'ok' } });
   eq('#3 approved', t2.status, 'APPROVED');
   eq('#3 approval lapses when figures change', F5.fastTie({ ...eng, a155: 2001 }, { ...tie, approval: { key: t1.key } }).status, 'REVIEW');
+  const eb = engineBalances({ period: P2, d: { step3: { summary: { closingAmt: 1000 } }, register: { rows: [] }, wipadj: { reg632: [{ record: 'RECORDED', impact: 100 }] }, salesDB: { rows: [] } } }, { d3b: { wf: { finalClosing: 1000 } } }, { totals: { closeA: 0, cogsA: 300 } });
+  eq('#3 DIRECT_632 changes both 154 and 632', [eb.a154, eb.a632], [900, 400]);
 }
 
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
