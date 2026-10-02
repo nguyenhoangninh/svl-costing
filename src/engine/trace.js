@@ -24,22 +24,28 @@ function col(header, names) { return headerColAny(header, names); }
 /** Index ERP material rows (PC-M consumption, MI-M issue, MR-M return) by product code. */
 export function buildIndex(datasets) {
   const pcm = new Map(), mi = new Map(), mr = new Map(), pcp = new Map();
+  const pcmByPc = new Map(), miByMo = new Map(), pcmERP = new Set();
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   for (const e of ERPS_COST) {
     const P = datasets[`PC-M-${e}`];
     if (P) {
       const h = P.header, c = { pc: col(h, ['PC No.']), sub: col(h, ['Sub-MO', 'Sub-MO No.']), mo: col(h, ['MO No.']), prod: col(h, ['Product Code']), mat: col(h, ['Material Code']), name: col(h, ['Material Name']), unit: col(h, ['Unit(Qty)', 'Unit']), qty: col(h, ['Quantity']), amt: col(h, ['Total Cost']), date: col(h, ['Date']) };
       for (const r of P.rows) {
-        const prod = utxt(r[c.prod]); if (!prod) continue;
-        push(pcm, prod, { erp: e, pc: ttxt(r[c.pc]), sub: c.sub >= 0 ? ttxt(r[c.sub]) : '', mo: c.mo >= 0 ? ttxt(r[c.mo]) : '', mat: ttxt(r[c.mat]), name: c.name >= 0 ? ttxt(r[c.name]) : '', unit: c.unit >= 0 ? ttxt(r[c.unit]) : '', qty: num(r[c.qty]), amt: num(r[c.amt]), date: c.date >= 0 ? r[c.date] : null });
+        // Rows are keyed by PC No. (same basis as the STEP 3 PC-M ↔ PC-P tie); Product Code / Sub-MO are only used to split a PC shared by several lots.
+        const pc = c.pc >= 0 ? ttxt(r[c.pc]) : ''; if (!pc) continue;
+        const prod = c.prod >= 0 ? utxt(r[c.prod]) : '';
+        const o = { erp: e, pc, prod, sub: c.sub >= 0 ? ttxt(r[c.sub]) : '', mo: c.mo >= 0 ? ttxt(r[c.mo]) : '', mat: ttxt(r[c.mat]), name: c.name >= 0 ? ttxt(r[c.name]) : '', unit: c.unit >= 0 ? ttxt(r[c.unit]) : '', qty: num(r[c.qty]), amt: num(r[c.amt]), date: c.date >= 0 ? r[c.date] : null };
+        pcmERP.add(e); push(pcmByPc, `${e}|${utxt(pc)}`, o); if (prod) push(pcm, prod, o);
       }
     }
     const M = datasets[`MI-M-${e}`];
     if (M) {
       const h = M.header, c = { doc: col(h, ['MI No.']), prod: col(h, ['Product Code']), mo: col(h, ['MO No.']), mat: col(h, ['Material Code']), name: col(h, ['Material Name']), unit: col(h, ['Unit']), qty: col(h, ['Current Issue Qty', 'Quantity']), amt: col(h, ['Total Cost']), date: col(h, ['Date']) };
       for (const r of M.rows) {
-        const prod = utxt(r[c.prod]); if (!prod) continue;
-        push(mi, prod, { erp: e, doc: ttxt(r[c.doc]), mo: ttxt(r[c.mo]), mat: ttxt(r[c.mat]), name: c.name >= 0 ? ttxt(r[c.name]) : '', unit: c.unit >= 0 ? ttxt(r[c.unit]) : '', qty: num(r[c.qty]), amt: num(r[c.amt]), date: c.date >= 0 ? r[c.date] : null });
+        const prod = c.prod >= 0 ? utxt(r[c.prod]) : ''; const mo = c.mo >= 0 ? ttxt(r[c.mo]) : '';
+        if (!prod && !mo) continue;
+        const o = { erp: e, doc: ttxt(r[c.doc]), mo, prod, mat: ttxt(r[c.mat]), name: c.name >= 0 ? ttxt(r[c.name]) : '', unit: c.unit >= 0 ? ttxt(r[c.unit]) : '', qty: num(r[c.qty]), amt: num(r[c.amt]), date: c.date >= 0 ? r[c.date] : null };
+        if (prod) push(mi, prod, o); if (mo) push(miByMo, `${e}|${utxt(mo)}`, o);
       }
     }
     const R = datasets[`MR-M-${e}`];
@@ -48,7 +54,7 @@ export function buildIndex(datasets) {
       for (const r of R.rows) { const prod = utxt(r[c.prod]); if (!prod) continue; push(mr, prod, { erp: e, doc: ttxt(r[c.doc]), mat: ttxt(r[c.mat]), qty: Math.abs(num(r[c.qty])), amt: Math.abs(num(r[c.amt])) }); }
     }
   }
-  return { pcm, mi, mr, pcp };
+  return { pcm, mi, mr, pcp, pcmByPc, miByMo, pcmERP };
 }
 
 // ---------------------------------------------------------------- product list
@@ -72,10 +78,24 @@ export function costTrace(ctx) {
   const P = utxt(ctx.prod); const A = [];
   const flag = (level, area, msg, extra = {}) => A.push({ level, area, msg, ...extra });
   const lotsCA = ((ctx.fl && ctx.fl.rows) || []).filter((r) => utxt(r.prod) === P);
-  const pcm = ctx.index.pcm.get(P) || [];
-  // PC-M by lot
-  const pcmByLot = new Map();
-  for (const r of pcm) { const k = lotKey(r.erp, r.pc, r.sub, P); if (!pcmByLot.has(k)) pcmByLot.set(k, []); pcmByLot.get(k).push(r); }
+  // PC-M rows → lots. Primary key ERP + PC No.; when one PC holds several lots, split by Product Code, then Sub-MO.
+  const idx = ctx.index;
+  const lotsPerPc = new Map();
+  for (const r of (ctx.fl && ctx.fl.rows) || []) { const k = `${r.erp}|${utxt(r.pc)}`; lotsPerPc.set(k, (lotsPerPc.get(k) || 0) + 1); }
+  const pcmByLot = new Map(); let looseLots = 0;
+  for (const r of lotsCA) {
+    const k = lotKey(r.erp, r.pc, r.sub, P);
+    let rows = (idx.pcmByPc && idx.pcmByPc.get(`${r.erp}|${utxt(r.pc)}`)) || [];
+    if ((lotsPerPc.get(`${r.erp}|${utxt(r.pc)}`) || 0) > 1) {
+      rows = rows.filter((x) => x.prod === P);
+      const bySub = rows.filter((x) => utxt(x.sub) === utxt(r.sub));
+      if (bySub.length && bySub.length < rows.length) rows = bySub;
+    }
+    if (rows.some((x) => x.prod !== P || utxt(x.sub) !== utxt(r.sub))) looseLots++;
+    pcmByLot.set(k, rows);
+  }
+  const pcm = [...pcmByLot.entries()].flatMap(([k, rows]) => rows.map((x) => ({ ...x, lotK: k })));
+  const pcmMissing = [...new Set(lotsCA.map((r) => r.erp))].filter((e) => idx.pcmERP && !idx.pcmERP.has(e));
   // lots
   const lots = lotsCA.map((r) => {
     const k = lotKey(r.erp, r.pc, r.sub, P); const mats = pcmByLot.get(k) || [];
@@ -84,7 +104,7 @@ export function costTrace(ctx) {
     return { erp: r.erp, pc: r.pc, date: r.date, mo: r.mo, sub: r.sub, name: r.name, qty: q, pcRM: num(r.pcRM), so: num(r.so), wipAdj: num(r.wipAdj), carryIn: num(r.carryIn), totalRM: num(r.totalRM), t622: num(r.t622), t627: num(r.t627), d622: num(r.d622), d627: num(r.d627), totalCost: num(r.totalCost),
       unit: q ? num(r.totalCost) / q : null, rmUnit: q ? num(r.totalRM) / q : null, u622: q ? num(r.t622) / q : null, u627: q ? num(r.t627) / q : null,
       price: num(r.price), priceSrc: r.priceSrc, fx: num(r.fx), salesVND: num(r.salesVND), gpPct: r.salesVND ? (num(r.salesVND) - num(r.totalCost)) / num(r.salesVND) : null, statusText: txt(r.statusText),
-      pcmSum, pcmDiff: num(r.pcRM) - pcmSum, nMat: new Set(mats.map((x) => x.mat)).size, flags: [] };
+      pcmSum, pcmDiff: pcmMissing.includes(r.erp) ? 0 : num(r.pcRM) - pcmSum, nMat: new Set(mats.map((x) => x.mat)).size, flags: [] };
   });
   const T = lots.reduce((a, l) => { for (const f of ['qty', 'pcRM', 'so', 'wipAdj', 'carryIn', 'totalRM', 't622', 't627', 'd622', 'd627', 'totalCost', 'salesVND']) a[f] += l[f]; return a; }, { qty: 0, pcRM: 0, so: 0, wipAdj: 0, carryIn: 0, totalRM: 0, t622: 0, t627: 0, d622: 0, d627: 0, totalCost: 0, salesVND: 0 });
   const unit = (v) => (T.qty ? v / T.qty : null);
@@ -99,31 +119,37 @@ export function costTrace(ctx) {
       const ratio = l.unit / medUnit;
       if (ratio > RULES.lotUnitHi || ratio < RULES.lotUnitLo) { const imp = (l.unit - medUnit) * l.qty; l.flags.push(`Giá thành/đv ${ratio > 1 ? 'cao' : 'thấp'} ${Math.round((ratio - 1) * 100)}% so với trung vị`); flag('REVIEW', 'Lô', `Lô ${l.pc}: giá thành đơn vị ${fmt(l.unit)} = ${pct(ratio - 1)} so với trung vị các lô (${fmt(medUnit)}). Ảnh hưởng ${fmt(imp)} VND.`, { pc: l.pc, impact: imp }); }
     }
-    if (Math.abs(l.pcmDiff) > 1) { l.flags.push('PC-P ≠ tổng PC-M'); flag('REVIEW', 'Báo cáo PC', `Lô ${l.pc}: Total Cost trên PC-P (${fmt(l.pcRM)}) khác tổng chi tiết PC-M (${fmt(l.pcmSum)}), chênh ${fmt(l.pcmDiff)} VND.`, { pc: l.pc, impact: l.pcmDiff }); }
-    if (!l.nMat && l.pcRM) { l.flags.push('Không có chi tiết PC-M'); flag('REVIEW', 'Báo cáo PC', `Lô ${l.pc}: có giá trị RM ${fmt(l.pcRM)} nhưng không có dòng vật tư nào trên PC-M.`, { pc: l.pc }); }
+    if (pcmMissing.includes(l.erp)) { /* reported once below */ }
+    else if (!l.nMat && l.pcRM) { l.flags.push('Không có chi tiết PC-M'); flag('REVIEW', 'Báo cáo PC', `Lô ${l.pc}: PC-P có NVL ${fmt(l.pcRM)} nhưng PC-M-${l.erp} không có dòng nào cùng PC No.`, { pc: l.pc, impact: l.pcRM }); }
+    else if (Math.abs(l.pcmDiff) > 1) { l.flags.push('PC-P ≠ tổng PC-M'); flag('REVIEW', 'Báo cáo PC', `Lô ${l.pc}: Total Cost trên PC-P (${fmt(l.pcRM)}) khác tổng chi tiết PC-M (${fmt(l.pcmSum)}), chênh ${fmt(l.pcmDiff)} VND.`, { pc: l.pc, impact: l.pcmDiff }); }
     if (/NON-POSITIVE/i.test(l.statusText)) { l.flags.push('Không nhận 622/627'); flag('REVIEW', 'Phân bổ 622/627', `Lô ${l.pc}: đóng góp ≤ 0 (doanh thu theo giá bán − RM) nên không nhận 622/627 chung. Kiểm tra giá bán / RM.`, { pc: l.pc }); }
     if (l.gpPct !== null && l.gpPct < 0) { l.flags.push('Giá thành > giá bán'); flag('REVIEW', 'Biên lợi nhuận', `Lô ${l.pc}: giá thành ${fmt(l.unit)} > giá bán quy đổi ${fmt(l.price * l.fx)} VND/đv (GP ${pct(l.gpPct)}).`, { pc: l.pc }); }
     if (l.totalRM && l.so / l.totalRM > RULES.soShare) { l.flags.push('Stock Out lớn'); flag('INFO', 'Stock Out', `Lô ${l.pc}: Stock Out phân bổ ${fmt(l.so)} VND = ${pct(l.so / l.totalRM)} RM của lô.`, { pc: l.pc }); }
     if (Math.abs(l.wipAdj) > 1) { l.flags.push('Có điều chỉnh WIP 3B'); flag('INFO', 'Điều chỉnh WIP', `Lô ${l.pc}: nhận điều chỉnh WIP trực tiếp (3B) ${fmt(l.wipAdj)} VND.`, { pc: l.pc }); }
     if (Math.abs(l.carryIn) > 1) { l.flags.push('Có rework chuyển vào'); flag('INFO', 'Rework', `Lô ${l.pc}: nhận giá trị rework hoàn thành ${fmt(l.carryIn)} VND.`, { pc: l.pc }); }
   }
+  for (const e of pcmMissing) flag('REVIEW', 'Báo cáo PC', `Kỳ này chưa có dữ liệu PC-M-${e} (chưa import hoặc đã bị xoá) – không xem được chi tiết vật tư và không đối chiếu được PC-P ↔ PC-M cho các lô ${e}. Import lại PC-M-${e} ở STEP 1.`);
+  if (looseLots) flag('INFO', 'Báo cáo PC', `${looseLots} lô: dòng PC-M ghi Product Code / Sub-MO khác PC-P – đã ghép theo PC No. (cùng cách đối chiếu ở STEP 3).`);
   for (const r of (ctx.lotCheck && ctx.lotCheck.rows) || []) if (utxt(r.prod) === P) flag('REVIEW', 'Kiểm tra đơn giá RM', `Lô ${r.pc}: đơn giá RM ${fmt(r.unit)} = ${r.ratio.toFixed(2)}× trung vị (${fmt(r.median)}). ${r.flag}. Ảnh hưởng ${fmt(r.impact)} VND.`, { pc: r.pc, impact: r.impact });
   if (overview.price === 0 || overview.price === null) flag('REVIEW', 'Giá bán', 'Không có giá bán trong Price Master – 622/627 không phân bổ được theo đóng góp.');
   else if (overview.priceSrc && !/CURRENT|LATEST/i.test(overview.priceSrc)) flag('INFO', 'Giá bán', `Giá bán dùng để phân bổ lấy từ: ${overview.priceSrc}.`);
 
   // ---- materials (PC-M consumption vs MI issue / MR return)
   const lotQty = new Map(lots.map((l) => [lotKey(l.erp, l.pc, l.sub, P), l.qty]));
+  const lotSub = new Map(lots.map((l) => [lotKey(l.erp, l.pc, l.sub, P), l.sub]));
   const mats = new Map();
   const mget = (code, name, unitTxt) => { if (!mats.has(code)) mats.set(code, { mat: code, name, unit: unitTxt, qty: 0, amt: 0, lots: new Map(), miQty: 0, miAmt: 0, mrQty: 0, mrAmt: 0, flags: [] }); const o = mats.get(code); if (!o.name && name) o.name = name; if (!o.unit && unitTxt) o.unit = unitTxt; return o; };
   const matLots = [];
   for (const r of pcm) {
-    const k = lotKey(r.erp, r.pc, r.sub, P);
+    const k = r.lotK;
     const o = mget(r.mat, r.name, r.unit); o.qty += r.qty; o.amt += r.amt;
     const lq = lotQty.get(k) || 0;
-    const ml = o.lots.get(k) || { erp: r.erp, pc: r.pc, sub: r.sub, date: r.date, lotQty: lq, qty: 0, amt: 0 };
+    const ml = o.lots.get(k) || { erp: r.erp, pc: r.pc, sub: lotSub.get(k), date: r.date, lotQty: lq, qty: 0, amt: 0 };
     ml.qty += r.qty; ml.amt += r.amt; o.lots.set(k, ml);
   }
-  for (const r of ctx.index.mi.get(P) || []) { const o = mget(r.mat, r.name, r.unit); o.miQty += r.qty; o.miAmt += r.amt; }
+  let miRows = idx.mi.get(P) || [];
+  if (!miRows.length && idx.miByMo) { const seen = new Set(); for (const l of lots) { const k = `${l.erp}|${utxt(l.mo)}`; if (l.mo && !seen.has(k)) { seen.add(k); miRows = miRows.concat(idx.miByMo.get(k) || []); } } }
+  for (const r of miRows) { const o = mget(r.mat, r.name, r.unit); o.miQty += r.qty; o.miAmt += r.amt; }
   for (const r of ctx.index.mr.get(P) || []) { const o = mget(r.mat, '', ''); o.mrQty += r.qty; o.mrAmt += r.amt; }
   const totalRMpcm = [...mats.values()].reduce((a, o) => a + o.amt, 0);
   const materials = [...mats.values()].map((o) => {

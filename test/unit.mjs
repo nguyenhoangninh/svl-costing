@@ -54,6 +54,34 @@ let threw = '';
 try { F5.runFIFO({ ...ctx({}), step4: { current: 'OUTDATED - RERUN REQUIRED', overall: 'PASS' } }); } catch (e) { threw = e.message; }
 eq('FIFO refuses stale STEP 4', threw.includes('CURRENT'), true);
 
+// ---- Trace: PC-M rows are tied to lots by ERP + PC No. (as STEP 3), whatever Sub-MO / Product Code PC-M carries
+import * as TR from '../src/engine/trace.js';
+{
+  const H = ['PC No.', 'MO No.', 'Sub-MO', 'Product Code', 'Material Code', 'Material Name', 'Quantity', 'Total Cost'];
+  const ds = (rows) => ({ 'PC-M-O': { header: H, rows } });
+  const fl = { rows: [
+    { erp: 'O', pc: 'PC-1', mo: 'MO-1', sub: 'MO-1-001', prod: 'A', qty: 10, pcRM: 1000, totalCost: 1500, totalRM: 1000 },
+    { erp: 'O', pc: 'PC-2', mo: 'MO-1', sub: 'MO-1-001', prod: 'A', qty: 10, pcRM: 800, totalCost: 1300, totalRM: 800 },
+    { erp: 'O', pc: 'PC-3', mo: 'MO-2', sub: 'MO-2-001', prod: 'A', qty: 5, pcRM: 300, totalCost: 400, totalRM: 300 },
+    { erp: 'O', pc: 'PC-3', mo: 'MO-2', sub: 'MO-2-002', prod: 'B', qty: 5, pcRM: 200, totalCost: 300, totalRM: 200 } ] };
+  const run = (rows) => TR.costTrace({ prod: 'A', fl, index: TR.buildIndex(ds(rows)) });
+  const pcRev = (t) => t.anomalies.filter((a) => a.area === 'Báo cáo PC' && a.level === 'REVIEW').length;
+  // PC-M: Sub-MO blank, Product Code blank on PC-1, different code on PC-2 → still tied by PC No.
+  let t = run([['PC-1', 'MO-1', '', '', 'M1', 'x', 5, 600], ['PC-1', 'MO-1', '', '', 'M2', 'y', 1, 400], ['PC-2', 'MO-1', '', 'A ', 'M1', 'x', 4, 800],
+    ['PC-3', 'MO-2', 'MO-2-001', 'A', 'M1', 'x', 2, 300], ['PC-3', 'MO-2', 'MO-2-002', 'B', 'M1', 'x', 2, 200]]);
+  eq('trace: PC-M sums per lot', t.lots.map((l) => l.pcmSum), [1000, 800, 300]);
+  eq('trace: no false PC-P ≠ PC-M', pcRev(t), 0);
+  eq('trace: loose match reported once (INFO)', t.anomalies.filter((a) => a.level === 'INFO' && /ghép theo PC No/.test(a.msg)).length, 1);
+  eq('trace: material totals from tied rows', t.materials.map((m) => [m.mat, m.amt]), [['M1', 1700], ['M2', 400]]);
+  // real difference still flagged
+  t = run([['PC-1', 'MO-1', 'MO-1-001', 'A', 'M1', 'x', 5, 900], ['PC-2', 'MO-1', 'MO-1-001', 'A', 'M1', 'x', 4, 800], ['PC-3', 'MO-2', 'MO-2-001', 'A', 'M1', 'x', 2, 300]]);
+  eq('trace: genuine difference flagged', t.lots.map((l) => Math.round(l.pcmDiff)), [100, 0, 0]);
+  eq('trace: one REVIEW for genuine difference', pcRev(t), 1);
+  // PC-M dataset absent → one dataset-level message, not one per lot
+  t = TR.costTrace({ prod: 'A', fl, index: TR.buildIndex({}) });
+  eq('trace: missing PC-M reported once', pcRev(t), 1);
+}
+
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
 import fs from 'node:fs';
 import path from 'node:path';
