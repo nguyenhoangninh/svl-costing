@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.10.0 STEP 5R & Close Integrity (02/10/2026):** tách Sales Return thành module/function độc lập **STEP 5R** với Return Register, strict original-invoice matching, cumulative return cap, original COGS reversal và Returned FG Layer; Return History và Close reconciliation dùng cùng một contract. Mọi FG Rework Active bắt buộc STRICT_DATE; Production layer thiếu completion date bị chặn trong STRICT_DATE; Sales MONTHLY/YTD bị hard-block nếu sai phạm vi recognition period; STEP 4/5 dùng chung canonical Bill/B.L. Recognition Date. NRV RECORDED được bridge vào FAST 2294 + 632. Cloud dùng immutable content-addressed chunks, exact revision snapshot, ever-closed retention và Close exception package; CSP được bổ sung; CI có accounting + retention contract tests.
+
 > **v1.9.1 Closed-period integrity patch (02/10/2026):** REOPEN được cloud-confirm trước khi ghi audit cục bộ; Firestore chỉ cho admin stage blob `closed@…` khi kỳ đang CLOSED, parent revision chỉ được đổi trạng thái closed tương ứng, và immutable revision phải bind đúng `rev + manifestHash` của parent sau transaction. Đây là hardening cho tính bất biến kỳ đã đóng; các costing-policy controls của v1.9.0 giữ nguyên.
 
 > **v1.9.0 Accounting Integrity (02/10/2026):** hard-block ngày ERP/Sales lỗi hoặc ngoài kỳ; Bill/B.L. Date là recognition date bắt buộc khi được cung cấp; Sales Return chạy STRICT_DATE, match hoá đơn gốc chặt, cộng gộp nhiều line cùng invoice-product và ghi COGS reversal vào FG History; Credit Note không tạo chuyển động FG; hỗ trợ kỳ không sản xuất nhưng bán FG đầu kỳ; Manual Price / Direct 622-627 có maker-checker; fallback STEP 2 trọng yếu cần Admin duyệt; NRV phải có quyết định kế toán trước Close; cloud lưu immutable revision manifest và CLOSED period chỉ sửa sau REOPEN; CI kiểm unit + synthetic + control rules trước deploy.
@@ -20,6 +22,7 @@ Bản web của **SVL Costing Master (Excel/VBA v30.9)**: tính giá thành sả
 | STEP 3A | Opening WIP (import / roll forward / validate) + Material WIP | Có trên web |
 | STEP 3B | Điều chỉnh WIP trực tiếp (ERP map, INPUT, BUILD, duyệt, APPLY, sổ 632) | Có trên web |
 | STEP 4 | Doanh thu, Price Master, FX/GL 622-627, phân bổ giá thành, đối chiếu, kiểm tra đơn giá lô | Có trên web |
+| STEP 5R | Hàng bán bị trả lại: match invoice gốc, reverse COGS gốc, Returned FG Layer, Return Register & close control | Có trên web |
 | STEP 5 | FG đầu kỳ theo lô, FIFO giá vốn, FIFO rework (5B), nhập–xuất–tồn, FG History, đóng kỳ, roll forward | Có trên web |
 
 Engine ban đầu được port từ VBA v30.9 và vẫn giữ **legacy regression baseline** của kỳ 2026-08: **69.871/69.871** giá trị cho STEP 1–3A, **223.899/223.899** cho STEP 3B–4 và **99.522/99.522** cho STEP 5 tại baseline Excel tương ứng. Từ v1.8–v1.9, web có một số **approved accounting-policy controls chủ ý khác Excel cũ** (3B amount basis, Bill/B.L. recognition date, chronological Sales Return/Rework, hard validation, maker-checker). Vì vậy không được hiểu mọi khác biệt với workbook v30.9 là regression; cần phân biệt **Legacy Excel Parity** và **Approved Web Accounting Policy**.
