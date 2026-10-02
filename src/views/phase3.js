@@ -167,10 +167,19 @@ function step5Controls(S, x) {
   const H = rows.map((r) => String(r.status || ''));
   const ok = H.filter((s) => s === 'PASS' || s === 'CURRENT' || s === 'INFO').length;
   const status = H.some((s) => s.startsWith('BLOCK') || s.startsWith('CHECK')) ? 'BLOCK' : H.some((s) => s === 'NOT RUN' || s.startsWith('RERUN')) ? 'RERUN REQUIRED' : H.some((s) => s.startsWith('REVIEW')) ? 'PASS WITH REVIEW' : 'PASS';
+  const byNo = (no) => rows.find((r) => r.no === no) || { status: 'NOT RUN' };
   const op = d.fgOpen;
   const opSt = !op ? 'NOT LOADED' : op.status;
-  const next = d.closed && d.closed.period === S.period ? `Kỳ đã đóng – tạo kỳ ${nextP(S.period)}` : opSt === 'NOT LOADED' ? 'Roll forward / import FG đầu kỳ' : !opSt.startsWith('VALIDATED') ? 'Validate FG đầu kỳ' : rows[1].status !== 'PASS' ? 'Hoàn tất STEP 4 trước' : (rows[3].status !== 'PASS' || rows[4].status !== 'PASS' || rows[10].status !== 'PASS') ? 'Chạy FIFO COGS' : rows[15].status !== 'PASS' ? 'Build FG History' : rows[16].status.startsWith('PASS') ? 'CLOSE MONTH' : 'Xử lý cổng đóng kỳ (05_RECONCILIATION dòng 49)';
-  return { rows, okText: `${ok} / 17 OK`, status: d.closed && d.closed.period === S.period ? 'CLOSED' : status, next };
+  const fifoNeedsRun = ['04', '05', '11', '14'].some((no) => !['PASS', 'INFO'].includes(byNo(no).status));
+  const next = d.closed && d.closed.period === S.period ? `Kỳ đã đóng – tạo kỳ ${nextP(S.period)}`
+    : opSt === 'NOT LOADED' ? 'Roll forward / import FG đầu kỳ'
+      : !opSt.startsWith('VALIDATED') ? 'Validate FG đầu kỳ'
+        : byNo('02').status !== 'PASS' ? 'Hoàn tất STEP 4 trước'
+          : fifoNeedsRun ? 'Chạy FIFO COGS'
+            : byNo('16').status !== 'PASS' ? 'Build FG History'
+              : byNo('17').status.startsWith('PASS') ? 'CLOSE MONTH'
+                : 'Xử lý cổng đóng kỳ (05_RECONCILIATION dòng 49)';
+  return { rows, okText: `${ok} / ${rows.length} OK`, status: d.closed && d.closed.period === S.period ? 'CLOSED' : status, next };
 }
 const nextP = (p) => { let y = +p.slice(0, 4), m = +p.slice(5, 7) + 1; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, '0')}`; };
 
@@ -553,7 +562,8 @@ export async function doClose() {
   if (!confirm(msg)) return;
   const prevArchive = d.rwArchive, prevClosedEver = d.closedEver;
   const exceptions = [];
-  for (const [no, r] of Object.entries(recon.rows || {})) if (String(r && r.status || '').startsWith('REVIEW')) exceptions.push({ control: no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.result ?? '', diff: r.diff ?? '', note: r.note || '' });
+  for (const [no, r] of Object.entries(recon.rows || {})) if (String(r && r.status || '').startsWith('REVIEW')) exceptions.push({ control: 'REC-' + no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.result ?? '', diff: r.diff ?? '', note: r.note || '' });
+  for (const r of (D5.controls && D5.controls.rows) || []) if (String(r.status || '').startsWith('REVIEW')) exceptions.push({ control: 'CC-' + r.no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.actual ?? r.result ?? '', diff: r.diff ?? '', note: r.rule || '' });
   if (D5.tie && D5.tie.diffs) exceptions.push({ control: 'FAST', label: 'FAST reconciliation', status: D5.tie.status, result: D5.tie.rows.filter((r) => r.status === 'DIFF').map((r) => `${r.acc}:${r.diff}`).join('; '), note: D5.tie.approval ? D5.tie.approval.note : '' });
   if (d.nrvDecision) exceptions.push({ control: 'NRV', label: 'NRV decision', status: d.nrvDecision.status, result: d.nrvDecision.amount, note: d.nrvDecision.note || '', ref: d.nrvDecision.ref || '' });
   d.closedEver = true;
