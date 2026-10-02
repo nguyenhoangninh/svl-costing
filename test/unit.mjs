@@ -23,8 +23,9 @@ const row = (d, inv, prod, qty, usd) => ({ invDate: d, customer: 'C', product: p
 let db = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 10, 2), 'I1', 'A', 1, 10), row(ser(2026, 10, 5), 'I2', 'A', 2, 20), row(ser(2026, 10, 10), 'I3', 'A', 3, 30)] }, { rows: [] }, P).db;
 db = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 10, 5), 'I2', 'A', 2, 20), row(ser(2026, 10, 10), 'I3', 'A', 3, 30)] }, db, P).db;
 eq('T-05 removed early-month row disappears', db.rows.map((r) => r.invNo).sort(), ['I2', 'I3']);
-db = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 9, 20), 'S1', 'A', 1, 10)] }, db, P).db;
-eq('rows outside coverage kept', db.rows.map((r) => r.invNo).sort(), ['I2', 'I3', 'S1']);
+let priorMonthErr = '';
+try { validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 9, 20), 'S1', 'A', 1, 10)] }, db, P); } catch (e) { priorMonthErr = e.message; }
+eq('MONTHLY source from prior period is blocked', priorMonthErr.includes('BLOCK'), true);
 
 // ---- F-04 3B build fingerprint
 const inp = [{ code: 'M1', basisQty: -5, basisAmt: 100, option: '' }];
@@ -133,6 +134,7 @@ import { fp as fpStr } from '../src/engine/util.js';
   let futureBillErr = '';
   try { validateSaveSales({ mode: 'YTD', rows: [{ ...row(ser(2026, 8, 7), 'UF', 'A', 1, 10), billDate: ser(2026, 9, 1) }] }, { rows: [] }, P2); } catch (e) { futureBillErr = e.message; }
   eq('F-05 future Bill Date blocked from current period Sales DB', futureBillErr.includes('BLOCK'), true);
+  eq('F-05 STEP5 canonical date never falls back from invalid supplied Bill Date', F5.saleDate({ invDate: ser(2026, 8, 7), billDate: '31/02/2026' }), null);
   // F-23: validation REVIEW of a costed line is counted
   const rv = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 8), 'V1', 'A', 1, 10), customer: '' }] }, { rows: [] }, P2);
   eq('F-23 advisory counted', F5.runFIFO({ ...ctx({}), salesRows: rv.db.rows }).stats.advisory, 1);
@@ -197,6 +199,10 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const rS2 = F5.runFIFO({ ...base, mode: 'STRICT_DATE', register: reg2 }); F5.runReworkFIFO(rS2, reg2, { period: P2, opening: op0, salesRows: [], step4Carry: 0 });
   eq('#1 STRICT: rework after production takes it', [reg2.rows[0].fifoStatus, Math.round(reg2.rows[0].fifoCost)], ['PASS', 200]);
   eq('#1 STRICT: gate allows rework', F5.reworkGate(reg2, [], P2, 'STRICT_DATE'), '');
+  let monthlyRwErr = ''; try { F5.runFIFO({ ...base, mode: 'MONTHLY', register: reg2 }); } catch (e) { monthlyRwErr = e.message; }
+  eq('#1 MONTHLY active rework is blocked by engine', monthlyRwErr.includes('STRICT_DATE'), true);
+  let undatedProdErr = ''; try { F5.runFIFO({ ...base, caRows: [{ ...ca1[0], date: null }], mode: 'STRICT_DATE', register: { rows: [] } }); } catch (e) { undatedProdErr = e.message; }
+  eq('#1 STRICT production without completion date is blocked', undatedProdErr.includes('thiếu ngày hoàn thành'), true);
   // sale on 10/08 then rework 15/08 with only the opening layer of 10 units: sale first, rework gets the rest in date order
   const reg3 = { rows: [{ ...reg.rows[0], issueQty: 3, issueDate: ser(2026, 8, 15) }] };
   const sl = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 10), 'S1', 'A', 8, 80)] }, { rows: [] }, P2).db.rows;
@@ -220,6 +226,11 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const rh = F5.buildHistory(rr, [], { period: P2, opening, caRows: ca });
   eq('#6 return reversal included in FG History', rh.rows.some((h) => h.source === 'SALES RETURN REVERSAL' && h.qty === -1 && Math.round(h.tot) === -100), true);
   eq('#6 return → FG History gate PASS', F5.historyGate(rh, rr, P2).gate, 'PASS');
+  eq('#6 STEP 5R register processed', [rr.returnControl.status, rr.returnControl.total, rr.returnControl.processed, rr.returnRegister[0].originalInv], ['PASS', 1, 1, 'X1']);
+  const rfl = { rows: ca, totals: { totalCost: 500, totalRM: 300, wipAdj: 0 }, gate6: 'PASS' };
+  const rrec = F5.step5Recon({ period: P2, res: rr, freshness: 'CURRENT', hist: rh, histGate: F5.historyGate(rh, rr, P2), gl: { ytd622: null, ytd627: null }, fl: rfl, s4: { alloc622: 100, alloc627: 100 }, gate6: 'PASS' });
+  eq('#6 return → STEP5 reconciliation row 36 PASS', rrec.rows[36].status, 'PASS');
+  eq('#6 return → Close Gate can become READY', rrec.closeGate.startsWith('READY'), true);
   const credit = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 21), 'CR1', 'A', -1, -10), tranType: 'CREDIT NOTE' }] }, { rows: [] }, P2).db.rows;
   const cr = F5.runFIFO({ ...ctx({}), salesRows: credit, mode: 'STRICT_DATE' });
   eq('#6 CREDIT NOTE has no physical FG/COGS movement', [cr.sales[0].fin, cr.stats.returns, cr.totals.cogsQ], ['NO COGS', 0, 0]);
@@ -269,10 +280,10 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const nk1 = nrvKey(nv), nk2 = nrvKey({ ...nv, closing: nv.closing.map((x) => ({ ...x, price: num(x.price) + 0.001 })) });
   eq('#7 NRV decision key changes when valuation price changes', nk1 !== nk2, true);
   // #3 FAST tie: difference needs approval bound to the figures
-  const eng = { a154: 1000, a155: 2000, a632: 3000, a511: 4000 };
+  const eng = { a154: 1000, a155: 2000, a2294: 0, a632: 3000, a511: 4000 };
   const t0 = F5.fastTie(eng, null);
   eq('#3 not entered', t0.status, 'NOT ENTERED');
-  const tie = { fast: { a154: 1000, a155: 2000, a632: 2990, a511: 4000 } };
+  const tie = { fast: { a154: 1000, a155: 2000, a2294: 0, a632: 2990, a511: 4000 } };
   const t1 = F5.fastTie(eng, tie);
   eq('#3 diff → REVIEW', [t1.status, t1.diffs], ['REVIEW', 1]);
   const t2 = F5.fastTie(eng, { ...tie, approval: { key: t1.key, by: 'x', note: 'ok' } });
@@ -280,6 +291,10 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('#3 approval lapses when figures change', F5.fastTie({ ...eng, a155: 2001 }, { ...tie, approval: { key: t1.key } }).status, 'REVIEW');
   const eb = engineBalances({ period: P2, d: { step3: { summary: { closingAmt: 1000 } }, register: { rows: [] }, wipadj: { reg632: [{ record: 'RECORDED', impact: 100 }] }, salesDB: { rows: [] } } }, { d3b: { wf: { finalClosing: 1000 } } }, { totals: { closeA: 0, cogsA: 300 } });
   eq('#3 DIRECT_632 changes both 154 and 632', [eb.a154, eb.a632], [900, 400]);
+  const fakeRes = { totals: { closeA: 0, cogsA: 300 }, closing: [{ lid: 'L', prod: 'A', qty: 1, tot: 100, price: 1, nrvUnit: 50, prov: 0, provNeed: 40 }] };
+  const nk = nrvKey(fakeRes);
+  const ebNrv = engineBalances({ period: P2, d: { step3: { summary: { closingAmt: 1000 } }, register: { rows: [] }, wipadj: { reg632: [] }, salesDB: { rows: [] }, nrvDecision: { key: nk, status: 'RECORDED', recordedAmount: 40, amount: 40 } } }, { d3b: { wf: { finalClosing: 1000 } } }, fakeRes);
+  eq('#7 recorded NRV bridges both 2294 and 632', [ebNrv.a2294, ebNrv.a632], [40, 340]);
 }
 
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
