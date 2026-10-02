@@ -320,6 +320,7 @@ const NAV = [
   { id: 'step4', no: '4.3', label: 'Phân bổ giá thành', sub: '622 / 627 theo lô', key: 's4' },
   { id: 'fgopen', no: '5.1', label: 'FG đầu kỳ', sub: 'Lớp FIFO đầu kỳ', key: 's5o' },
   { id: 'step5', no: '5.2', label: 'FIFO giá vốn', sub: 'COGS · rework 5B', key: 's5' },
+  { id: 'salesreturn', no: '5R', label: 'Sales Return', sub: 'Hàng bán bị trả lại', key: 's5r' },
   { id: 'close', no: '5.3', label: 'FG History & đóng kỳ', sub: 'Đóng kỳ', key: 's5c' },
 ];
 const TOOLS = [
@@ -335,13 +336,14 @@ function railStatus(st) {
   return {
     s1: st.s1c.result, s2: st.s2c.status, rw: !S.d.register ? 'NOT RUN' : blocks ? 'BLOCK' : 'PASS',
     op: op === 'READY' ? 'PASS' : op === 'READY WITH WARNINGS' ? 'PASS WITH REVIEW' : op === 'NO DATA' ? 'NOT RUN' : 'BLOCK', s3: st.s3c.status,
-    s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5c: 'NOT RUN' }),
+    s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5r: 'NOT RUN', s5c: 'NOT RUN' }),
     pm: !S.d.pm ? 'NOT RUN' : S.d.pm.status !== 'CURRENT' ? S.d.pm.status : S.d.pm.rows.some((r) => r.status === 'MISSING PRICE') ? 'BLOCK' : 'PASS',
     gl: S.d.gl && S.d.gl.period === S.period && num(S.d.gl.fx) > 0 ? 'PASS' : 'NOT RUN',
   };
 }
 
 function renderShell() {
+  document.body.classList.remove('auth-screen');
   const st = statusAll(); const rs = railStatus(st);
   $('#rail').innerHTML = `
     <div class="period-box">
@@ -369,11 +371,25 @@ function renderShell() {
 
 function render() {
   if (store.needsSignIn() || (store.cloud.enabled && !store.cloud.user && !store.cloud.offline)) {
-    $('#rail').innerHTML = `<div class="ver">${esc(APP_VERSION)}</div>`;
-    $('#account').innerHTML = `<button class="btn sm" data-act="signin" type="button" ${store.cloud.ready ? '' : 'disabled'}>Đăng nhập Google</button>`;
+    document.body.classList.add('auth-screen');
+    $('#rail').innerHTML = '';
+    $('#account').innerHTML = '';
     renderSync();
-    app().innerHTML = `<section class="page"><h1>Đăng nhập để dùng SVL Costing</h1><p class="lead">Dữ liệu giá thành chỉ hiển thị cho tài khoản đã được cấp quyền.</p>
-      <div class="card"><p>${store.cloud.ready ? 'Bấm <b>Đăng nhập Google</b> ở góc trên bên phải.' : 'Đang kết nối…'}</p>${store.cloud.error ? `<p class="err">${esc(store.cloud.error)}</p>` : ''}</div></section>`;
+    app().innerHTML = `<section class="auth-login" aria-labelledby="auth-title">
+      <div class="auth-card">
+        <div class="auth-logo"><img src="icon.svg" alt="" width="72" height="72"></div>
+        <div class="auth-kicker">STARRY VIETNAM · FINANCE</div>
+        <h1 id="auth-title">SVL Costing</h1>
+        <p class="auth-sub">Hệ thống giá thành sản xuất tháng</p>
+        <p class="auth-desc">Import ERP, kiểm soát WIP, phân bổ giá thành, FIFO COGS, Sales Return và đóng kỳ trên một quy trình có kiểm soát.</p>
+        <button class="btn auth-signin" data-act="signin" type="button" ${store.cloud.ready ? '' : 'disabled'}>
+          <span class="auth-g">G</span><span>${store.cloud.ready ? 'Đăng nhập bằng Google' : 'Đang kết nối Google…'}</span>
+        </button>
+        <div class="auth-note">Chỉ tài khoản đã được cấp quyền mới có thể xem dữ liệu giá thành trên cloud.</div>
+        ${store.cloud.error ? `<div class="alert block auth-error">${esc(store.cloud.error)}</div>` : ''}
+        <div class="auth-version">${esc(APP_VERSION)}</div>
+      </div>
+    </section>`;
     return;
   }
   renderShell();
@@ -400,6 +416,7 @@ VIEWS.gl = (el) => P2.viewGL(el);
 VIEWS.step4 = (el) => P2.view4(el);
 VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
+VIEWS.salesreturn = (el) => P3.viewReturns(el);
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
@@ -417,6 +434,7 @@ VIEWS.cc = (el) => {
     ['4.3', 'Phân bổ giá thành', st.s4c.status, st.p2.d4 && st.p2.d4.fl ? fmtNum(st.p2.d4.fl.totals.totalCost) : '', S.d.step4 && S.d.step4.runAt, st.s4c.next, 'step4'],
     ['5.1', 'FG đầu kỳ', rs.s5o, S.d.fgOpen && S.d.fgOpen.stats ? fmtNum(S.d.fgOpen.stats.amt) : '', S.d.fgOpen && (S.d.fgOpen.validatedAt || S.d.fgOpen.loadedAt), S.d.fgOpen ? '' : 'Roll forward / import FG đầu kỳ', 'fgopen'],
     ['5.2', 'FIFO giá vốn & rework', rs.s5, st.d5 && st.d5.res ? fmtNum(st.d5.res.totals.cogsA) : '', st.d5 && st.d5.res && st.d5.res.runAt, st.s5c.next, 'step5'],
+    ['5R', 'Sales Return', rs.s5r, st.d5 && st.d5.res && st.d5.res.returnControl ? `${st.d5.res.returnControl.processed}/${st.d5.res.returnControl.total} processed` : '', st.d5 && st.d5.res && st.d5.res.runAt, rs.s5r === 'PASS' ? '' : 'Kiểm tra Original Invoice / return qty / COGS reversal', 'salesreturn'],
     ['5.3', 'FG History & đóng kỳ', rs.s5c, st.d5 && st.d5.res ? st.d5.recon.finalStatus : '', S.d.closed && S.d.closed.period === S.period ? S.d.closed.closedAt : S.d.fgHistory && S.d.fgHistory.builtAt, S.d.closed && S.d.closed.period === S.period ? '' : st.d5 && st.d5.res ? (st.d5.closeReason || 'CLOSE MONTH') : '', 'close'],
   ];
   const next = steps.find((x) => !String(x[2]).startsWith('PASS') && x[2] !== 'CLOSED');
