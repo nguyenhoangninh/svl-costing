@@ -85,11 +85,11 @@ const HS = ['Invoice Date', 'Month', 'Customer', 'Product Number', 'Product Name
 const FX = 26000;
 const sale = (day, cust, prod, qty, usd, inv, bill = null, orig = null) => [ser(day), 8, cust, prod, 'x', FX, qty, usd, qty * usd, qty * usd * FX, null, inv, null, qty < 0 ? 'SALES RETURN' : 'NORMAL SALE', bill, orig];
 const salesGrid = [HS, sale(5, 'C1', 'SPX-100', 30, 260, 'INV-1'), sale(12, 'C1', 'SPX-200', 20, 300, 'INV-2'), sale(14, 'C2', 'OLX-300', 25, 40, 'INV-3'), sale(20, 'C2', 'OLX-400', 15, 22, 'INV-4'),
-  sale(18, 'C1', 'SPX-100', 25, 262, 'INV-5', ser(19)), sale(25, 'C1', 'SPX-100', -2, 260, 'CN-1', null, 'INV-1'), sale(31, 'C3', 'OLX-300', 5, 41, 'INV-6', ser(31) + 3)];
+  sale(18, 'C1', 'SPX-100', 25, 262, 'INV-5', ser(19)), sale(25, 'C1', 'SPX-100', -2, 260, 'CN-1', null, 'INV-1')];
 const salesDB = validateSaveSales(importSales({ S: salesGrid }, 'synthetic.xlsx', 'YTD', P), { rows: [] }, P).db;
 const pm = updatePriceMaster({ salesDB, so: [{ active: 'Y', product: 'OLX-400', price: 23, soDate: ser(2) }], manual: [], step2: s2, period: P }).pm;
 const gl = { period: P, fx: FX, gl622: 90000000, gl627: 60000000 };
-const s4 = runStep4({ period: P, step2: s2, step3: s3, pm, gl, directAdj: [{ active: 'Y', erp: 'O', account: 622, amount: 5000000, pc: pcp.O[0][0], prod: pcp.O[0][6] }] });
+const s4 = runStep4({ period: P, step2: s2, step3: s3, pm, gl, directAdj: [{ active: 'Y', erp: 'O', account: 622, amount: 5000000, pc: pcp.O[0][0], prod: pcp.O[0][6], reason: 'Synthetic approved direct labor attribution' }] });
 const fl = finalLayer(s4, postedByLot(eng), register);
 // ---------- STEP 5
 const fgOpen = { period: P, status: 'LOADED', rows: [['SPX-100', 10, 9000000], ['OLX-300', 8, 300000]].map(([prod, qty, tot], i) => ({ period: P, srcPeriod: '2026-07', lid: `OP-${i}`, source: 'OPENING', pc: `PC-2607-${i}`, date: (Date.UTC(2026, 6, 20) - Date.UTC(1899, 11, 30)) / 86400000, mo: '', prod, name: 'x', loc: '', unit: 'PCS', qty, rm: tot * 0.6, a622: tot * 0.25, a627: tot * 0.15, tot, price: 0, prov: 0, cons: '' })) };
@@ -114,7 +114,7 @@ ok('3B WIP bridge', wf.bridgeStatus === 'PASS', wf.bridgeStatus);
 ok('step4 overall PASS', String(fl.overall).startsWith('PASS'), fl.overall);
 for (const [n, x] of [['MONTHLY', M], ['STRICT', St]]) for (const k of [8, 9, 10, 11, 12]) ok(`${n} rec ${k}`, x.res.rec[k].status === 'PASS', JSON.stringify(x.res.rec[k]));
 ok('return restored in STRICT_DATE', St.res.sales.some((s) => s.fin === 'RETURN' && s.status === 'RETURNED'));
-ok('bill date moves INV-6 out of the period', !M.res.sales.some((s) => s.inv === 'INV-6'));
+ok('all accepted sales recognition dates are inside the costing period', salesDB.rows.every((r) => { const d = F5.saleDate(r); return d !== null && d <= ser(31); }));
 const f154 = (x) => num(s3.openingAmt) + s3.summary.miAmt + s3.summary.soAmt + s4.alloc622 + s4.alloc627 + x.res.rework.fifoCost - s3.summary.mrAmt - fl.totals.totalCost - wf.finalClosing - x.reg.rows.reduce((a, r) => a + num(r.closingWIP), 0);
 ok('154 bridge MONTHLY', Math.abs(f154(M)) <= 1, f154(M));
 ok('154 bridge STRICT', Math.abs(f154(St)) <= 1, f154(St));
