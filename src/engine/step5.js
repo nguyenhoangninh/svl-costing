@@ -1,7 +1,8 @@
 // STEP 5 — FG inventory by production lot, FIFO COGS, FG Rework FIFO (5B), FG History and month close.
 // Port of modSTEP5_FIFO (STEP5_Run_FIFO_COGS …), modSTEP2B_5B_FGRework (RW_RunMonthlyReworkFIFO …),
 // modSTEP5_MonthClose (STEP5_Build_FG_History_B333 / STEP5_Close_Month_B333) and the 05_RECONCILIATION formulas.
-import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, cellDateSerial, fp } from './util.js';
+import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, cellDateSerial, recognitionDate, fp } from './util.js';
+import * as RET from './return.js';
 
 export const TOLQ = 0.0001;          // S5_TOLQ
 const TOL_QTY = 0.000001;            // modSTEP5_MonthClose / RW
@@ -200,7 +201,9 @@ export function runFIFO(ctx) {
     const prod = utxt(r.prod), qty = num(r.qty);
     if (!s5t(r.pc) || !prod || !(qty > 0)) continue;
     const n = L.length + 1 - nO;
-    const l = { lid: `PR-${period.replace('-', '')}-${s5t(r.pc)}-${pad(n, 3)}`, src: 'PRODUCTION', sp: period, pc: s5t(r.pc), dt: dateVal(r.date) || 0, mo: s5t(r.sub) || s5t(r.mo), prod, name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty, rm: num(r.totalRM), a622: num(r.t622), a627: num(r.t627), tot: num(r.totalCost), price: num(r.price), prov: 0, cons: '', flag: '' };
+    const pDate = dateVal(r.date);
+    if (mode === 'STRICT_DATE' && pDate === null) throw new Error(`STRICT_DATE: lô sản xuất ${s5t(r.pc)} / ${prod} thiếu ngày hoàn thành. Không thể chứng minh layer tồn tại trước Sale/Rework.`);
+    const l = { lid: `PR-${period.replace('-', '')}-${s5t(r.pc)}-${pad(n, 3)}`, src: 'PRODUCTION', sp: period, pc: s5t(r.pc), dt: pDate || 0, mo: s5t(r.sub) || s5t(r.mo), prod, name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty, rm: num(r.totalRM), a622: num(r.t622), a627: num(r.t627), tot: num(r.totalCost), price: num(r.price), prov: 0, cons: '', flag: '' };
     if (/NON-POSITIVE/i.test(txt(r.statusText))) l.flag = 'STEP 4 REVIEW: no 622/627 allocated (non-positive contribution)';
     L.push(l); step4Qty += qty; step4Cost += l.tot;
   }
@@ -258,15 +261,12 @@ export function runFIFO(ctx) {
     S.push(s);
   });
 
-  // Sales returns are inventory events. For accounting safety, returns require chronological FIFO;
-  // MONTHLY cannot prove when returned FG became available for a later sale/rework in the same period.
+  // STEP 5R — Sales Return is a separate accounting sub-engine.
   const returns = S.filter((s) => s.fin === 'RETURN');
-  if (mode === 'MONTHLY' && returns.length) throw new Error('Có Sales Return trong kỳ. Chuyển FIFO sang STRICT_DATE để hoàn nhập COGS và đưa hàng trả lại vào đúng thứ tự thời gian.');
-  const returnByProd = new Map();
-  for (const s of returns) { if (!returnByProd.has(s.prod)) returnByProd.set(s.prod, []); returnByProd.get(s.prod).push(s); }
+  if (mode === 'MONTHLY' && returns.length) throw new Error('Có Sales Return trong kỳ. Chuyển FIFO sang STRICT_DATE để STEP 5R hoàn nhập COGS và đưa Returned FG vào đúng thứ tự thời gian.');
+  const returnByProd = RET.groupReturnsByProduct(returns);
   let retQ = 0, retA = 0, retN = 0;
   const originNow = new Map(), returnedNow = new Map();
-  const originKey = (o) => `${utxt(o.inv)}|${utxt(o.prod)}`;
 
   // FIFO allocation
   const D = []; let shortProducts = 0; const undatedUsed = new Set();
@@ -317,41 +317,25 @@ export function runFIFO(ctx) {
     for (const x of ev) {
       currentEventDate = x.d;
       if (x.k === 'T') {
-        const s = x.s; const q = -s.qty;
+        const s = x.s;
         const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
-        const cand = [...currentOrigins(), ...prior];
-        let o = null;
-        if (s.origInv) {
-          o = cand.filter((z) => utxt(z.inv) === utxt(s.origInv)).sort((a, b) => b.date - a.date)[0] || null;
-          if (!o) {
-            s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
-            s.msg += `Return: Original Invoice ${s.origInv} not found for product ${prod}; no automatic fallback is allowed; `;
-            continue;
-          }
-        } else {
-          const same = cand.filter((z) => utxt(z.cust) === utxt(s.cust)).sort((a, b) => b.date - a.date);
-          if (same.length === 1) o = same[0];
-          else {
-            s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
-            s.msg += same.length ? 'Return: multiple possible original invoices – enter Original Invoice No.; ' : 'Return: original sale not found – enter Original Invoice No.; ';
-            continue;
-          }
-        }
-        const ok = originKey(o), already = num(o.returned) + (returnedNow.get(ok) || 0), avail = Math.max(0, num(o.fq) - already);
-        if (q > avail + TOLQ) {
+        const result = RET.processReturnEvent({
+          sale: s,
+          candidates: [...currentOrigins(), ...prior],
+          returnedNow,
+          period,
+          sequence: retN + 1,
+          tol: TOL_QTY,
+        });
+        if (!result.ok) {
           s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
-          s.msg += `Return qty ${vbFmt(q, 4, true)} exceeds remaining returnable qty ${vbFmt(avail, 4, true)} of ${o.inv}; `;
+          s.msg += result.message;
           continue;
         }
-        const f = q / num(o.fq);
-        s.fq = -q; s.rm = -num(o.rm) * f; s.c622 = -num(o.c622) * f; s.c627 = -num(o.c627) * f; s.tot = -num(o.tot) * f;
-        s.matchedOrigInv = o.inv; s.status = 'RETURNED';
-        s.msg += `Return at original COGS of ${o.inv} (${o.period || period}); `;
-        returnedNow.set(ok, (returnedNow.get(ok) || 0) + q);
-        retN++; retQ += q; retA += -s.tot;
-        const l = { lid: `RT-${period.replace('-', '')}-${s.inv || 'NOINV'}-${pad(retN, 3)}`, src: 'RETURN', sp: period, pc: o.inv || '', dt: s.date, mo: '', prod, name: s.name, loc: '', unit: '', qty: q, rm: -s.rm, a622: -s.c622, a627: -s.c627, tot: -s.tot, price: 0, prov: 0, cons: '', flag: `Sales return ${s.inv}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + retN };
-        s.returnLid = l.lid;
-        sorted.push(l); prodLayers.push(l);
+        Object.assign(s, result.salePatch, { returnLid: result.lid });
+        s.msg += `Return at original COGS of ${result.origin.inv} (${result.origin.period || period}); `;
+        retN++; retQ += result.qty; retA += result.amount;
+        sorted.push(result.layer); prodLayers.push(result.layer);
         prodLayers.sort((a, b) => a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
         continue;
       }
@@ -375,14 +359,7 @@ export function runFIFO(ctx) {
         const s = x.s;
         if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; }
         else s.status = 'OK';
-        if (s.fq > TOLQ && s.inv) {
-          const ok = originKey({ inv: s.inv, prod });
-          const p = originNow.get(ok);
-          if (p) {
-            p.fq += s.fq; p.rm += s.rm; p.c622 += s.c622; p.c627 += s.c627; p.tot += s.tot;
-            p.date = Math.min(p.date, s.date);
-          } else originNow.set(ok, { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
-        }
+        if (s.fq > TOLQ && s.inv) RET.mergeOrigin(originNow, { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
       } else rwPlan[x.e.i] = { takes, short: nd > TOLQ ? nd : 0 };
     }
     if (short) shortProducts++;
@@ -542,10 +519,10 @@ export function chronologyConflicts(register, salesRows, period) {
 /** Pre-run gate of STEP5_FGREWORK_Run_FIFO_v1_1. Returns '' or a blocking message. */
 export function reworkGate(register, salesRows, period, mode) {
   if (!reworkCount(register)) return '';
-  let m = utxt(mode) || 'MONTHLY'; let conflicts = chronologyConflicts(register, salesRows, period);
-  if (!activeReworkCount(register)) { m = 'MONTHLY'; conflicts = 0; }
-  if (m === 'MONTHLY' && conflicts > 0) return `BLOCK - STRICT DATE REQUIRED: ${conflicts} sự kiện rework có bán hàng cùng sản phẩm từ ngày xuất rework trở đi. Phân bổ MONTHLY sau bán hàng sẽ sai thứ tự FIFO – chuyển sang STRICT_DATE.`;
-  return ''; // STRICT_DATE runs sales and rework in one date order (owner decision 02/10/2026)
+  const m = utxt(mode) || 'MONTHLY';
+  const active = activeReworkCount(register);
+  if (active && m !== 'STRICT_DATE') return `BLOCK - STRICT DATE REQUIRED: có ${active} dòng FG Rework Active. Rework phải chạy STRICT_DATE để không lấy layer FG hoàn thành sau ngày xuất.`;
+  return ''; // B/F-only rows may roll without current-period issue; active rework always uses the chronological engine.
 }
 
 /**
@@ -767,13 +744,10 @@ export function buildHistory(res, prevRows, ctx) {
     h.price = price; h.provVND = prov; h.net = num(d.tot) - prov; h.cons = cons;
     out.push(h);
   }
-  // Sales Return is a negative COGS history event. Without this reversal, FG History would not reconcile to net 632.
-  for (const s of res.sales || []) {
-    if (s.fin !== 'RETURN' || s.status !== 'RETURNED' || !(num(s.fq) < -TOL_QTY)) continue;
-    nCOGS++;
-    const lid = ttxt(s.returnLid) || `RET-${period.replace('-', '')}-${ttxt(s.inv) || s.seq}`;
-    out.push({ pc: ttxt(s.origInv || ''), date: s.date, mo: '', prod: ttxt(s.prod), name: ttxt(s.name), loc: '', unit: '', qty: num(s.fq), rmSrc: num(s.rm), rmST: 0, tot: num(s.tot), rm: num(s.rm), a622: num(s.c622), a627: num(s.c627), price: 0, costMonth, provUSD: 0, pl7: 0, srcPeriod: period, provVND: 0, net: num(s.tot), cons: 0, hStatus: 'CURRENT COGS', archive: period, lid, source: 'SALES RETURN REVERSAL' });
-  }
+  // STEP 5R supplies the negative COGS history events for physical returns.
+  const retHist = RET.historyRows(res.sales, period, costMonth);
+  nCOGS += retHist.length;
+  out.push(...retHist);
   for (const c of res.closing) {
     if (!ttxt(c.lid)) continue;
     nClose++;
@@ -792,7 +766,7 @@ export function historyGate(hist, res, period) {
   const sum = (rows, f) => rows.reduce((a, r) => a + num(r[f]), 0);
   const cogs = cur('CURRENT COGS'), cl = cur('CLOSING FG');
   const T = res ? res.totals : {};
-  const retHistN = res ? (res.sales || []).filter((s) => s.fin === 'RETURN' && s.status === 'RETURNED' && num(s.fq) < -TOL_QTY).length : 0;
+  const retHistN = res ? RET.historyCount(res.sales) : 0;
   const exp8 = res ? res.detail.filter((d) => ttxt(d.lid)).length + retHistN + res.closing.length : 0;
   const rows = [
     { label: 'History COGS Qty', hist: sum(cogs, 'qty'), step5: num(T.cogsQ) },
@@ -846,7 +820,7 @@ export function step5Recon(x) {
   R[33] = { label: 'FG History COGS amount', expected: T.cogsA, result: hv(1), diff: hv(1) - T.cogsA, status: Math.abs(hv(1) - T.cogsA) <= L4 ? 'PASS' : 'REVIEW', note: '' };
   R[34] = { label: 'FG History closing qty', expected: T.closeQ, result: hv(2), diff: hv(2) - T.closeQ, status: Math.abs(hv(2) - T.closeQ) <= 0.000001 ? 'PASS' : 'REVIEW', note: '' };
   R[35] = { label: 'FG History closing amount', expected: T.closeA, result: hv(3), diff: hv(3) - T.closeA, status: Math.abs(hv(3) - T.closeA) <= L4 ? 'PASS' : 'REVIEW', note: '' };
-  const exp36 = res.detail.filter((d) => ttxt(d.lid)).length + res.closing.length;
+  const exp36 = res.detail.filter((d) => ttxt(d.lid)).length + RET.historyCount(res.sales) + res.closing.length;
   R[36] = { label: 'FG History current layer count', expected: exp36, result: hv(4), diff: hv(4) - exp36, status: hv(4) === exp36 ? 'PASS' : 'REVIEW', note: '' };
   R[37] = { label: 'Roll-forward source period', expected: period, result: res.period, diff: res.period === period ? 0 : 1, status: res.period === period ? 'PASS' : 'REVIEW', note: '05_FG_CLOSING phải là kỳ hiện tại' };
   // Batch 7
@@ -913,7 +887,7 @@ export function archiveReworkWIP(register, period) {
 
 // ---------------------------------------------------------------- FAST general-ledger tie (owner decision 02/10/2026)
 /** Recognition date of a sales row: Bill (B/L) date when present, else invoice date. */
-export const saleDate = (r) => { const b = dateVal(r.billDate); return b !== null ? b : dateVal(r.invDate); };
+export const saleDate = (r) => recognitionDate(r);
 export const FAST_ACCOUNTS = [
   ['a154', '154', 'WIP cuối kỳ (vật tư sau 3B + rework WIP)'],
   ['a155', '155', 'Thành phẩm cuối kỳ'],
