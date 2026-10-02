@@ -108,13 +108,13 @@ export function validateSaveSales(staging, salesDB, period) {
       if (!minInv || d < minInv) minInv = d;
       if (!maxInv || d > maxInv) maxInv = d;
       if (d > latest) latest = d;
-      if (d > periodEnd) msg += 'Invoice Date after costing period; ';
-    } else msg += 'Invalid/blank Invoice Date; ';
+      if (d > periodEnd) msg += 'Recognition Date after costing period; ';
+    } else msg += 'Invalid/blank Bill/Invoice recognition date; ';
     if (r.billDate !== null && r.billDate !== undefined && r.billDate !== '') {
       const b = toSerial(r.billDate);
       if (b === null) msg += 'Invalid Bill Date; ';
       else {
-        if (d !== null && yyyymm(b) !== yyyymm(d)) msg += `Bill Date in another month than Invoice Date – COGS follows Bill Date (${serialToYMD(b).y}-${String(serialToYMD(b).m).padStart(2, '0')}); `;
+        if (invD !== null && yyyymm(b) !== yyyymm(invD)) msg += `Bill Date in another month than Invoice Date – revenue/COGS follows Bill Date (${serialToYMD(b).y}-${String(serialToYMD(b).m).padStart(2, '0')}); `;
         if (b > periodEnd) msg += 'Bill Date after costing period – COGS in the period of the Bill Date; ';
       }
     }
