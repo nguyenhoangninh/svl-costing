@@ -1099,8 +1099,8 @@ document.addEventListener('click', async (e) => {
     case 's5-reopen': await P3.doReopen(); render(); break;
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
-      if (isClosed() && !confirm(`Kỳ ${S.period} ĐÃ ĐÓNG. Xoá kỳ đã đóng sẽ mất số liệu đã khoá sổ. Chỉ tiếp tục khi đã lưu bản xuất Excel / bản sao. Tiếp tục?`)) break;
-      if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
+      if (isClosed()) { toast(`Kỳ ${S.period} đã CLOSED và là hồ sơ kế toán bất biến. Muốn xoá phải Mở lại kỳ trước; thao tác REOPEN sẽ để lại revision/audit riêng.`, 'block'); break; }
+      if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ OPEN này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${S.period}/`)) await store.localDel(k);
         await store.localSet('periods', ((await store.localGet('periods')) || []).filter((p) => p !== S.period));
         audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${S.period}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
