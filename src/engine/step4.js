@@ -83,55 +83,84 @@ export function includeInPrice(tranType, qty, amt) {
 }
 const KNOWN_TYPES = ['NORMAL SALE', 'SALES RETURN', 'CREDIT NOTE', 'FOC', 'SAMPLE', 'OTHER', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'];
 
-/** STEP4_Validate_Save_Sales — advisory validation; Sales DB coverage follows canonical recognition date (Bill/B.L. date, else Invoice Date). */
+/** STEP4_Validate_Save_Sales — accounting validation + controlled Sales DB replacement. */
 export function validateSaveSales(staging, salesDB, period) {
   if (!staging || !staging.rows.length) throw new Error('Chưa có dữ liệu doanh thu trong vùng staging.');
   const periodEnd = periodEndSerial(period);
   const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
   const batchKeys = new Set();
-  let minInv = 0, maxInv = 0, latest = 0, pass = 0, review = 0, dup = 0;
+  let minInv = 0, maxInv = 0, latest = 0, pass = 0, review = 0, block = 0, dup = 0;
   for (const r of staging.rows) {
-    let msg = '';
+    const hard = [], warn = [];
     const invD = toSerial(r.invDate);
+    const billSupplied = r.billDate !== null && r.billDate !== undefined && ttxt(r.billDate) !== '';
+    const billD = billSupplied ? toSerial(r.billDate) : null;
     const d = recognitionDate(r);
-    if (d !== null) {
+    if (billSupplied && billD === null) hard.push('Invalid Bill Date');
+    if (d === null) hard.push('Invalid/blank recognition date');
+    else {
       r.month = serialToYMD(d).m;
       if (!minInv || d < minInv) minInv = d;
       if (!maxInv || d > maxInv) maxInv = d;
       if (d > latest) latest = d;
-      if (d > periodEnd) msg += 'Recognition Date after costing period; ';
-    } else msg += 'Invalid/blank Bill/Invoice recognition date; ';
-    if (r.billDate !== null && r.billDate !== undefined && r.billDate !== '') {
-      const b = toSerial(r.billDate);
-      if (b === null) msg += 'Invalid Bill Date; ';
-      else {
-        if (invD !== null && yyyymm(b) !== yyyymm(invD)) msg += `Bill Date in another month than Invoice Date – revenue/COGS follows Bill Date (${serialToYMD(b).y}-${String(serialToYMD(b).m).padStart(2, '0')}); `;
-        if (b > periodEnd) msg += 'Bill Date after costing period – COGS in the period of the Bill Date; ';
-      }
+      if (d > periodEnd) hard.push('Recognition Date after costing period');
     }
+    if (invD === null) warn.push('Invalid/blank Invoice Date');
+    if (billD !== null && invD !== null && yyyymm(billD) !== yyyymm(invD)) warn.push(`Bill Date in another month than Invoice Date – revenue/COGS follows Bill Date (${serialToYMD(billD).y}-${String(serialToYMD(billD).m).padStart(2, '0')})`);
+
     const cust = ttxt(r.customer), prod = utxt(r.product), pname = ttxt(r.prodName), inv = ttxt(r.invNo), ln = ttxt(r.lineNo);
-    let tt = utxt(r.tranType);
-    if (!tt) { tt = num(r.qty) < 0 || num(r.amtUSD) < 0 ? 'SALES RETURN' : 'NORMAL SALE'; r.tranType = tt; }
-    if (!prod) msg += 'Missing Product Number; ';
-    if (!cust) msg += 'Missing Customer; ';
-    if (!pname) msg += 'Missing Product Name; ';
-    if (!inv) msg += 'Missing SI Invoice No.; ';
     let qty = 0, amt = 0, qtyOK = false, amtOK = false;
-    if (isNumeric(r.qty) && r.qty !== null && r.qty !== '') { qtyOK = true; qty = num(r.qty); if (qty === 0) msg += 'Zero Quantity / service or non-quantity transaction; '; }
-    else msg += 'Invalid/blank Quantity; ';
+    if (isNumeric(r.qty) && r.qty !== null && r.qty !== '') { qtyOK = true; qty = num(r.qty); }
+    else hard.push('Invalid/blank Quantity');
     if (isNumeric(r.amtUSD) && r.amtUSD !== null && r.amtUSD !== '') { amtOK = true; amt = num(r.amtUSD); }
-    else msg += 'Invalid/blank Amount USD; ';
+    else hard.push('Invalid/blank Amount USD');
+
+    let tt = utxt(r.tranType);
+    if (!tt) {
+      if ((qtyOK && qty < 0) || (amtOK && amt < 0)) {
+        if (ttxt(r.origInv) && qtyOK && qty < 0) tt = 'SALES RETURN';
+        else hard.push('Negative transaction requires explicit Transaction Type (SALES RETURN / CREDIT NOTE / ADJUSTMENT)');
+      } else tt = 'NORMAL SALE';
+      if (tt) r.tranType = tt;
+    }
+    if (tt && !KNOWN_TYPES.includes(tt)) hard.push('Unknown Transaction Type');
+    if (['NORMAL SALE', 'SALES RETURN', 'FOC', 'SAMPLE'].includes(tt) && qtyOK && qty !== 0 && !prod) hard.push('Missing Product Number for inventory transaction');
+    else if (!prod && tt !== 'NON-PRODUCT REVENUE') warn.push('Missing Product Number');
+    if (!cust) warn.push('Missing Customer');
+    if (!pname && prod) warn.push('Missing Product Name');
+    if (!inv && tt !== 'NON-PRODUCT REVENUE') warn.push('Missing SI Invoice No.');
+
+    if (tt === 'SALES RETURN') {
+      if (!qtyOK || qty >= 0) hard.push('SALES RETURN must have negative Quantity');
+      if (amtOK && amt > 0) hard.push('SALES RETURN Amount USD must be zero/negative');
+      if (!ttxt(r.origInv)) warn.push('Sales Return has no Original Invoice No. – FIFO will only match when a unique prior sale can be proven');
+    } else if (qtyOK && qty < 0 && tt !== 'CREDIT NOTE' && tt !== 'ADJUSTMENT') hard.push(`Negative Quantity is not allowed for ${tt || 'blank Transaction Type'}`);
+
+    if (tt === 'OTHER' || tt === 'ADJUSTMENT') warn.push(`${tt} transaction requires accounting review; no automatic inventory COGS treatment`);
+    if (qtyOK && qty === 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(tt)) warn.push('Zero Quantity / service or non-quantity transaction');
+
     const unitP = num(r.unitPrice), fx = num(r.fx), vnd = num(r.amtVND);
-    if (!KNOWN_TYPES.includes(tt)) msg += 'Unknown Transaction Type; ';
-    if (tt === 'OTHER') msg += 'OTHER transaction requires review; ';
-    if (qtyOK && amtOK && qty !== 0 && unitP !== 0 && amt !== 0) { const diff = Math.abs(qty * unitP - amt); const tol = Math.max(Math.abs(amt) * 0.005, 1); if (diff > tol) msg += 'Qty x Unit Price differs from Amount USD; '; }
-    if (amtOK && fx > 0 && amt !== 0 && vnd !== 0) { const diff = Math.abs(amt * fx - vnd); const tol = Math.max(Math.abs(vnd) * 0.002, 1000); if (diff > tol) msg += 'USD x FX differs from Amount VND; '; }
-    else if (vnd !== 0 && fx <= 0) msg += 'Missing/invalid Exchange Rate; ';
+    if (qtyOK && amtOK && qty !== 0 && unitP !== 0 && amt !== 0) {
+      const diff = Math.abs(qty * unitP - amt), tol = Math.max(Math.abs(amt) * 0.005, 1);
+      if (diff > tol) warn.push('Qty x Unit Price differs from Amount USD');
+    }
+    if (amtOK && fx > 0 && amt !== 0 && vnd !== 0) {
+      const diff = Math.abs(amt * fx - vnd), tol = Math.max(Math.abs(vnd) * 0.002, 1000);
+      if (diff > tol) warn.push('USD x FX differs from Amount VND');
+    } else if (vnd !== 0 && fx <= 0) warn.push('Missing/invalid Exchange Rate');
+
     const key = txnKey(d, inv, ln, prod, cust, qty, amt);
     r.txnKey = key;
-    if (batchKeys.has(key)) { msg += 'Possible duplicate transaction in current import batch; '; dup++; } else batchKeys.add(key);
-    r.validStat = msg ? 'REVIEW' : 'PASS'; r.validMsg = msg; msg ? review++ : pass++;
+    if (batchKeys.has(key)) { warn.push('Possible duplicate transaction in current import batch'); dup++; } else batchKeys.add(key);
+    r.validStat = hard.length ? 'BLOCK' : warn.length ? 'REVIEW' : 'PASS';
+    r.validMsg = [...hard.map((x) => 'BLOCK: ' + x), ...warn].join('; ') + (hard.length || warn.length ? ';' : '');
+    if (hard.length) block++; else if (warn.length) review++; else pass++;
   }
+  if (block) {
+    staging.status = 'BLOCKED - FIX SALES DATA';
+    throw new Error(`Sales validation có ${block} dòng BLOCK. Sửa Recognition/Bill Date, Transaction Type, Product/Quantity rồi Validate & Save lại.`);
+  }
+
   const saveAt = nowISO();
   const newRows = staging.rows.map((r) => {
     const prod = utxt(r.product);
@@ -141,23 +170,22 @@ export function validateSaveSales(staging, salesDB, period) {
   });
   const cov = salesCoverage(mode, minInv, maxInv, period);
   const old = (salesDB && salesDB.rows) || [];
-  let replaced = 0; const kept = [];
-  let droppedUndated = 0;
+  let replaced = 0; const kept = []; let droppedUndated = 0;
   for (const r of old) {
     const d = recognitionDate(r);
     if (d !== null && cov && d >= cov.from && d <= cov.to) replaced++;
-    else if (d === null) droppedUndated++; // audit F-05: undated rows of an earlier save are replaced by the new batch, not kept forever
+    else if (d === null) droppedUndated++;
     else kept.push(r);
   }
-  staging.status = 'VALIDATED & SAVED - ADVISORY';
+  staging.status = review ? 'VALIDATED & SAVED - WITH REVIEW' : 'VALIDATED & SAVED';
   const rows = kept.concat(newRows);
-  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, droppedUndated, undated: newRows.filter((r) => recognitionDate(r) === null && (r.product || num(r.qty) !== 0)).length, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
+  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, block: 0, dup, replaced, droppedUndated, undated: 0, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
 }
 
 /**
  * Date range of the Sales DB that a new file replaces (F-05). Recognition date = Bill/B.L. date when valid, else Invoice Date; defined by the mode, not by the first/last invoice actually present,
  * so a transaction deleted at the edge of the source range disappears from the DB too.
- * MONTHLY: whole calendar months spanned by the file. YTD: 1 Jan of the file's first year → max(last invoice, costing period end).
+ * MONTHLY: whole calendar months spanned by the file. YTD: 1 Jan of the source year → costing period end (never future periods).
  */
 export function salesCoverage(mode, minInv, maxInv, period) {
   if (!minInv || !maxInv) return null;
@@ -165,7 +193,7 @@ export function salesCoverage(mode, minInv, maxInv, period) {
   const ser = (y, m, d) => (Date.UTC(y, m, d) - E) / 86400000;
   const a = serialToYMD(minInv), b = serialToYMD(maxInv);
   if (mode === 'MONTHLY') return { from: ser(a.y, a.m - 1, 1), to: ser(b.y, b.m, 0) };
-  return { from: ser(a.y, 0, 1), to: Math.max(maxInv, periodEndSerial(period)) };
+  return { from: ser(a.y, 0, 1), to: periodEndSerial(period) };
 }
 /** What Validate & Save would do, for the confirmation dialog. */
 export function salesSavePreview(staging, salesDB, period) {
