@@ -276,9 +276,15 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else if (rank === soRank.get(prod)) { if (rank === 3) rep = d >= soDate.get(prod); if (rank === 2) rep = true; if (rank === 1) rep = d < soDate.get(prod); }
     if (rep) { soRank.set(prod, rank); soPrice.set(prod, val); soRowOf.set(prod, i); soDate.set(prod, d); }
   });
-  const manP = new Map(), manS = new Map(), manN = new Map();
-  for (const m of manual || []) { const p = utxt(m.product); if (p && isNumeric(m.price) && num(m.price) > 0 && manualActive(m, pStart, pEnd)) { manP.set(p, num(m.price)); manS.set(p, txt(m.source)); manN.set(p, (manN.get(p) || 0) + 1); } }
-  let overlap = 0, afterSO = 0;
+  const manP = new Map(), manS = new Map(), manN = new Map(), manApproved = new Map();
+  for (const m of manual || []) {
+    const p = utxt(m.product);
+    if (p && isNumeric(m.price) && num(m.price) > 0 && manualActive(m, pStart, pEnd)) {
+      manP.set(p, num(m.price)); manS.set(p, txt(m.source)); manN.set(p, (manN.get(p) || 0) + 1);
+      if (ttxt(m.approvedBy)) manApproved.set(p, true);
+    }
+  }
+  let overlap = 0, afterSO = 0, unapprovedManual = 0;
   const rows = [], audit = []; let missing = 0, stale = 0; const missingList = [];
   for (const p of prods) {
     let curP = 0, latestP = 0, ytdP = 0, soP = 0, sel = 0, src = '', ref = null;
@@ -290,7 +296,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     }
     if (ytd.has(p) && Math.abs(ytd.get(p)[1]) > 0.0000001) ytdP = ytd.get(p)[0] / ytd.get(p)[1];
     if (soPrice.has(p)) soP = soPrice.get(p);
-    const mp = manP.get(p) || 0, manOverlap = (manN.get(p) || 0) > 1;
+    const mp = manP.get(p) || 0, manOverlap = (manN.get(p) || 0) > 1, manOk = !mp || !!manApproved.get(p);
     if (curP > 0) { sel = curP; src = 'CURRENT MONTH ACTUAL'; ref = lastSale.has(p) ? lastSale.get(p) : pEnd; }
     else if (latestP > 0) { sel = latestP; src = 'LATEST ACTUAL ' + latestMonth.get(p); ref = lastSale.get(p) ?? null; }
     else if (ytdP > 0) { sel = ytdP; src = 'YTD ACTUAL'; ref = lastSale.get(p) ?? null; }
@@ -301,6 +307,8 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     const row = { product: p, refPrice: sel, refSource: src, refDetail: ref, manPrice: null, manSource: null, finalPrice: null, finalSource: null, status: '' };
     if (manOverlap) {
       row.manPrice = mp || null; row.manSource = manS.get(p); row.status = 'BLOCK - MANUAL OVERLAP'; overlap++;
+    } else if (mp > 0 && !manOk) {
+      row.manPrice = mp; row.manSource = manS.get(p); row.status = 'BLOCK - MANUAL NOT APPROVED'; unapprovedManual++;
     } else if (mp > 0) { row.manPrice = mp; row.manSource = manS.get(p); row.finalPrice = mp; row.finalSource = manS.get(p) || 'MANUAL OVERRIDE'; row.status = 'OK - MANUAL'; }
     else if (sel > 0 && src !== 'SALES ORDER (AFTER PERIOD)') { row.finalPrice = sel; row.finalSource = src; row.status = 'OK'; }
     else if (sel > 0 && src === 'SALES ORDER (AFTER PERIOD)') { row.status = 'BLOCK - SO AFTER PERIOD'; afterSO++; }
@@ -310,6 +318,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     if (row.status === 'MISSING PRICE') review = 'MISSING';
     else if (row.status === 'BLOCK - MANUAL OVERLAP') review = `BLOCK - MANUAL OVERLAP (${manN.get(p)} dòng hiệu lực)`;
     else if (row.status === 'BLOCK - SO AFTER PERIOD') review = 'BLOCK - SO AFTER PERIOD';
+    else if (row.status === 'BLOCK - MANUAL NOT APPROVED') review = 'BLOCK - MANUAL NOT APPROVED';
     else if (mp > 0) review = 'MANUAL';
     else if (age > 6) { review = 'REVIEW - STALE >6M'; stale++; }
     else if (age > 3) { review = 'REVIEW - STALE 4-6M'; stale++; }
@@ -324,8 +333,8 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else r.check = 'NOT USED - SUPERSEDED BY ANOTHER SO ROW';
   });
   return {
-    pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: missing || overlap || afterSO ? 'BLOCKED - PRICE POLICY' : 'CURRENT', period },
-    so: soRows, stats: { products: prods.length, missing, stale, missingList, overlap, afterSO },
+    pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: missing || overlap || afterSO || unapprovedManual ? 'BLOCKED - PRICE POLICY' : 'CURRENT', period },
+    so: soRows, stats: { products: prods.length, missing, stale, missingList, overlap, afterSO, unapprovedManual },
   };
 }
 
