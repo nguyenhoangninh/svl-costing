@@ -83,8 +83,9 @@ const KNOWN_TYPES = ['NORMAL SALE', 'SALES RETURN', 'CREDIT NOTE', 'FOC', 'SAMPL
 /** STEP4_Validate_Save_Sales — accounting validation + controlled Sales DB replacement. */
 export function validateSaveSales(staging, salesDB, period) {
   if (!staging || !staging.rows.length) throw new Error('Chưa có dữ liệu doanh thu trong vùng staging.');
-  const periodEnd = periodEndSerial(period);
+  const periodStart = periodStartSerial(period), periodEnd = periodEndSerial(period);
   const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
+  const yearStart = periodStartSerial(period.slice(0, 4) + '-01');
   const batchKeys = new Set();
   let minInv = 0, maxInv = 0, latest = 0, pass = 0, review = 0, block = 0, dup = 0;
   for (const r of staging.rows) {
@@ -101,6 +102,8 @@ export function validateSaveSales(staging, salesDB, period) {
       if (!maxInv || d > maxInv) maxInv = d;
       if (d > latest) latest = d;
       if (d > periodEnd) hard.push('Recognition Date after costing period');
+      if (mode === 'MONTHLY' && d < periodStart) hard.push('MONTHLY source contains Recognition Date before costing period');
+      if (mode === 'YTD' && d < yearStart) hard.push('YTD source contains Recognition Date before current fiscal year');
     }
     if (invD === null) warn.push('Invalid/blank Invoice Date');
     if (billD !== null && invD !== null && yyyymm(billD) !== yyyymm(invD)) warn.push(`Bill Date in another month than Invoice Date – revenue/COGS follows Bill Date (${serialToYMD(billD).y}-${String(serialToYMD(billD).m).padStart(2, '0')})`);
@@ -374,6 +377,7 @@ const xlRound0 = (x) => (x < 0 ? -Math.round(-x) : Math.round(x)); // WorksheetF
 /** Gates of STEP4_Run_Cost_Allocation_Gated + S4FreshnessChainOK. Returns '' or a blocking message. */
 export function step4Gate(st) {
   const { period, salesImport, pm, gl, step2, step3, opening, latestImport, manual } = st;
+  if (salesImport && salesImport.period && salesImport.period !== period) return `Staging doanh thu thuộc kỳ ${salesImport.period}, không phải kỳ ${period}.`;
   if (salesImport && salesImport.rows && salesImport.rows.length && !String(salesImport.status || '').startsWith('VALIDATED & SAVED')) return 'Dữ liệu doanh thu đã import nhưng chưa Validate & Save hoặc còn dòng BLOCK.';
   if (!pm || pm.status !== 'CURRENT') return `Price Master chưa CURRENT (${pm ? pm.status : 'chưa cập nhật'}). Chạy Update Price Master sau lần Validate & Save gần nhất.`;
   if (!step2) return 'Chưa chạy STEP 2.';
