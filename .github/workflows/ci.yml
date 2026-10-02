@@ -26,6 +26,9 @@ jobs:
         run: |
           grep -q "match /revisions/{revision}" firestore.rules
           grep -q "affectedKeys().hasOnly(\['closed'\])" firestore.rules
+          grep -q "summary.diff(resource.data.summary).affectedKeys().hasOnly(\['closed'\])" firestore.rules
+          grep -q "chunk.matches('closed@.*')" firestore.rules
+          grep -q "request.resource.data.rev == getAfter(periodPath(period)).data.rev" firestore.rules
           grep -q "allow update, delete: if false;" firestore.rules
 
   # Production deploy: main is published only after every accounting/control check passes.
