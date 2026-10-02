@@ -124,6 +124,13 @@ export function serialToISO(serial) {
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 /** Strict date parser shared by ERP, Sales and FIFO. Blank/invalid → null; impossible calendar dates are rejected. */
+/** Canonical revenue/COGS recognition date. Bill/B.L. Date is authoritative when supplied; Invoice Date is fallback only when Bill Date is blank. */
+export function recognitionDate(r) {
+  const rawBill = r && r.billDate;
+  if (rawBill !== null && rawBill !== undefined && ttxt(rawBill) !== '') return cellDateSerial(rawBill);
+  return cellDateSerial(r && r.invDate);
+}
+
 export function cellDateSerial(v) {
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return isFinite(v) && v >= 1 && v <= 2958465 ? Math.floor(v) : null;
