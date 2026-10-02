@@ -288,10 +288,33 @@ export function viewSales(el) {
     const cols = [['active', 'Active', 60], ['product', 'Product Code', 140], ['soDate', 'SO Date', 100, 'date'], ['soNo', 'SO No.', 140], ['customer', 'Customer', 140], ['qty', 'Qty', 90, 'qty'], ['price', 'Unit Price USD', 110, 'qty'], ['note', 'Note', 220], ['check', 'Price Master Check', 320]].map(([key, label, width, type]) => ({ key, label, width, type }));
     A.mountTable(box.querySelector('#t-so'), { columns: cols, rows: d.soPrice || [], filterKey: 'check', height: 480, onExport: A.exportTable('04_SO_PRICE', cols) });
   } else if (tab === 'manual') {
-    box.innerHTML = `<p class="muted">Giá thủ công (USD) có ưu tiên cao nhất, giữ qua các kỳ và có hiệu lực theo Effective From / To. Sau khi sửa, chạy lại Update Price Master.</p><div id="l-man"></div>`;
-    const cols = [{ key: 'product', label: 'Product Code' }, { key: 'price', label: 'Price USD', num: true }, { key: 'effFrom', label: 'Effective From', date: true }, { key: 'effTo', label: 'Effective To', date: true }, { key: 'source', label: 'Source / Note' }, { key: 'approvedBy', label: 'Approved By' }, { key: 'updatedAt', label: 'Updated At', ro: true }];
-    editList(box.querySelector('#l-man'), { columns: cols, rows: d.manualPrice || (d.manualPrice = []), readOnly: !edit, addLabel: 'Thêm giá thủ công', newRow: () => ({ product: '', price: null, updatedAt: nowISO() }),
-      onChange: (rows, r) => { if (r) { r.product = utxt(r.product); r.updatedAt = nowISO(); } if (d.pm) d.pm.status = 'OUTDATED'; A.audit('MANUAL PRICE EDIT', r ? `${r.product} = ${r.price}` : 'xoá dòng'); A.markDirty('manualPrice', 'pm', 'audit'); } });
+    const checker = String(A.who() || '').trim().toLowerCase();
+    box.innerHTML = `<p class="muted">Giá thủ công (USD) có ưu tiên cao nhất. <b>Approved By</b> được hệ thống ghi từ tài khoản đăng nhập; người sửa dòng giá không được tự phê duyệt dòng đó. Mọi chỉnh sửa làm mất hiệu lực phê duyệt cũ.</p><div id="man-approval"></div><div id="l-man"></div>`;
+    const cols = [{ key: 'product', label: 'Product Code' }, { key: 'price', label: 'Price USD', num: true }, { key: 'effFrom', label: 'Effective From', date: true }, { key: 'effTo', label: 'Effective To', date: true }, { key: 'source', label: 'Source / Evidence' }, { key: 'updatedBy', label: 'Prepared / Updated By', ro: true }, { key: 'approvedBy', label: 'Approved By', ro: true }, { key: 'approvedAt', label: 'Approved At', ro: true }, { key: 'updatedAt', label: 'Updated At', ro: true }];
+    editList(box.querySelector('#l-man'), { columns: cols, rows: d.manualPrice || (d.manualPrice = []), readOnly: !edit, addLabel: 'Thêm giá thủ công', newRow: () => ({ product: '', price: null, updatedBy: A.who(), approvedBy: '', approvedAt: '', approvalNote: '', updatedAt: nowISO() }),
+      onChange: (rows, r) => {
+        if (r) { r.product = utxt(r.product); r.updatedBy = A.who(); r.approvedBy = ''; r.approvedAt = ''; r.approvalNote = ''; r.updatedAt = nowISO(); }
+        if (d.pm) d.pm.status = 'OUTDATED';
+        A.audit('MANUAL PRICE EDIT', r ? `${r.product} = ${r.price}; approval reset` : 'xoá dòng');
+        A.markDirty('manualPrice', 'pm', 'audit');
+      } });
+    const rows = d.manualPrice || [], pending = rows.filter((r) => ttxt(r.product) && num(r.price) > 0 && !ttxt(r.approvedBy));
+    const own = pending.filter((r) => ttxt(r.updatedBy).toLowerCase() === checker).length;
+    const ab = box.querySelector('#man-approval');
+    ab.innerHTML = pending.length
+      ? `<div class="alert review"><b>${pending.length} giá thủ công chưa được duyệt.</b> ${own ? own + ' dòng do chính tài khoản này sửa – cần Admin khác duyệt.' : ''} ${edit && A.isAdmin() && !own ? '<button class="btn sm" type="button" id="approve-manual">Admin duyệt giá đang chờ</button>' : ''}</div>`
+      : '<div class="alert pass">Không có giá thủ công đang chờ duyệt.</div>';
+    const ap = box.querySelector('#approve-manual');
+    if (ap) ap.addEventListener('click', () => {
+      if (!A.isAdmin() || !A.canEdit()) return;
+      const note = (prompt('Nhập lý do / bằng chứng phê duyệt Manual Price (bắt buộc):', '') || '').trim();
+      if (note.length < 5) { A.toast('Cần giải trình ít nhất 5 ký tự.', 'review'); return; }
+      const now = nowISO();
+      for (const r of pending) { r.approvedBy = A.who(); r.approvedAt = now; r.approvalNote = note; }
+      if (d.pm) d.pm.status = 'OUTDATED';
+      A.audit('MANUAL PRICE APPROVE', `${pending.length} dòng; ${note}`);
+      A.markDirty('manualPrice', 'pm', 'audit'); A.render();
+    });
   }
 }
 
