@@ -146,6 +146,8 @@ import { fp as fpStr } from '../src/engine/util.js';
   eq('F-15/F-21 Price Master overall blocked', pmR.pm.status, 'BLOCKED - PRICE POLICY');
   const pmA = updatePriceMaster({ salesDB: { rows: [{ ...row(ser(2026, 8, 3), 'ZA', 'B', 1, 5), include: 'Y' }], savedAt: 'x' }, so: [], manual: [{ product: 'B', price: 6, source: 'Approved quote', approvedBy: 'controller', effFrom: null, effTo: null }], step2: { pc: [{ erp: 'O', pcNo: 'PC-2', prod: 'B', rowIdx: 2 }] }, period: P2 });
   eq('F-21 approved single manual price can become final', [pmA.pm.status, pmA.pm.rows[0].finalPrice], ['CURRENT', 6]);
+  const pmBadDate = updatePriceMaster({ salesDB: { rows: [{ ...row(ser(2026, 8, 3), 'ZB', 'B', 1, 5), include: 'Y' }], savedAt: 'x' }, so: [], manual: [{ product: 'B', price: 6, source: 'Quote', approvedBy: 'controller', effFrom: '31/02/2026' }], step2: { pc: [{ erp: 'O', pcNo: 'PC-2', prod: 'B', rowIdx: 2 }] }, period: P2 });
+  eq('F-21 invalid manual effective date blocks Price Master', [pmBadDate.pm.status, pmBadDate.pm.rows[0].status], ['BLOCKED - PRICE POLICY', 'BLOCK - MANUAL INVALID DATE']);
   // F-13: existing map row whose movement moved to another ERP is flagged, not overwritten
   const H = ['Material Code', 'Quantity'];
   const map0 = { rows: [{ code: 'M1', erp: 'T', review: 'OK', b2Review: 'OK', override: '' }] };
@@ -157,9 +159,9 @@ import { fp as fpStr } from '../src/engine/util.js';
   eq('F-24 NO DATA with rows refused', e24.includes('NO DATA'), true);
   eq('F-24 empty NO DATA ok', buildDataset([grid[0]], 'PC-P-O-202608-NO DATA.xlsx', P2).status, 'NO DATA');
   // F-10 v1.9: outside-period, blank and invalid ERP transaction dates all block
-  const dsD = { 'MI-M-O': { header: ['Date', 'Material Code', 'Total Cost'], rows: [[ser(2026, 8, 2), 'M', 5], [ser(2026, 7, 30), 'M', 7], [null, '', 12], ['31/02/2026', 'M2', 8]] } };
+  const dsD = { 'MI-M-O': { header: ['Date', 'Material Code', 'Total Cost'], rows: [[ser(2026, 8, 2), 'M', 5], [ser(2026, 7, 30), 'M', 7], [null, 'MB', 12], ['31/02/2026', 'M2', 8], [null, '', 999]] } };
   const di = outOfPeriodRows(dsD, P2);
-  eq('F-10 ERP date issues classified', di.map((x) => [x.key, x.n, x.outside, x.blank, x.invalid, x.amt, x.months.join()]), [['MI-M-O', 3, 1, 1, 1, 27, '2026-07']]);
+  eq('F-10 ERP date issues classified; footer ignored', di.map((x) => [x.key, x.n, x.outside, x.blank, x.invalid, x.amt, x.months.join()]), [['MI-M-O', 3, 1, 1, 1, 27, '2026-07']]);
   const s1Stub = { checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } };
   eq('F-10 STEP 1 blocks ERP date integrity', step1Controls(s1Stub, 0, di).result, 'BLOCK - ERP DATE CONTROL');
   // F-12: broad fallback amount visible in STEP 2 controls
