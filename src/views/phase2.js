@@ -60,6 +60,7 @@ export function step4StaleReason(S, d3b) {
   if (String(s2).startsWith('RERUN') || String(s2).startsWith('BLOCK')) return `STEP 2 = ${s2}`;
   if (String(s3).startsWith('RERUN') || String(s3).startsWith('BLOCK')) return `STEP 3A = ${s3}`;
   if (d3b && d3b.buildStale) return 'STEP 3B: INPUT / ERP map đã đổi sau BUILD';
+  const dag = directApprovalBlock(S); if (dag) return dag;
   if (!d.pm || d.pm.status !== 'CURRENT') return `Price Master = ${d.pm ? d.pm.status : 'chưa cập nhật'}`;
   return '';
 }
@@ -411,7 +412,7 @@ export function viewGL(el) {
       <tr><td>Direct 627</td><td class="r">${A.fmtNum(dt.d627)}</td><td>Common pool 627</td><td class="r">${A.fmtNum(num(gl.gl627) - dt.d627)}</td></tr>
     </tbody></table>
     <h2>Phân bổ trực tiếp 622 / 627 <small>Chỉ dùng cho khoản xác định được cho một lô cụ thể. Active = Y.</small></h2>
-    <div id="l-dir"></div></section>`;
+    <div id="dir-approval"></div><div id="l-dir"></div></section>`;
   if (edit) el.querySelector('#f-gl').addEventListener('submit', (e) => {
     e.preventDefault(); const f = new FormData(e.target);
     const vals = {};
@@ -423,7 +424,25 @@ export function viewGL(el) {
   });
   const cols = [{ key: 'active', label: 'Active', options: ['Y', 'N'] }, { key: 'erp', label: 'ERP', options: ['T', 'O'] }, { key: 'account', label: 'Account', options: ['622', '627'] }, { key: 'amount', label: 'Amount (VND)', num: true }, { key: 'pc', label: 'PC No.' }, { key: 'prod', label: 'Product Code' }, { key: 'reason', label: 'Reason / Evidence' }, { key: 'status', label: 'Status', ro: true, status: true }];
   editList(el.querySelector('#l-dir'), { columns: cols, rows: d.directAdj || (d.directAdj = []), readOnly: !edit, addLabel: 'Thêm dòng phân bổ trực tiếp', newRow: () => ({ active: 'Y', erp: 'T', account: '622', amount: null, pc: '', prod: '', reason: '', status: '' }),
-    onChange: () => { A.audit('DIRECT ADJ EDIT', ''); A.markDirty('directAdj', 'audit'); } });
+    onChange: () => {
+      d.directPreparedBy = A.who(); d.directApproval = null;
+      A.audit('DIRECT ADJ EDIT', 'maker-checker approval reset'); A.markDirty('directAdj', 'directPreparedBy', 'directApproval', 'audit');
+    } });
+  const active = (d.directAdj || []).filter((r) => utxt(r.active) === 'Y');
+  const key = directKey(d.directAdj), dap = d.directApproval, approved = !!(dap && dap.key === key);
+  const maker = ttxt(d.directPreparedBy).toLowerCase(), checker = String(A.who() || '').trim().toLowerCase();
+  const db = el.querySelector('#dir-approval');
+  if (!active.length) db.innerHTML = '<div class="muted">Không có phân bổ trực tiếp đang Active.</div>';
+  else if (approved) db.innerHTML = `<div class="alert pass"><b>Direct 622/627 đã được duyệt</b> bởi ${esc(dap.by)} lúc ${A.fmtTs(dap.at)} · ${esc(dap.note || '')}</div>`;
+  else db.innerHTML = `<div class="alert review"><b>${active.length} dòng Direct 622/627 chưa được duyệt.</b> ${maker && maker === checker ? 'Người đang đăng nhập là người lập/sửa – cần Admin khác duyệt.' : ''} ${edit && A.isAdmin() && (!maker || maker !== checker) ? '<button class="btn sm" id="approve-direct" type="button">Admin duyệt Direct 622/627</button>' : ''}</div>`;
+  const da = el.querySelector('#approve-direct');
+  if (da) da.addEventListener('click', () => {
+    const note = (prompt('Nhập lý do / bằng chứng phê duyệt Direct 622/627:', '') || '').trim();
+    if (note.length < 5) { A.toast('Cần giải trình ít nhất 5 ký tự.', 'review'); return; }
+    d.directApproval = { key, by: A.who(), at: nowISO(), note };
+    A.audit('DIRECT 622/627 APPROVE', `${active.length} dòng; ${note}`);
+    A.markDirty('directApproval', 'audit'); A.render();
+  });
 }
 
 // ======================= STEP 4 cost allocation view =======================
@@ -496,9 +515,16 @@ export function threeBBlock(S, d3b, { forClose = false } = {}) {
   }
   return '';
 }
+export function directApprovalBlock(S) {
+  const d = S.d, active = (d.directAdj || []).filter((r) => utxt(r.active) === 'Y');
+  if (!active.length) return '';
+  const key = directKey(d.directAdj), ap = d.directApproval;
+  if (!ap || ap.key !== key) return `Direct 622/627 có ${active.length} dòng Active nhưng chưa có maker-checker approval hiện hành.`;
+  return '';
+}
 function gateMsg(S) {
   const d = S.d;
-  return F.step4Gate({ period: S.period, salesImport: d.salesImport, pm: d.pm, gl: d.gl, step2: d.step2, step3: d.step3, opening: d.opening, latestImport: A.latestImport(), manual: d.manualPrice, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '' });
+  return F.step4Gate({ period: S.period, salesImport: d.salesImport, pm: d.pm, gl: d.gl, step2: d.step2, step3: d.step3, opening: d.opening, latestImport: A.latestImport(), manual: d.manualPrice, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '' }) || directApprovalBlock(S);
 }
 export function runLotCheck() {
   const S = A.S; const fl = A.derived().d4.fl; if (!fl) return;
@@ -632,5 +658,5 @@ export function carryForward(prev, newPeriod) {
   return out;
 }
 
-export const PHASE2_BLOBS = ['erpMap', 'wipadj', 'salesImport', 'salesDB', 'soPrice', 'manualPrice', 'pm', 'gl', 'directAdj', 'step4', 'lotCheck', 'lotParams', 'fgRef'];
+export const PHASE2_BLOBS = ['erpMap', 'wipadj', 'salesImport', 'salesDB', 'soPrice', 'manualPrice', 'pm', 'gl', 'directAdj', 'directPreparedBy', 'directApproval', 'step4', 'lotCheck', 'lotParams', 'fgRef'];
 export { RW_FIELDS, F, B };
