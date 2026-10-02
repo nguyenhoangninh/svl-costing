@@ -357,9 +357,11 @@ export function doPMUpdate() {
     if (!S.d.step2) throw new Error('Cần chạy STEP 2 trước (danh sách sản phẩm lấy từ PC-P).');
     const r = F.updatePriceMaster({ salesDB: S.d.salesDB, so: S.d.soPrice, manual: S.d.manualPrice, step2: S.d.step2, period: S.period });
     S.d.pm = r.pm; S.d.soPrice = r.so;
-    A.audit('UPDATE PRICE MASTER', `${r.stats.products} sản phẩm; thiếu giá ${r.stats.missing}; cũ ${r.stats.stale}`);
+    A.audit('UPDATE PRICE MASTER', `${r.stats.products} sản phẩm; thiếu giá ${r.stats.missing}; manual overlap ${r.stats.overlap}; manual chưa duyệt ${r.stats.unapprovedManual || 0}; SO sau kỳ ${r.stats.afterSO}; cũ ${r.stats.stale}`);
     A.markDirty('pm', 'soPrice', 'audit');
-    A.toast(r.stats.missing ? `Còn ${r.stats.missing} sản phẩm thiếu giá: ${r.stats.missingList.slice(0, 8).join(', ')}` : `Price Master CURRENT – ${r.stats.products} sản phẩm có giá.`, r.stats.missing ? 'block' : 'pass');
+    const blocked = r.pm.status !== 'CURRENT';
+    const why = [r.stats.missing ? `thiếu giá ${r.stats.missing}` : '', r.stats.overlap ? `manual overlap ${r.stats.overlap}` : '', r.stats.unapprovedManual ? `manual chưa duyệt ${r.stats.unapprovedManual}` : '', r.stats.afterSO ? `SO sau kỳ ${r.stats.afterSO}` : ''].filter(Boolean).join(' · ');
+    A.toast(blocked ? `Price Master BLOCKED: ${why}` : `Price Master CURRENT – ${r.stats.products} sản phẩm có giá.`, blocked ? 'block' : 'pass');
   } catch (e) { A.toast('Update Price Master lỗi: ' + e.message, 'block'); }
 }
 
