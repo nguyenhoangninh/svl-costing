@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
-let fail = 0;
-const ok = (label, cond) => { console.log(`${cond ? '✓' : '✗'} ${label}`); if (!cond) fail++; };
+let total = 0, fail = 0;
+const ok = (label, cond) => { total++; console.log(`${cond ? '✓' : '✗'} ${label}`); if (!cond) fail++; };
 const rules = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
 const store = fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
@@ -18,11 +18,13 @@ ok('revision blob manifest exactly equals parent', rules.includes('request.resou
 ok('revision summary exactly equals parent', rules.includes('request.resource.data.summary == getAfter(periodPath(period)).data.summary'));
 ok('revision documents immutable', /match \/revisions\/\{revision\}[\s\S]*allow update, delete: if false;/.test(rules));
 ok('audit events immutable', /match \/svl_costing_audit\/\{id\}[\s\S]*allow update, delete: if false;/.test(rules));
+ok('production owner is source-controlled', rules.includes("myEmail() in ['kamenguyen@gmail.com']"));
+ok('owner placeholder removed', !rules.includes('YOUR_EMAIL@gmail.com'));
 ok('cloudSave preserves everClosed after close/reopen', store.includes('safeSummary.everClosed = true'));
 ok('cloudDelete checks everClosed metadata', store.includes('meta.summary.everClosed'));
 ok('cloudDelete checks historical closed revision', store.includes('r.summary && r.summary.closed'));
 ok('close persists local closedEver retention state', phase3.includes('d.closedEver = true'));
 ok('close snapshots exception package', phase3.includes('exceptions'));
 
-console.log(`\n${17 - fail}/17 Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
+console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
