@@ -9,7 +9,7 @@ const esc = (s) => A.esc(s);
 const tabsHTML = (cur, tabs, attr) => `<div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" role="tab" class="tab ${id === cur ? 'on' : ''}" ${attr}="${id}" aria-selected="${id === cur}">${esc(label)}</button>`).join('')}</div>`;
 const colsOf = (fields, headers, types = {}, widths = {}) => fields.map((f, i) => ({ key: f, label: headers[i], type: types[f] || 'text', width: widths[f] || (types[f] === 'num' ? 140 : types[f] === 'qty' ? 100 : f === 'prod' ? 150 : 120), trace: f === 'prod' }));
 
-export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'rwArchive', 'fastTie', 'nrvDecision'];
+export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'closedEver', 'rwArchive', 'fastTie', 'nrvDecision'];
 export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
 export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist']);
 
@@ -528,12 +528,17 @@ export async function doClose() {
   if (recon.finalStatus.includes('REVIEW') || recon.closeGate.includes('REVIEW')) msg += '\n\nKỳ này còn mục REVIEW. Xác nhận đã được quản lý review trước khi đóng.';
   if (!confirm(msg)) return;
   const prevArchive = d.rwArchive;
-  d.closed = { period: S.period, closedAt: nowISO(), closedBy: A.who(), status: recon.finalStatus, closeGate: recon.closeGate, runAt: d.step5.runAt, note: `FG History PASS; Close Gate=${recon.closeGate}; Batch7=PASS` };
+  const exceptions = [];
+  for (const [no, r] of Object.entries(recon.rows || {})) if (String(r && r.status || '').startsWith('REVIEW')) exceptions.push({ control: no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.result ?? '', diff: r.diff ?? '', note: r.note || '' });
+  if (D5.tie && D5.tie.diffs) exceptions.push({ control: 'FAST', label: 'FAST reconciliation', status: D5.tie.status, result: D5.tie.rows.filter((r) => r.status === 'DIFF').map((r) => `${r.acc}:${r.diff}`).join('; '), note: D5.tie.approval ? D5.tie.approval.note : '' });
+  if (d.nrvDecision) exceptions.push({ control: 'NRV', label: 'NRV decision', status: d.nrvDecision.status, result: d.nrvDecision.amount, note: d.nrvDecision.note || '', ref: d.nrvDecision.ref || '' });
+  d.closedEver = true;
+  d.closed = { period: S.period, closedAt: nowISO(), closedBy: A.who(), status: recon.finalStatus, closeGate: recon.closeGate, runAt: d.step5.runAt, note: `FG History PASS; Close Gate=${recon.closeGate}; Batch7=PASS`, exceptions };
   d.rwArchive = F5.archiveReworkWIP(d.register, S.period);
   const arcCost = d.rwArchive.reduce((a, r) => a + num(r.carryCost), 0);
   A.audit('STEP 5 - CLOSE MONTH', `${recon.finalStatus}; ${recon.closeGate}; FG HISTORY PASS`);
   A.audit('STEP 5B - REWORK WIP CARRY-FORWARD', `Rows=${d.rwArchive.length}; carrying cost=${A.fmtNum(arcCost, 2)}`);
-  A.markDirty('closed', 'rwArchive', 'audit');
+  A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
   // audit F-25: with cloud sync, the close only stands once the cloud has committed it
   if (A.cloudOn()) {
     A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
