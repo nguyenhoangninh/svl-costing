@@ -34,8 +34,7 @@ jobs:
   # Production deploy: main is published only after every accounting/control check passes.
   deploy:
     needs: checks
-    # Temporarily paused during v1.9.0 remediation; re-enabled only after the full audit suite passes.
-    if: false
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
