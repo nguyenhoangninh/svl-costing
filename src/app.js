@@ -1081,7 +1081,7 @@ document.addEventListener('click', async (e) => {
     case 's5-run': await busy('Đang chạy FIFO COGS…', async () => P3.doRunFIFO()); render(); break;
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
     case 's5-close': await P3.doClose(); render(); break;
-    case 's5-reopen': P3.doReopen(); render(); break;
+    case 's5-reopen': await P3.doReopen(); render(); break;
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
       if (isClosed() && !confirm(`Kỳ ${S.period} ĐÃ ĐÓNG. Xoá kỳ đã đóng sẽ mất số liệu đã khoá sổ. Chỉ tiếp tục khi đã lưu bản xuất Excel / bản sao. Tiếp tục?`)) break;
