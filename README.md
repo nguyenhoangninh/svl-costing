@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.9.1 Closed-period integrity patch (02/10/2026):** REOPEN được cloud-confirm trước khi ghi audit cục bộ; Firestore chỉ cho admin stage blob `closed@…` khi kỳ đang CLOSED, parent revision chỉ được đổi trạng thái closed tương ứng, và immutable revision phải bind đúng `rev + manifestHash` của parent sau transaction. Đây là hardening cho tính bất biến kỳ đã đóng; các costing-policy controls của v1.9.0 giữ nguyên.
+
 > **v1.9.0 Accounting Integrity (02/10/2026):** hard-block ngày ERP/Sales lỗi hoặc ngoài kỳ; Bill/B.L. Date là recognition date bắt buộc khi được cung cấp; Sales Return chạy STRICT_DATE, match hoá đơn gốc chặt, cộng gộp nhiều line cùng invoice-product và ghi COGS reversal vào FG History; Credit Note không tạo chuyển động FG; hỗ trợ kỳ không sản xuất nhưng bán FG đầu kỳ; Manual Price / Direct 622-627 có maker-checker; fallback STEP 2 trọng yếu cần Admin duyệt; NRV phải có quyết định kế toán trước Close; cloud lưu immutable revision manifest và CLOSED period chỉ sửa sau REOPEN; CI kiểm unit + synthetic + control rules trước deploy.
 
 > **v1.8.1 core-controls remediation:** Recognition Date, STRICT_DATE Rework/Return, ERP-period gate, 3B AMOUNT strict basis, DIRECT_632 FAST bridge, inter-period reopen guard và CI→Pages deployment.
