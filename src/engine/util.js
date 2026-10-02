@@ -183,3 +183,13 @@ export function parseUserNumber(v) {
   const x = parseFloat(out);
   return isFinite(x) ? { ok: true, value: neg ? -x : x } : bad;
 }
+
+/** Fast deterministic fingerprint (FNV-1a 32-bit ×2) of a string – used for freshness checks, not security. */
+export function fp(str) {
+  let h1 = 0x811c9dc5, h2 = 0x01000193 ^ 0x5bd1e995;
+  const s = String(str);
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 0x01000193); h2 = Math.imul(h2 ^ c, 0x5bd1e995); h2 ^= h2 >>> 15; }
+  return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0') + ':' + s.length;
+}
+/** Fingerprint of a set of rows independent of their order. */
+export const fpRows = (rows, line) => fp((rows || []).map(line).sort().join('\n'));

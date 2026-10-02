@@ -52,9 +52,19 @@ export function refreshErpMap(map, step3, datasets, period) {
   const rows = map && map.rows ? map.rows : [];
   const have = new Set(rows.map((r) => k(r.code)));
   const { ev, evS } = evidence(datasets);
-  let added = 0, nRev = 0;
+  let added = 0, nRev = 0, nChanged = 0;
+  const byCode = new Map(rows.map((r) => [k(r.code), r]));
   for (const m of step3.rows) {
-    const code = k(m.code); if (!code || have.has(code)) continue;
+    const code = k(m.code); if (!code) continue;
+    if (have.has(code)) {
+      // audit F-13: re-check existing rows against this period's movement; flag (never overwrite) a different single-ERP evidence
+      const r = byCode.get(code); if (!r || ttxt(r.override)) continue;
+      const c = classify(code, ev, evS);
+      const changed = c.src === 'MOVEMENT' && c.erp && utxt(r.erp) !== c.erp;
+      if (changed) { if (!String(r.review).startsWith('REVIEW - ERP CHANGED')) { r.review = `REVIEW - ERP CHANGED (kỳ ${period}: ${c.erp})`; r.priority = 'REVIEW'; r.reason = `Kỳ ${period} chỉ có phát sinh ở hệ ${c.erp} (${c.sheets}) nhưng map đang là ${r.erp}. Xác nhận bằng User ERP Override.`; } nChanged++; }
+      else if (String(r.review).startsWith('REVIEW - ERP CHANGED')) { r.review = r.b2Review || 'OK'; r.priority = r.review === 'OK' ? 'NORMAL' : 'REVIEW'; }
+      continue;
+    }
     have.add(code);
     const c = classify(code, ev, evS);
     const q = m.closingQty, a = m.closingAmt;
@@ -62,7 +72,8 @@ export function refreshErpMap(map, step3, datasets, period) {
     rows.push({ code, name: txt(m.name), unit: txt(m.unit), erp: c.erp, src: c.src, sheets: c.sheets, rowsN: c.rowsN, rule, review: c.review, priority: c.review === 'OK' ? 'NORMAL' : 'REVIEW', reason: c.reason, step3Status: '', override: '', overrideNote: '', approvedBy: '', approvedAt: '', effFrom: `NEW ${period}`, active: 'Y', version: 'web-AUTO', b2Review: c.review });
     added++; if (c.review !== 'OK') nRev++;
   }
-  return { map: { period, rows, refreshedAt: nowISO() }, added, nRev, msg: added ? `ERP MAP: ${added} vật tư mới, ${nRev} cần REVIEW.` : 'ERP MAP đã cập nhật – không có vật tư mới.' };
+  const chg = nChanged ? ` ${nChanged} vật tư có phát sinh kỳ này ở hệ ERP khác map – cần xác nhận (Review = ERP CHANGED).` : '';
+  return { map: { period, rows, refreshedAt: nowISO() }, added, nRev, nChanged, msg: (added ? `ERP MAP: ${added} vật tư mới, ${nRev} cần REVIEW.` : 'ERP MAP đã cập nhật – không có vật tư mới.') + chg };
 }
 function mapIndex(map) {
   const m = new Map();

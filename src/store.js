@@ -260,10 +260,24 @@ export async function flushAudit() {
     }
   } catch (e) { console.warn('audit flush', e); } finally { flushing = false; }
 }
-export async function cloudAuditList(period) {
-  if (!cloud.user) return [];
-  const F = fb.F;
-  const q = await F.getDocs(F.query(F.collection(fb.fs, AUDIT), F.where('period', '==', period), F.limit(1000)));
-  return q.docs.map((d) => { const x = d.data(); return { ...x, serverAt: x.serverAt && x.serverAt.toDate ? x.serverAt.toDate().toISOString() : x.at }; })
-    .sort((a, b) => String(b.serverAt).localeCompare(String(a.serverAt)));
+/**
+ * Every audit event of a period (audit F-26): read in pages ordered by document id (no composite index needed),
+ * then sorted by server time. Stops at `max` events and says so instead of returning an arbitrary subset.
+ */
+export async function cloudAuditList(period, { pageSize = 500, max = 20000, onProgress } = {}) {
+  if (!cloud.user) return { rows: [], truncated: false };
+  const F = fb.F; const col = F.collection(fb.fs, AUDIT);
+  const out = []; let last = null; let truncated = false;
+  for (;;) {
+    const parts = [col, F.where('period', '==', period), F.orderBy(F.documentId()), F.limit(pageSize)];
+    if (last) parts.splice(3, 0, F.startAfter(last));
+    const q = await F.getDocs(F.query(...parts));
+    for (const d of q.docs) { const x = d.data(); out.push({ ...x, id: d.id, serverAt: x.serverAt && x.serverAt.toDate ? x.serverAt.toDate().toISOString() : x.at }); }
+    onProgress && onProgress(out.length);
+    if (q.docs.length < pageSize) break;
+    last = q.docs[q.docs.length - 1];
+    if (out.length >= max) { truncated = true; break; }
+  }
+  out.sort((a, b) => String(b.serverAt).localeCompare(String(a.serverAt)));
+  return { rows: out, truncated };
 }

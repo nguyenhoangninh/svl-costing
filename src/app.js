@@ -1,9 +1,9 @@
 // SVL Costing Web — application shell (state, persistence, views)
-import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO, parseUserNumber } from './engine/util.js';
+import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
 import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
-import { step1Controls, step2Controls, step3Controls, accessLimitedCount } from './engine/controls.js';
+import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
 import * as store from './store.js';
@@ -103,12 +103,16 @@ function scheduleCloud() {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => { const r = await pushCloud(); if (!r.ok) toast((r.conflict ? 'Xung đột cloud: ' : 'Chưa lưu được lên cloud: ') + r.error, 'block'); }, 1500);
 }
+/** Push now (no debounce) and report whether the cloud committed it. */
+async function syncNow() { clearTimeout(syncTimer); await saveChain; return pushCloud(); }
 /** Returns {ok, meta} or {ok:false, error, conflict}. Never reports success unless the cloud commit is confirmed (F-09). */
 async function pushCloud() {
   if (!store.cloud.user) return { ok: false, error: 'Chưa đăng nhập.' };
   if (!S.period) return { ok: false, error: 'Chưa chọn kỳ.' };
   if (!store.canEdit()) return { ok: false, error: 'Tài khoản chỉ có quyền xem.' };
   const p = S.period, data = S.d, seq = S.editSeq || 0;
+  const meta0 = await store.cloudMeta(p).catch(() => null);
+  if (meta0 && meta0.summary && meta0.summary.closed && !store.isAdmin()) { S.sync = 'synced'; S.syncMsg = 'Kỳ đã đóng trên cloud – chỉ quản trị viên ghi được.'; renderSync(); return { ok: false, error: 'Kỳ đã đóng trên cloud; chỉ quản trị viên được ghi.' }; }
   try {
     S.sync = 'saving'; renderSync();
     await saveChain;
@@ -169,7 +173,9 @@ async function openPeriod(p, { preferCloud = false } = {}) {
     } catch (e) { toast('Không đọc được cloud: ' + e.message, 'review'); }
   }
   await refreshPeriods();
+  S.prevDrift = [];
   render();
+  checkPrevDrift();
 }
 async function loadPeriodData(p) {
   if (p === S.period) return S.d;
@@ -203,8 +209,8 @@ function datasetsMeta() {
 }
 function statusAll() {
   const s1 = step1Status(datasetsMeta());
-  const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets));
-  const ctx = { period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport, opening: S.d.opening, step3: S.d.step3 };
+  const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets), outOfPeriodRows(S.d.datasets, S.period));
+  const ctx = { period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport, opening: S.d.opening, step3: S.d.step3, datasets: S.d.datasets };
   const p2 = S.period ? P2.derive(S) : { d3b: null, d4: null };
   const s3bc = p2.d3b ? p2.d3b.controls : { status: 'NOT RUN', okText: '', rows: [], next: 'Chạy STEP 3A trước' };
   const d5 = S.period ? P3.derive(S, p2) : null;
@@ -397,6 +403,7 @@ VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
+const driftHTML = () => ((S.prevDrift || []).length ? `<div class="alert block"><b>Số dư đầu kỳ cần chuyển lại</b><ul>${S.prevDrift.map((m) => `<li>${esc(m)}</li>`).join('')}</ul><a href="#opening">Mở Opening WIP → Roll forward</a></div>` : '');
 VIEWS.cc = (el) => {
   const st = statusAll(); const rs = railStatus(st); const s2 = S.d.step2, s3 = S.d.step3;
   const steps = [
@@ -416,6 +423,7 @@ VIEWS.cc = (el) => {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>Tổng quan kỳ ${esc(S.period)}</h1><p class="lead">Chạy lần lượt từng bước; mỗi bước chỉ đi tiếp khi các checkpoint không còn BLOCK.</p></div>
       <div class="next"><span>Việc tiếp theo</span><b>${next ? `<a href="#${next[6]}">${esc(next[1])}</a> — ${esc(next[5] || 'xem checkpoint')}` : (S.d.closed && S.d.closed.period === S.period ? `Kỳ đã đóng. Tạo kỳ ${esc(nextPeriod(S.period))} và roll forward.` : 'Tất cả các bước đã PASS – CLOSE MONTH.')}</b></div></header>
+    ${driftHTML()}
     <div class="kpis">
       ${kpi('Opening WIP', S.d.opening && S.d.opening.stats ? S.d.opening.stats.totalAmt : null)}
       ${kpi('WIP vào (MI + Stock Out)', s3 ? s3.summary.inAmt : null)}
@@ -473,6 +481,7 @@ VIEWS.step1 = (el) => {
       <p class="muted">File được đọc ngay trong trình duyệt; chỉ dữ liệu đã chuẩn hoá được lưu.</p>
     </div>
     <div id="plan"></div>
+    ${c.dateIssues && c.dateIssues.length ? `<div class="alert review"><b>Có dòng ngày ngoài kỳ ${esc(S.period)}</b> – kiểm tra file xuất ERP trước khi chạy STEP 2:<ul>${c.dateIssues.map((x) => `<li>${esc(x.key)}: ${fmtNum(x.n)} dòng (${esc(x.months.join(', '))})${x.amt ? ` · ${fmtNum(x.amt)} VND` : ''}</li>`).join('')}</ul></div>` : ''}
     <div class="grid3">${ERPS.map((e) => { const b = st.s1.bySys[e]; return `<div class="sys sys-${e}"><b>Hệ ${e}</b>${pill(b.status)}<span>${b.files} file · ${fmtNum(b.rows)} dòng</span><small>${fmtTs(b.lastImport)}</small></div>`; }).join('')}</div>
     <h2>Danh mục 21 báo cáo bắt buộc</h2>
     <table class="cp"><thead><tr><th>Hệ</th><th>Báo cáo</th><th>Trạng thái</th><th class="r">Số dòng</th><th>File nguồn</th><th>Thời điểm import</th><th></th></tr></thead><tbody>
@@ -495,6 +504,7 @@ async function importERP(files) {
   const plan = planImport(files.map((f) => ({ name: f.name, lastModified: f.lastModified, file: f })), S.period);
   const planEl = $('#plan');
   if (plan.error) { planEl.innerHTML = `<div class="alert block"><b>Import bị chặn.</b> ${esc(plan.error)}</div>`; return; }
+  if (plan.noToken && plan.noToken.length) toast(`${plan.noToken.length} file không có kỳ (YYMM) trong tên: ${plan.noToken.slice(0, 3).join(', ')}${plan.noToken.length > 3 ? '…' : ''}. Hệ thống sẽ kiểm tra ngày từng dòng sau khi import.`, 'review');
   const items = Object.entries(plan.slots);
   let ok = 0, errs = [], nNew = 0, nRep = 0;
   await busy('Đang đọc file ERP…', async () => {
@@ -571,7 +581,9 @@ function doStep2() {
     const s2 = runStep2(S.d.datasets, S.period);
     S.d.step2 = s2;
     const bf = S.d.register ? S.d.register.rows.filter((r) => r.active === 'B/F').map(bfFromRow) : (S.d.bfSeed || []);
+    const bfSrc = S.d.register ? S.d.register.bfSrc : null;
     S.d.register = buildReworkRegister(S.d.datasets, S.period, S.d.register ? S.d.register.rows : [], bf);
+    if (bfSrc) S.d.register.bfSrc = bfSrc;
     audit('STEP 2 - STOCK OUT (RM / FG SPLIT)', `${s2.status} · NVL phân bổ ${fmtNum(s2.total.alloc)} · FG rework ${S.d.register.stats.rows} dòng`);
     markDirty('step2', 'register', 'audit');
     toast(`STEP 2 xong: ${s2.status}. Đã phân bổ ${fmtNum(s2.total.alloc)} VND.`, s2.status === 'PASS' ? 'pass' : 'review');
@@ -616,8 +628,10 @@ VIEWS.opening = (el) => {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 3A · Opening WIP</h1><p class="lead">Số dư WIP vật tư đầu kỳ ${esc(S.period)}. Quy tắc: Opening ERP = Opening giá thành (chỉ một số dư đầu kỳ). Lấy từ Closing WIP kỳ ${esc(prev)} hoặc import từ file.</p></div>
       <div class="result"><span>Trạng thái</span>${pill(op ? op.status : 'NO DATA')}<small>${op && op.stats ? `${fmtNum(op.stats.materials)} vật tư` : ''}</small></div></header>
+    ${driftHTML().replace(/<a href="#opening">.*?<\/a>/, '')}
+    ${op && op.src ? `<p class="muted">Nguồn: Closing WIP ${esc(op.src.period)} ${op.src.closedAt ? `(đã đóng ${fmtTs(op.src.closedAt)})` : `– <b>kỳ ${esc(op.src.period)} chưa đóng khi chuyển</b>; lý do: ${esc(op.src.reason)}`} · chuyển lúc ${fmtTs(op.src.at)}</p>` : ''}
     <div class="row">
-      <button class="btn" data-act="roll-wip" type="button">Roll forward từ ${esc(prev)}</button>
+      <button class="btn" data-act="roll-wip" type="button">Roll forward từ ${esc(prev)} (WIP + Rework B/F)</button>
       <label class="btn ghost">Import từ file…<input type="file" id="f-open" accept=".xlsx,.xlsm,.xls" hidden></label>
       <button class="btn ghost" data-act="validate-wip" type="button" ${op ? '' : 'disabled'}>Validate &amp; lưu</button>
       <button class="btn ghost" data-act="template-wip" type="button">Tải file mẫu</button>
@@ -657,22 +671,72 @@ async function importOpening(file) {
   });
   render();
 }
+// ---------- inter-period roll-forward (audit F-06) ----------
+const isClosedIn = (d, p) => !!(d && d.closed && d.closed.period === p);
+/** Rework WIP the previous period hands over: the close-time archive when it is CLOSED, else its live register. */
+function bfRowsOf(prevD, prevP) {
+  if (isClosedIn(prevD, prevP) && Array.isArray(prevD.rwArchive)) return prevD.rwArchive.map((a) => ({ ...a, originPeriod: a.originPeriod || prevP }));
+  return ((prevD && prevD.register && prevD.register.rows) || []).filter((r) => (r.active === 'Y' || r.active === 'B/F') && num(r.closingWIP) > 1)
+    .map((r) => ({ ...bfFromRow(r), bfQty: r.active === 'B/F' ? r.bfQty : r.fifoQty, carryCost: num(r.closingWIP), originPeriod: r.active === 'B/F' ? r.originPeriod : r.period || prevP }));
+}
+const wipFp = (s3) => (s3 ? fpRows(openingFromClosing(s3, '').rows, (r) => `${ttxt(r.code).toUpperCase()}|${num(r.qty).toFixed(4)}|${num(r.amt).toFixed(0)}`) : '');
+const bfFp = (rows) => fpRows(rows, (r) => `${r.rid}|${num(r.bfQty).toFixed(4)}|${num(r.carryCost).toFixed(0)}`);
+const srcStamp = (prevD, prevP, reason) => ({ period: prevP, closedAt: isClosedIn(prevD, prevP) ? prevD.closed.closedAt : '', step3RunAt: prevD && prevD.step3 ? prevD.step3.runAt : '', wipFp: wipFp(prevD && prevD.step3), bfFp: bfFp(bfRowsOf(prevD, prevP)), reason: reason || '', at: nowISO() });
+/** Ask for a reason when the previous period is still open; '' = do not roll. */
+function openRollReason(prevD, prevP) {
+  if (isClosedIn(prevD, prevP)) return 'CLOSED';
+  return (prompt(`Kỳ ${prevP} CHƯA ĐÓNG. Số dư chuyển sang có thể còn thay đổi.\nNhập lý do để vẫn chuyển tạm Closing WIP / Rework WIP (bỏ trống = không chuyển; roll lại sau khi đóng kỳ ${prevP}):`) || '').trim();
+}
+/** Opening WIP (+ Rework B/F if the register has none yet) of S.period from the previous period's data. */
+function rollFromPrev(prevD, prevP, reason, { wip = true, bf = true, replaceBF = false } = {}) {
+  const stamp = srcStamp(prevD, prevP, reason === 'CLOSED' ? '' : reason);
+  const done = [];
+  if (wip && prevD.step3) {
+    const op = openingFromClosing(prevD.step3, S.period); op.src = stamp;
+    validateOpening(op, S.d.datasets, S.period); S.d.opening = op; done.push('opening');
+    audit('OPENING WIP ROLL FORWARD', `Closing WIP ${prevP}${stamp.closedAt ? ' (CLOSED)' : ' (CHƯA ĐÓNG – lý do: ' + stamp.reason + ')'} → Opening ${S.period} · ${fmtNum(op.rows.reduce((a, r) => a + num(r.amt), 0))} VND`);
+  }
+  const rows = bf ? bfRowsOf(prevD, prevP) : [];
+  const hasBF = !!(S.d.register && S.d.register.rows.some((r) => r.active === 'B/F'));
+  const sameBF = hasBF && S.d.register.bfSrc && S.d.register.bfSrc.bfFp === stamp.bfFp;
+  if (bf && (rows.length || hasBF) && !sameBF && (!hasBF || replaceBF)) {
+    const base = S.d.register ? S.d.register.rows.filter((r) => r.active !== 'B/F') : [];
+    if (S.d.step2) S.d.register = buildReworkRegister(S.d.datasets, S.period, base, rows);
+    else S.d.register = { period: S.period, refreshedAt: '', rows: rows.map((b) => ({ active: 'B/F', ...b, bfCost: b.carryCost, closingWIP: b.carryCost, fifoStatus: 'OPENING B/F', rowSource: 'OPENING B/F' })), stats: { rows: 0, issueQty: 0, erpRef: 0, bfRows: rows.length, bfCost: rows.reduce((a, b) => a + b.carryCost, 0) } };
+    S.d.register.bfSrc = stamp; S.d.bfSeed = rows; done.push('register');
+    audit('REWORK WIP B/F', `${hasBF ? 'Thay B/F: ' : ''}${rows.length} dòng / ${fmtNum(rows.reduce((a, b) => a + num(b.carryCost), 0))} VND từ ${stamp.closedAt ? 'archive đóng kỳ' : 'register chưa đóng'} ${prevP}`);
+  }
+  if (done.length) markDirty(...done, 'audit');
+  return done;
+}
 async function rollWIP() {
   const prev = prevPeriod(S.period);
-  let s3 = null;
-  s3 = await store.localGet(lk(prev, 'step3'));
-  if (!s3 && store.cloud.user) {
-    try { const r = await store.cloudLoad(prev); s3 = r && r.blobs.step3; } catch { /* ignore */ }
+  const prevD = await loadPeriodData(prev);
+  if (!prevD || !prevD.step3) { toast(`Chưa có Material WIP (STEP 3) của kỳ ${prev}. Hãy import Opening WIP từ file.`, 'block'); return; }
+  if (nextPeriod(prevD.step3.period) !== S.period) { toast(`Closing WIP hiện có là kỳ ${prevD.step3.period}, không phải kỳ liền trước.`, 'block'); return; }
+  const reason = openRollReason(prevD, prev);
+  if (!reason) { toast('Không chuyển số dư.', 'review'); return; }
+  const done = rollFromPrev(prevD, prev, reason, { replaceBF: true });
+  S.prevDrift = [];
+  toast(`Đã roll forward từ kỳ ${prev}${reason === 'CLOSED' ? '' : ' (kỳ trước chưa đóng)'}: ${done.includes('opening') ? 'Opening WIP' : ''}${done.includes('register') ? ' + Rework WIP B/F' : ''}.`, reason === 'CLOSED' ? 'pass' : 'review');
+  render(); checkPrevDrift();
+}
+/** Has the previous period changed since its balances were rolled into this one? (sets S.prevDrift) */
+async function checkPrevDrift() {
+  const out = [];
+  const op = S.d.opening && S.d.opening.src, bs = S.d.register && S.d.register.bfSrc;
+  const p = (op && op.period) || (bs && bs.period);
+  if (p) {
+    try {
+      const prevD = await loadPeriodData(p);
+      if (op && wipFp(prevD.step3) !== op.wipFp) out.push(`Closing WIP kỳ ${p} đã thay đổi sau khi chuyển sang Opening WIP kỳ ${S.period} – roll forward lại.`);
+      else if (op && !op.closedAt && isClosedIn(prevD, p)) out.push(`Opening WIP được chuyển khi kỳ ${p} chưa đóng; kỳ ${p} nay đã đóng – roll forward lại để dùng số chính thức.`);
+      if (bs && bfFp(bfRowsOf(prevD, p)) !== bs.bfFp) out.push(`Rework WIP cuối kỳ ${p} khác số đã chuyển sang B/F kỳ ${S.period}${isClosedIn(prevD, p) ? '' : ' (kỳ trước chưa đóng)'}.`);
+    } catch { /* previous period not available on this device */ }
   }
-  if (!s3) { toast(`Chưa có Material WIP (STEP 3) của kỳ ${prev}. Hãy import Opening WIP từ file.`, 'block'); return; }
-  if (nextPeriod(s3.period) !== S.period) { toast(`Closing WIP hiện có là kỳ ${s3.period}, không phải kỳ liền trước.`, 'block'); return; }
-  const op = openingFromClosing(s3, S.period);
-  validateOpening(op, S.d.datasets, S.period);
-  S.d.opening = op;
-  audit('OPENING WIP ROLL FORWARD', `Closing WIP ${prev} → Opening ${S.period} · ${fmtNum(op.stats.totalAmt)} VND`);
-  markDirty('opening', 'audit');
-  toast(`Đã roll forward Closing WIP ${prev} sang Opening ${S.period}.`, 'pass');
-  render();
+  const changed = JSON.stringify(out) !== JSON.stringify(S.prevDrift || []);
+  S.prevDrift = out;
+  if (changed) render();
 }
 
 // ---------- STEP 3 ----------
@@ -736,7 +800,9 @@ VIEWS.audit = (el) => {
     $('#t-audit').insertAdjacentHTML('beforebegin', '<div class="row"><button class="btn ghost" type="button" id="b-caudit">Xem nhật ký cloud (không sửa / xoá được)</button><span class="muted">Bảng dưới là nhật ký lưu cùng dữ liệu kỳ (500 dòng gần nhất).</span></div><div id="t-caudit"></div>');
     $('#b-caudit').addEventListener('click', async () => {
       try {
-        const rows = await store.cloudAuditList(S.period);
+        const btn = $('#b-caudit'); btn.disabled = true;
+        const { rows, truncated } = await store.cloudAuditList(S.period, { onProgress: (n) => { btn.textContent = `Đang tải nhật ký cloud… ${n}`; } });
+        btn.disabled = false; btn.textContent = `Nhật ký cloud: ${rows.length} sự kiện${truncated ? ' (dừng ở giới hạn 20.000 – xuất Excel theo từng đợt)' : ' (đầy đủ)'}`;
         const c2 = [{ key: 'serverAt', label: 'Thời điểm (server)', type: 'ts', width: 160 }, { key: 'by', label: 'Người dùng', width: 200 }, { key: 'role', label: 'Vai trò', width: 80 }, { key: 'action', label: 'Hành động', width: 260 }, { key: 'detail', label: 'Chi tiết', width: 520 }, { key: 'app', label: 'Phiên bản', width: 200 }];
         mountTable($('#t-caudit'), { columns: c2, rows, height: 420, onExport: exportTable('AUDIT_CLOUD', c2) });
       } catch (e) { toast('Không đọc được nhật ký cloud: ' + e.message, 'block'); }
@@ -938,18 +1004,14 @@ async function newPeriod() {
   const p = (prompt('Kỳ mới (YYYY-MM):', sug) || '').trim();
   if (!p) return;
   if (!isPeriod(p)) { toast('Kỳ phải có dạng YYYY-MM.', 'block'); return; }
-  const prev = S.period && nextPeriod(S.period) === p ? { step3: S.d.step3, register: S.d.register } : null;
+  const adjP = S.period && nextPeriod(S.period) === p ? S.period : '';
+  const adjD = adjP ? S.d : null;
   const prevD = S.period && S.period < p ? S.d : null;
   await openPeriod(p);
-  if (prev && !S.d.opening && prev.step3) {
-    S.d.opening = openingFromClosing(prev.step3, p); validateOpening(S.d.opening, S.d.datasets, p);
-    audit('OPENING WIP ROLL FORWARD', `Closing WIP ${prev.step3.period} → Opening ${p}`);
-    markDirty('opening', 'audit');
-  }
-  if (prev && prev.register && !S.d.register) {
-    // Closing Rework WIP of the previous period becomes B/F rows (RW_ArchiveClosingReworkWIP → RW_CollectBroughtForward)
-    S.d.bfSeed = prev.register.rows.filter((r) => (r.active === 'Y' || r.active === 'B/F') && num(r.closingWIP) > 1).map((r) => ({ ...bfFromRow(r), bfQty: r.active === 'B/F' ? r.bfQty : r.fifoQty, carryCost: num(r.closingWIP), originPeriod: r.active === 'B/F' ? r.originPeriod : r.period }));
-    if (S.d.bfSeed.length) { S.d.register = { period: p, refreshedAt: '', rows: S.d.bfSeed.map((b) => ({ active: 'B/F', ...b, bfCost: b.carryCost, closingWIP: b.carryCost, fifoStatus: 'OPENING B/F', rowSource: 'OPENING B/F' })), stats: { rows: 0, issueQty: 0, erpRef: 0, bfRows: S.d.bfSeed.length, bfCost: S.d.bfSeed.reduce((a, b) => a + b.carryCost, 0) } }; markDirty('register'); }
+  if (adjD && (adjD.step3 || adjD.register) && !S.d.opening && !(S.d.register && S.d.register.rows.some((r) => r.active === 'B/F'))) {
+    const reason = openRollReason(adjD, adjP);
+    if (reason) rollFromPrev(adjD, adjP, reason);
+    else toast(`Chưa chuyển Opening WIP / Rework B/F từ kỳ ${adjP} (chưa đóng). Dùng “Roll forward” ở STEP 3 sau khi đóng kỳ ${adjP}.`, 'review');
   }
   if (prevD) {
     const cf = { ...P2.carryForward(prevD, p), ...P3.carryForward(prevD, p) }; const took = [];
@@ -1012,7 +1074,7 @@ document.addEventListener('click', async (e) => {
     case 's5-template': await P3.doTemplate(); break;
     case 's5-run': await busy('Đang chạy FIFO COGS…', async () => P3.doRunFIFO()); render(); break;
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
-    case 's5-close': P3.doClose(); render(); break;
+    case 's5-close': await P3.doClose(); render(); break;
     case 's5-reopen': P3.doReopen(); render(); break;
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
@@ -1113,7 +1175,7 @@ window.addEventListener('offline', () => { renderSync(); toast('Mất kết nố
 
 P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
 TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
-P3.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+P3.install({ cloudOn: () => !!store.cloud.user, syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
 // ======================= boot =======================
 (async function boot() {

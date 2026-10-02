@@ -112,7 +112,12 @@ export function buildDataset(grid, fileName, period) {
     rows.push(row);
   }
   let dataRows = Math.max(lastRow - headerRow, 0);
-  if (normalizeName(fileBaseName(fileName)).includes('NO-DATA')) dataRows = 0;
+  if (normalizeName(fileBaseName(fileName)).includes('NO-DATA')) {
+    // audit F-24: a "NO DATA" file must really be empty – rows with an amount / quantity are not silently kept
+    const withNumbers = rows.filter((r) => r.some((v) => typeof v === 'number' && v !== 0)).length;
+    if (withNumbers) throw new Error(`${report}-${erp}: tên file ghi NO DATA nhưng có ${withNumbers} dòng có số liệu. Đổi tên file (bỏ NO DATA) hoặc xuất lại báo cáo.`);
+    rows.length = 0; dataRows = 0;
+  }
   return {
     key: dsKey(erp, report), erp, report, period,
     fileName: fileBaseName(fileName), importedAt: nowISO(),
@@ -138,10 +143,10 @@ export function planImport(files, period) {
     } else dups.push(`${fileBaseName(f.name)} - older duplicate skipped`);
   }
   const expect = periodToken(period);
-  let first = '', mixed = false;
+  let first = '', mixed = false; const noToken = [];
   for (const f of Object.values(slots)) {
     const t = filePeriodToken(f.name);
-    if (!t) continue;
+    if (!t) { noToken.push(fileBaseName(f.name)); continue; } // audit F-10: imported, but its rows' dates are checked in STEP 1
     if (!first) first = t; else if (t !== first) { mixed = true; break; }
   }
   let error = '';
@@ -149,7 +154,7 @@ export function planImport(files, period) {
   else if (!Object.keys(slots).length) error = 'Không nhận diện được báo cáo ERP nào. Cần PC-P/PC-M/MI-P/MI-M/STOCK OUT/MR-P/MR-M + T/S/O trong tên file.';
   else if (mixed) error = 'Các file được chọn thuộc nhiều kỳ khác nhau. Hãy import từng tháng một.';
   else if (first && first !== expect) error = `Kỳ của file ERP (${tokenPeriod(first)}) không khớp kỳ báo cáo ${period}. Import bị CHẶN để tránh tính giá lẫn kỳ.`;
-  return { slots, skipped, dups, recognized, error };
+  return { slots, skipped, dups, recognized, error, noToken };
 }
 
 /** Checklist / summary (RefreshStatusCore). datasetsMeta: {key: {status, dataRows, fileName, importedAt}} */

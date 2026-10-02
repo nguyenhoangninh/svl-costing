@@ -220,9 +220,12 @@ export function runFIFO(ctx) {
   const ovr = new Map(Object.entries(ctx.overrides || {}).map(([k, v]) => [k.toUpperCase(), utxt(v)]));
   const excluded = new Set(Object.entries(ctx.dupDecisions || {}).filter(([, v]) => v === 'EXCLUDE').map(([k]) => k.toUpperCase()));
   const S = []; const keyCount = new Map(); const need = new Map(); const lines = new Map();
-  let overridesUsed = 0, reviewLines = 0, sumEligQ = 0;
+  let overridesUsed = 0, reviewLines = 0, sumEligQ = 0, advisory = 0;
+  const undated = []; // audit F-05: sales rows whose date cannot be read never silently drop out of COGS
   (ctx.salesRows || []).forEach((r, idx) => {
-    const d = dateVal(r.invDate); if (d === null || d < pStart || d > pEnd) return;
+    const d = dateVal(r.invDate);
+    if (d === null) { if (utxt(r.product) || num(r.qty) !== 0) undated.push({ dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), qty: num(r.qty), vnd: num(r.amtVND), rawDate: r.invDate === null || r.invDate === undefined ? '' : String(r.invDate) }); return; }
+    if (d < pStart || d > pEnd) return;
     const s = { seq: S.length + 1, date: d, prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
     s.key = lineKey(r, d, keyCount);
     if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
@@ -242,6 +245,7 @@ export function runFIFO(ctx) {
     }
     if (s.fin === 'NO COGS') s.status = 'NO COGS';
     if (s.fin === 'REVIEW') { s.status = 'REVIEW'; reviewLines++; }
+    if (utxt(r.validResult) === 'REVIEW') { s.vmsg = s5t(r.validMsg); if (s.fin === 'FIFO COGS') advisory++; } // audit F-23
     if (s.fin === 'FIFO COGS') {
       need.set(s.prod, (need.get(s.prod) || 0) + s.qty);
       if (!lines.has(s.prod)) lines.set(s.prod, []); lines.get(s.prod).push(s);
@@ -251,7 +255,7 @@ export function runFIFO(ctx) {
   });
 
   // FIFO allocation
-  const D = []; let shortProducts = 0;
+  const D = []; let shortProducts = 0; const undatedUsed = new Set();
   for (const [prod, list] of lines) {
     if (mode === 'MONTHLY') {
       let nd = need.get(prod), tq = 0, trm = 0, t622 = 0, t627 = 0, ttot = 0;
@@ -287,6 +291,7 @@ export function runFIFO(ctx) {
             if (avail > TOLQ) {
               const take = avail <= nd + TOLQ ? avail : nd;
               const d = takeLayer(l, take, D, prod, s.seq);
+              if (l.dt === 0 && l.src !== 'OPENING') { undatedUsed.add(l.lid || `${l.pc}|${prod}`); s.msg += `Used production layer ${l.pc || ''} without completion date; `; } // audit F-11
               s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
               nd -= take;
             }
@@ -387,7 +392,8 @@ export function runFIFO(ctx) {
   return {
     period, runAt: nowISO(), mode, tol, runSeconds: Math.round((Date.now() - t0) / 100) / 10, overridesUsed, openLayers: nO, runResult,
     ledger, sales, detail, closing, summary: sum, totals, rec, sumDetA, sumLineA, step4Qty, step4Cost,
-    stats: { lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers },
+    stats: { lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size },
+    undated,
     // internal (dropped before saving): layers for the rework pass
     _sorted: sorted,
   };

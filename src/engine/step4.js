@@ -129,18 +129,21 @@ export function validateSaveSales(staging, salesDB, period) {
     const prod = utxt(r.product);
     const inc = !prod || toSerial(r.invDate) === null ? 'N' : includeInPrice(r.tranType, num(r.qty), num(r.amtUSD));
     r.saveStat = 'SAVED'; r.savedAt = saveAt;
-    return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
+    return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, validMsg: r.validMsg, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
   });
   const cov = salesCoverage(mode, minInv, maxInv, period);
   const old = (salesDB && salesDB.rows) || [];
   let replaced = 0; const kept = [];
+  let droppedUndated = 0;
   for (const r of old) {
     const d = toSerial(r.invDate);
-    if (d !== null && cov && d >= cov.from && d <= cov.to) replaced++; else kept.push(r);
+    if (d !== null && cov && d >= cov.from && d <= cov.to) replaced++;
+    else if (d === null) droppedUndated++; // audit F-05: undated rows of an earlier save are replaced by the new batch, not kept forever
+    else kept.push(r);
   }
   staging.status = 'VALIDATED & SAVED - ADVISORY';
   const rows = kept.concat(newRows);
-  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
+  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, dup, replaced, droppedUndated, undated: newRows.filter((r) => toSerial(r.invDate) === null && (r.product || num(r.qty) !== 0)).length, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
 }
 
 /**
@@ -229,8 +232,9 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else if (rank === soRank.get(prod)) { if (rank === 3) rep = d >= soDate.get(prod); if (rank === 2) rep = true; if (rank === 1) rep = d < soDate.get(prod); }
     if (rep) { soRank.set(prod, rank); soPrice.set(prod, val); soRowOf.set(prod, i); soDate.set(prod, d); }
   });
-  const manP = new Map(), manS = new Map();
-  for (const m of manual || []) { const p = utxt(m.product); if (p && isNumeric(m.price) && num(m.price) > 0 && manualActive(m, pStart, pEnd)) { manP.set(p, num(m.price)); manS.set(p, txt(m.source)); } }
+  const manP = new Map(), manS = new Map(), manN = new Map();
+  for (const m of manual || []) { const p = utxt(m.product); if (p && isNumeric(m.price) && num(m.price) > 0 && manualActive(m, pStart, pEnd)) { manP.set(p, num(m.price)); manS.set(p, txt(m.source)); manN.set(p, (manN.get(p) || 0) + 1); } }
+  let overlap = 0, afterSO = 0;
   const rows = [], audit = []; let missing = 0, stale = 0; const missingList = [];
   for (const p of prods) {
     let curP = 0, latestP = 0, ytdP = 0, soP = 0, sel = 0, src = '', ref = null;
@@ -257,7 +261,9 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     const age = ref !== null && ref !== undefined ? monthsBetween(ref, pEnd) : 0;
     let review;
     if (row.status === 'MISSING PRICE') review = 'MISSING';
+    else if (mp > 0 && manN.get(p) > 1) { review = `REVIEW - MANUAL OVERLAP (${manN.get(p)} dòng hiệu lực, dòng cuối được dùng)`; overlap++; } // audit F-21
     else if (mp > 0) review = 'MANUAL';
+    else if (src === 'SALES ORDER (AFTER PERIOD)') { review = 'REVIEW - SO AFTER PERIOD'; afterSO++; } // audit F-15
     else if (age > 6) { review = 'REVIEW - STALE >6M'; stale++; }
     else if (age > 3) { review = 'REVIEW - STALE 4-6M'; stale++; }
     else review = 'OK';
@@ -272,7 +278,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   });
   return {
     pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: 'CURRENT', period },
-    so: soRows, stats: { products: prods.length, missing, stale, missingList },
+    so: soRows, stats: { products: prods.length, missing, stale, missingList, overlap, afterSO },
   };
 }
 

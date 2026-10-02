@@ -1,7 +1,7 @@
 // Phase 3 views: STEP 5 — Opening FG, FIFO COGS + FG Rework FIFO (5B), FG History & month close.
 import * as F5 from '../engine/step5.js';
 import * as P2 from './phase2.js';
-import { num, ttxt, utxt, txt, nowISO, prevPeriod, serialToISO } from '../engine/util.js';
+import { num, ttxt, utxt, txt, nowISO, prevPeriod, serialToISO, fpRows } from '../engine/util.js';
 
 let A = null;
 export function install(api) { A = api; }
@@ -16,8 +16,12 @@ export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'vali
 // ======================= derived =======================
 function snap(S, D4) {
   const d = S.d; const fl = D4 && D4.fl;
-  return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode, dupKey: dupKey(S) };
+  return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode, dupKey: dupKey(S),
+    flKey: flKey(fl), ovKey: ovKey(S) };
 }
+/** Audit F-03: final STEP 4 cost per lot (3B / rework carry-in can move between lots with an unchanged total) and the FIFO overrides. */
+export const flKey = (fl) => fpRows(fl ? fl.rows : [], (r) => [r.erp, utxt(r.pc), utxt(r.prod), num(r.qty), num(r.totalRM).toFixed(0), num(r.t622).toFixed(0), num(r.t627).toFixed(0), num(r.totalCost).toFixed(0)].join('|'));
+export const ovKey = (S) => fpRows(Object.entries(S.d.fifoOverrides || {}).filter(([, v]) => v), ([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
 const cfg = (S) => S.d.s5cfg || { mode: 'MONTHLY', tol: 1 };
 /** Repeated sales lines of the period and how many still need a KEEP / EXCLUDE decision (F-03). */
 export function dupStatus(S) {
@@ -42,6 +46,8 @@ function staleReason(S, D4, d3b) {
   if (c.openValidatedAt !== p.openValidatedAt) return 'FG đầu kỳ đã validate lại';
   if (c.mode !== p.mode) return 'Đổi chế độ FIFO';
   if (dupKey(S) !== (p.dupKey || '')) return 'Quyết định dòng nghi trùng đã đổi';
+  if (p.flKey !== undefined && c.flKey !== p.flKey) return 'Giá thành từng lô ở STEP 4 đã đổi (điều chỉnh 3B / rework chuyển giữa các lô)';
+  if (p.ovKey !== undefined && c.ovKey !== p.ovKey) return 'Lựa chọn xử lý FIFO (override) đã đổi';
   return '';
 }
 function freshness(S, D4, d3b) {
@@ -61,9 +67,11 @@ export function derive(S, p2) {
   const dups = dupStatus(S);
   const hg = F5.historyGate(d.fgHistory, res, S.period);
   const recon = F5.step5Recon({ period: S.period, res, freshness: fresh, hist: d.fgHistory, histGate: d.fgHistory ? hg : null, gl: d.gl, fl, s4: d.step4, gate6: fl ? fl.gate6 : '' });
-  const controls = step5Controls(S, { res, recon, hg, fl, fresh });
+  const controls = step5Controls(S, { res, recon, hg, fl, fresh, d3b: p2 ? p2.d3b : null });
   let closeReason = F5.closeBlockReason({ period: S.period, recon, histGate: d.fgHistory ? hg : null, res, register: d.register, closed: d.closed });
   if (res && stale && !(d.closed && d.closed.period === S.period)) closeReason = `STEP 5 OUTDATED: ${stale}. Chạy lại theo thứ tự STEP 4 → RUN FIFO → BUILD FG HISTORY.`;
+  if (!closeReason && res && (S.prevDrift || []).length && !(d.closed && d.closed.period === S.period)) closeReason = `Số dư đầu kỳ đã lệch so với kỳ trước: ${S.prevDrift[0]}`;
+  if (!closeReason && res && res.undated && res.undated.length) closeReason = `Sales Database có ${res.undated.length} dòng thiếu / sai ngày hoá đơn (vd. ${res.undated.slice(0, 3).map((u) => u.inv || 'dòng ' + u.dbRow).join(', ')}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.`;
   if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
   return { res, fresh, stale, dups, hg, recon, controls, closeReason };
 }
@@ -84,6 +92,12 @@ function step5Controls(S, x) {
   add('07', 'SL FIFO = SL bán đủ điều kiện', R(11).expected, R(11).result, R(11).status, 'Dòng bán FIFO COGS');
   add('08', 'Sản phẩm thiếu FG', R(13).expected, R(13).result, R(13).status, 'Phải bằng 0');
   add('09', 'Dòng bán cần review', R(15).expected, R(15).result, R(15).status, 'Final Treatment = REVIEW');
+  const und = res && res.undated ? res.undated.length : 0, adv = res && res.stats ? num(res.stats.advisory) : 0;
+  if (res) {
+    add('09a', 'Dòng bán thiếu / sai ngày hoá đơn', 0, und, und ? 'BLOCK' : 'PASS', 'Không xác định được kỳ → chưa tính giá vốn. Sửa ngày ở nguồn rồi import & lưu lại (4.1)');
+    if (res.mode === 'STRICT_DATE') { const ul = num(res.stats && res.stats.undatedLayers); add('09c', 'STRICT_DATE: lớp sản xuất không có ngày hoàn thành đã được dùng', 0, ul, ul ? 'REVIEW' : 'PASS', 'PC-P thiếu Date → không chứng minh được thứ tự thời gian'); }
+    add('09b', 'Dòng FIFO có cảnh báo kiểm tra dữ liệu bán', 0, adv, adv ? 'REVIEW' : 'PASS', 'Thiếu khách hàng, SL×đơn giá lệch, loại OTHER… (không chặn)');
+  }
   add('10', 'Lô cuối kỳ giá vốn > giá bán (NRV)', R(16).expected, R(16).result, R(16).status, 'Review NRV (sau dự phòng)');
   const reg = d.register ? d.register.rows : [];
   const stale = reg.some((r) => (r.active === 'Y' && utxt(r.fifoStatus) === 'NOT RUN') || utxt(r.fifoStatus).startsWith('RERUN'));
@@ -100,6 +114,13 @@ function step5Controls(S, x) {
   const T = res ? res.totals : null;
   const f201 = T ? T.openA + (fl ? fl.totals.totalCost : 0) - T.cogsA - num(T.rwTot) - T.closeA : 0;
   add('15', 'Cầu nối TK 155 (gồm rework)', 0, f201, Math.abs(f201) <= 1 ? 'PASS' : 'REVIEW', 'Đầu kỳ + nhập kho − COGS − rework − cuối kỳ');
+  // audit F-17: VBA Control Center F200 "WIP 154 bridge (incl. 3B & Rework)"
+  const s3 = d.step3, s4 = d.step4;
+  if (res && s3 && fl && x.d3b && s4 && !s4.blocked) {
+    const S3 = s3.summary;
+    const f200 = num(s3.openingAmt) + num(S3.miAmt) + num(S3.soAmt) + num(s4.alloc622) + num(s4.alloc627) + fifoC + bf - num(S3.mrAmt) - fl.totals.totalCost - x.d3b.wf.finalClosing - sumOf(reg, 'closingWIP');
+    add('15a', 'Cầu nối TK 154 (gồm 3B & rework)', 0, f200, Math.abs(f200) <= 1 ? 'PASS' : stale ? 'RERUN FIFO' : 'REVIEW', 'WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối (sau 3B) − rework WIP cuối');
+  }
   add('16', 'FG History', 'PASS', hg.gate, hg.gate === 'PASS' ? 'PASS' : 'RERUN HISTORY', 'BUILD FG HISTORY sau FIFO');
   const f135 = recon.finalStatus;
   add('17', 'Cổng đóng kỳ', 'READY', res ? f135 : '', !res ? 'NOT RUN' : f135.startsWith('READY') ? (f135.includes('REVIEW') ? 'PASS WITH REVIEW' : 'PASS') : 'BLOCK', '05_RECONCILIATION dòng 49');
@@ -217,6 +238,9 @@ export function viewFIFO(el) {
     <div class="row">
       <label>Chế độ FIFO <select id="s5-mode" ${edit ? '' : 'disabled'}>${['MONTHLY', 'STRICT_DATE'].map((m) => `<option ${conf.mode === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
       <button class="btn" data-act="s5-run" type="button">RUN FIFO COGS</button>
+    </div>
+    <p class="muted">${conf.mode === 'STRICT_DATE' ? '<b>STRICT_DATE</b> = FIFO theo từng dòng bán theo ngày hoá đơn: chỉ dùng lớp có ngày ≤ ngày hoá đơn. Rework vẫn tính theo tháng.' : '<b>MONTHLY</b> = FIFO định kỳ theo tháng: cộng SL bán cả tháng của từng sản phẩm, lấy lớp cũ nhất trước, rồi chia giá vốn cho các dòng bán theo tỷ lệ SL. Tổng giá vốn tháng là FIFO; giá vốn từng hoá đơn là bình quân của tháng.'}</p>
+    <div class="row">
       <span class="muted">${res ? `Chạy ${A.fmtTs(res.runAt)} · ${res.runSeconds}s · ${A.pill(D5.fresh)}` : ''}</span>
     </div>
     ${res && D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>STEP 5 OUTDATED:</b> ${esc(D5.stale)}. Chạy lại theo thứ tự (STEP 4 nếu cần) → RUN FIFO COGS → BUILD FG HISTORY.</div>` : ''}
@@ -329,7 +353,7 @@ export function viewClose(el) {
     ${closed ? `<div class="alert pass"><b>Kỳ ${esc(S.period)} đã đóng</b> lúc ${A.fmtTs(d.closed.closedAt)} bởi ${esc(d.closed.closedBy)} · trạng thái ${esc(d.closed.status)}. Tạo kỳ ${esc(nextP(S.period))} rồi Roll forward FG đầu kỳ.</div>` : ''}
     <div class="row">
       <button class="btn" data-act="s5-hist" type="button" ${res ? '' : 'disabled'}>BUILD FG HISTORY</button>
-      <button class="btn" data-act="s5-close" type="button" ${closed ? 'disabled' : ''}>CLOSE MONTH</button>
+      <button class="btn" data-act="s5-close" type="button" ${closed || !A.isAdmin() ? 'disabled' : ''} title="${A.isAdmin() ? '' : 'Chỉ quản trị viên được đóng kỳ'}">CLOSE MONTH${A.isAdmin() ? '' : ' (quản trị viên)'}</button>
       ${closed && A.isAdmin() ? '<button class="btn danger ghost" data-act="s5-reopen" type="button">Mở lại kỳ…</button>' : ''}
       <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
     </div>
@@ -372,28 +396,45 @@ export function doBuildHistory() {
     A.toast(`FG History: ${h.rows.length} dòng (COGS kỳ này ${h.nCOGS}, FG cuối kỳ ${h.nClose}, đã bán trước ${h.nKeep}). Archive gate PASS.`, 'pass');
   } catch (e) { A.toast('BUILD FG HISTORY lỗi: ' + e.message, 'block'); }
 }
-export function doClose() {
+export async function doClose() {
   const S = A.S; const d = S.d; const D5 = derive(S, P2.derive(S));
+  // audit F-16: closing is an approval step – administrators only (reopen already is)
+  if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được CLOSE MONTH. Người lập chuẩn bị số liệu; quản trị viên kiểm tra và đóng kỳ.', 'review'); return; }
   if (D5.closeReason) { A.toast('CLOSE MONTH bị chặn: ' + D5.closeReason, 'block'); return; }
   const { recon } = D5;
   let msg = `Đóng kỳ kế toán ${S.period}?\n\nFinal Production Status: ${recon.finalStatus}\nMonth Close Gate: ${recon.closeGate}\nFG History: PASS\nBatch 7: PASS`;
   if (recon.finalStatus.includes('REVIEW') || recon.closeGate.includes('REVIEW')) msg += '\n\nKỳ này còn mục REVIEW. Xác nhận đã được quản lý review trước khi đóng.';
   if (!confirm(msg)) return;
+  const prevArchive = d.rwArchive;
   d.closed = { period: S.period, closedAt: nowISO(), closedBy: A.who(), status: recon.finalStatus, closeGate: recon.closeGate, runAt: d.step5.runAt, note: `FG History PASS; Close Gate=${recon.closeGate}; Batch7=PASS` };
   d.rwArchive = F5.archiveReworkWIP(d.register, S.period);
   const arcCost = d.rwArchive.reduce((a, r) => a + num(r.carryCost), 0);
   A.audit('STEP 5 - CLOSE MONTH', `${recon.finalStatus}; ${recon.closeGate}; FG HISTORY PASS`);
   A.audit('STEP 5B - REWORK WIP CARRY-FORWARD', `Rows=${d.rwArchive.length}; carrying cost=${A.fmtNum(arcCost, 2)}`);
   A.markDirty('closed', 'rwArchive', 'audit');
-  A.toast(`Kỳ ${S.period} đã ĐÓNG. Rework WIP chuyển kỳ: ${d.rwArchive.length} dòng / ${A.fmtNum(arcCost)} VND. Bước tiếp: tạo kỳ ${nextP(S.period)} → Roll forward FG đầu kỳ.`, 'pass');
+  // audit F-25: with cloud sync, the close only stands once the cloud has committed it
+  if (A.cloudOn()) {
+    A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
+    const r = await A.syncNow();
+    if (!r.ok) {
+      d.closed = null; d.rwArchive = prevArchive;
+      A.audit('STEP 5 - CLOSE MONTH FAILED', `Cloud chưa xác nhận: ${r.error}`);
+      A.markDirty('closed', 'rwArchive', 'audit');
+      A.toast(`CHƯA đóng kỳ: cloud không xác nhận (${r.error}). Kiểm tra kết nối / xung đột rồi CLOSE MONTH lại.`, 'block');
+      A.render(); return;
+    }
+  }
+  A.toast(`Kỳ ${S.period} đã ĐÓNG${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Rework WIP chuyển kỳ: ${d.rwArchive.length} dòng / ${A.fmtNum(arcCost)} VND. Bước tiếp: tạo kỳ ${nextP(S.period)} → Roll forward.`, 'pass');
+  A.render();
 }
 export function doReopen() {
   const S = A.S;
   if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được mở lại kỳ đã đóng.', 'review'); return; }
   const reason = (prompt(`Mở lại kỳ ${S.period} đã đóng (để sửa số liệu). Nhập lý do:`, '') || '').trim();
   if (!reason) return;
+  const was = S.d.closed;
   S.d.closed = null;
-  A.audit('STEP 5 - REOPEN PERIOD', reason);
+  A.audit('STEP 5 - REOPEN PERIOD', `${reason} (đóng lúc ${was ? was.closedAt : '?'} bởi ${was ? was.closedBy : '?'})`);
   A.markDirty('closed', 'audit');
   A.toast(`Đã mở lại kỳ ${S.period}. Sau khi sửa: RUN FIFO → BUILD FG HISTORY → CLOSE MONTH.`, 'pass');
 }

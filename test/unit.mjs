@@ -95,6 +95,67 @@ import * as TR from '../src/engine/trace.js';
   }
 }
 
+// ---- Audit 2026-10 group A
+import { directKey, postedKey } from '../src/views/phase2.js';
+import { flKey } from '../src/views/phase3.js';
+import { updatePriceMaster } from '../src/engine/step4.js';
+import { refreshErpMap } from '../src/engine/step3b.js';
+import { buildDataset } from '../src/engine/step1.js';
+import { step2Controls, step3Controls, outOfPeriodRows, fallbackAlloc } from '../src/engine/controls.js';
+import { fp as fpStr } from '../src/engine/util.js';
+{
+  // F-02: moving a direct 622 amount to another PC with the same total changes the key
+  const dA = [{ active: 'Y', erp: 'O', account: 622, pc: 'PC-1', prod: 'A', amount: 100 }, { active: 'Y', erp: 'O', account: 627, pc: 'PC-2', prod: 'B', amount: 50 }];
+  const dB = [{ ...dA[0], pc: 'PC-2', prod: 'B' }, dA[1]];
+  eq('F-02 direct key: same rows any order', directKey([dA[1], dA[0]]), directKey(dA));
+  eq('F-02 direct key: PC moved → changes', directKey(dB) !== directKey(dA), true);
+  eq('F-02 direct key: inactive row ignored', directKey([...dA, { ...dA[0], active: 'N', pc: 'PC-9' }]), directKey(dA));
+  eq('F-02 posted 3B key: amount moved → changes', postedKey(new Map([['O|PC-1|A', { amt: 10 }], ['O|PC-2|B', { amt: 0 }]])) !== postedKey(new Map([['O|PC-1|A', { amt: 0 }], ['O|PC-2|B', { amt: 10 }]])), true);
+  // F-03: same total, cost moved between lots → STEP 5 key changes
+  const L = (a, b) => ({ rows: [{ erp: 'O', pc: 'PC-1', prod: 'A', qty: 1, totalRM: a, t622: 0, t627: 0, totalCost: a }, { erp: 'O', pc: 'PC-2', prod: 'B', qty: 1, totalRM: b, t622: 0, t627: 0, totalCost: b }] });
+  eq('F-03 lot key: redistribution with same total → changes', flKey(L(60, 40)) !== flKey(L(40, 60)), true);
+  eq('F-03 lot key: identical → same', flKey(L(60, 40)), flKey(L(60, 40)));
+  eq('fp deterministic', fpStr('abc'), fpStr('abc'));
+  // F-05: undated sales never silently drop out of FIFO; earlier undated rows do not pile up
+  const und = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 7), 'U1', 'A', 1, 10), { ...row(null, 'U2', 'A', 1, 10), invDate: '' }] }, { rows: sales }, P2);
+  eq('F-05 save counts undated', und.stats.undated, 1);
+  const r5 = F5.runFIFO({ ...ctx({}), salesRows: und.db.rows });
+  eq('F-05 FIFO lists undated row', r5.undated.map((u) => u.inv), ['U2']);
+  const again = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 7), 'U1', 'A', 1, 10)] }, und.db, P2);
+  eq('F-05 resave drops old undated row', [again.stats.droppedUndated, again.db.rows.filter((r) => !r.invDate).length], [1, 0]);
+  // F-23: validation REVIEW of a costed line is counted
+  const rv = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 8), 'V1', 'A', 1, 10), customer: '' }] }, { rows: [] }, P2);
+  eq('F-23 advisory counted', F5.runFIFO({ ...ctx({}), salesRows: rv.db.rows }).stats.advisory, 1);
+  // F-15 / F-21: future SO price and overlapping manual prices are REVIEW
+  const s2pc = { pc: [{ erp: 'O', pcNo: 'PC-1', prod: 'A', rowIdx: 1 }, { erp: 'O', pcNo: 'PC-2', prod: 'B', rowIdx: 2 }] };
+  const pmR = updatePriceMaster({ salesDB: { rows: [{ ...row(ser(2026, 8, 3), 'Z', 'C', 1, 5), include: 'Y' }], savedAt: 'x' }, so: [{ product: 'A', price: 9, soDate: ser(2026, 9, 15), active: 'Y' }],
+    manual: [{ product: 'B', price: 4, effFrom: null, effTo: null }, { product: 'B', price: 5, effFrom: null, effTo: null }], step2: s2pc, period: P2 });
+  eq('F-15 SO after period → REVIEW', pmR.pm.audit.find((a) => a.product === 'A').review, 'REVIEW - SO AFTER PERIOD');
+  eq('F-21 manual overlap → REVIEW', pmR.pm.audit.find((a) => a.product === 'B').review.startsWith('REVIEW - MANUAL OVERLAP'), true);
+  eq('F-21 last manual row still wins (parity)', pmR.pm.rows.find((r) => r.product === 'B').finalPrice, 5);
+  // F-13: existing map row whose movement moved to another ERP is flagged, not overwritten
+  const H = ['Material Code', 'Quantity'];
+  const map0 = { rows: [{ code: 'M1', erp: 'T', review: 'OK', b2Review: 'OK', override: '' }] };
+  const rf = refreshErpMap(map0, { rows: [{ code: 'M1', closingQty: -1, closingAmt: -5 }] }, { 'MI-M-O': { header: H, rows: [['M1', 1]] } }, P2);
+  eq('F-13 ERP change flagged', [rf.nChanged, rf.map.rows[0].erp, rf.map.rows[0].review.startsWith('REVIEW - ERP CHANGED')], [1, 'T', true]);
+  // F-24: NO-DATA file with numbers is refused
+  const grid = [['PC No.', 'Product Code', 'Current Complete Qty', 'Total Cost'], ['PC-1', 'A', 5, 100]];
+  let e24 = ''; try { buildDataset(grid, 'PC-P-O-202608-NO DATA.xlsx', P2); } catch (e) { e24 = e.message; }
+  eq('F-24 NO DATA with rows refused', e24.includes('NO DATA'), true);
+  eq('F-24 empty NO DATA ok', buildDataset([grid[0]], 'PC-P-O-202608-NO DATA.xlsx', P2).status, 'NO DATA');
+  // F-10: rows dated outside the period are reported
+  const dsD = { 'MI-M-O': { header: ['Date', 'Material Code', 'Total Cost'], rows: [[ser(2026, 8, 2), 'M', 5], [ser(2026, 7, 30), 'M', 7], [null, '', 12]] } };
+  eq('F-10 out-of-period rows', outOfPeriodRows(dsD, P2).map((x) => [x.key, x.n, x.amt, x.months.join()]), [['MI-M-O', 1, 7, '2026-07']]);
+  // F-12: broad fallback amount visible in STEP 2 controls
+  const s2 = { period: P2, runAt: 'z', status: 'PASS', total: { src: 100, alloc: 100, unalloc: 0 }, detail: [['O', 'X', '', 1, 100, '', 'O', 'ALL', 'PC-1', '', '', '', '', 1, 1, 100, 'ALLOCATED', 'O fallback ALL.']] };
+  eq('F-12 fallback amount', fallbackAlloc(s2), 100);
+  eq('F-12 fallback > 5% → REVIEW', step2Controls({ period: P2, step2: s2, register: null, latestImport: '' }).rows.find((r) => r.no === '11').status, 'REVIEW');
+  // F-22: ERP S memo rows
+  const s3c = step3Controls({ period: P2, opening: { status: 'READY', period: P2, stats: { totalAmt: 0 } }, step3: { period: P2, runAt: 'z', summary: { opening: 0, inAmt: 0, outAmt: 0, closingAmt: 0 }, checks: { soVsStep2: { value: 0, status: 'PASS' }, pcmVsPcp: { value: 0, status: 'PASS' }, exceptions: { value: 0 } } }, step2: { runAt: 'a' },
+    datasets: { 'MI-M-S': { header: ['Total Cost'], rows: [[30]] }, 'PC-M-S': { header: ['Total Cost'], rows: [[20]] } } });
+  eq('F-22 S memo', s3c.rows.filter((r) => r.no === '11' || r.no === '12').map((r) => [r.actual, r.status]), [[30, 'INFO'], [20, 'INFO']]);
+}
+
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
 import fs from 'node:fs';
 import path from 'node:path';

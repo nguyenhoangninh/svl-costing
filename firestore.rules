@@ -31,15 +31,21 @@ service cloud.firestore {
       allow read: if canRead();
       allow write: if isAdmin();
     }
+    // Closed periods (summary.closed set): only admins may change anything, and only admins may close / reopen.
+    function closedOf(d) { return d.get('summary', {}).get('closed', null); }
+    function periodPath(p) { return /databases/$(database)/documents/svl_costing_periods/$(p); }
+    function periodOpen(p) { return !exists(periodPath(p)) || closedOf(get(periodPath(p)).data) == null; }
     // Periods: editors create / update (revision must go up by exactly 1 → no blind overwrite); only admins delete.
     match /svl_costing_periods/{period} {
       allow read: if canRead();
-      allow create: if canWrite() && request.resource.data.rev == 1;
-      allow update: if canWrite() && request.resource.data.rev == resource.data.get('rev', 0) + 1;
+      allow create: if canWrite() && request.resource.data.rev == 1
+        && (isAdmin() || closedOf(request.resource.data) == null);
+      allow update: if canWrite() && request.resource.data.rev == resource.data.get('rev', 0) + 1
+        && (isAdmin() || (closedOf(resource.data) == null && closedOf(request.resource.data) == null));
       allow delete: if isAdmin();
       match /chunks/{chunk} {
         allow read: if canRead();
-        allow create, update: if canWrite();
+        allow create, update: if isAdmin() || (canWrite() && periodOpen(period));
         allow delete: if isAdmin();
       }
     }

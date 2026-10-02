@@ -2,7 +2,7 @@
 import * as B from '../engine/step3b.js';
 import * as F from '../engine/step4.js';
 import { step2Controls, step3Controls, step3bControls, step4Controls } from '../engine/controls.js';
-import { num, ttxt, txt, utxt, serialToISO, nowISO, isoToSerial } from '../engine/util.js';
+import { num, ttxt, txt, utxt, serialToISO, nowISO, isoToSerial, fpRows } from '../engine/util.js';
 import { RW_FIELDS } from '../engine/step2.js';
 
 let A = null; // app API
@@ -23,7 +23,7 @@ export function derive(S) {
     const balancePass = w.control ? B.balancePassCount(w.control, d.step3) : 0;
     const step4Posted = d.step4 && d.step4.snap ? d.step4.snap.posted3B : null;
     const buildStale = !!(w.control && w.control.fp && w.control.fp !== B.buildFingerprint(w.input, d.erpMap, d.step2, d.step3));
-    const controls = step3bControls({ period, input: w.input, inputD, engine: w.engine, engDyn, detail: w.detail, control: w.control, reg632: w.reg632, wf, balancePass, step3: d.step3, step4Posted, buildStale });
+    const controls = step3bControls({ erpMap: d.erpMap, period, input: w.input, inputD, engine: w.engine, engDyn, detail: w.detail, control: w.control, reg632: w.reg632, wf, balancePass, step3: d.step3, step4Posted, buildStale });
     out.d3b = { inputD, engDyn, wf, posted, engPosted, balancePass, controls, buildStale };
   }
   const s4 = d.step4;
@@ -40,12 +40,16 @@ function directTotals(list) {
   for (const r of list || []) { if (utxt(r.active) !== 'Y') continue; n++; const acc = Math.trunc(num(r.account)); if (acc === 622) d622 += num(r.amount); if (acc === 627) d627 += num(r.amount); }
   return { d622, d627, n };
 }
+/** Audit F-02: which PC / product each active direct 622/627 row goes to – not only the totals. */
+export const directKey = (list) => fpRows((list || []).filter((r) => utxt(r.active) === 'Y'), (r) => [utxt(r.erp), Math.trunc(num(String(r.account ?? '').replace(/[^\d.-]/g, ''))), utxt(r.pc), utxt(r.prod), num(r.amount).toFixed(2)].join('|'));
+export const postedKey = (posted) => fpRows([...(posted || new Map()).entries()], ([k, v]) => `${k}|${num(v.amt).toFixed(2)}`);
 function currentSnap(S, d3b) {
   const d = S.d; const dt = directTotals(d.directAdj);
   return {
     period: S.period, latestImport: A.latestImport(), step2RunAt: d.step2 ? d.step2.runAt : '', step3RunAt: d.step3 ? d.step3.runAt : '',
     dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', pmUpdatedAt: d.pm ? d.pm.updatedAt : '', glPeriod: d.gl ? d.gl.period : '',
     fx: d.gl ? num(d.gl.fx) : 0, gl622: d.gl ? num(d.gl.gl622) : 0, gl627: d.gl ? num(d.gl.gl627) : 0, direct622: dt.d622, direct627: dt.d627, activeDirect: dt.n, posted3B: d3b ? d3b.engPosted : 0,
+    directKey: directKey(d.directAdj), posted3BKey: d3b ? postedKey(d3b.posted) : '',
   };
 }
 /** Why STEP 4 must be rerun, or '' (F-01: covers the whole upstream chain, not only Step 4's own snapshot). */
@@ -64,7 +68,8 @@ function step4Freshness(S, d3b) {
   if (step4StaleReason(S, d3b)) return 'OUTDATED - RERUN REQUIRED';
   const c = currentSnap(S, d3b), p = s4.snap;
   const same = c.period === p.period && c.latestImport === p.latestImport && c.step2RunAt === p.step2RunAt && c.step3RunAt === p.step3RunAt && c.dbSavedAt === p.dbSavedAt && c.pmUpdatedAt === p.pmUpdatedAt
-    && c.glPeriod === p.glPeriod && c.fx === p.fx && c.gl622 === p.gl622 && c.gl627 === p.gl627 && Math.abs(c.direct622 - p.direct622) <= 1 && Math.abs(c.direct627 - p.direct627) <= 1 && c.activeDirect === p.activeDirect && Math.abs(c.posted3B - p.posted3B) <= 1;
+    && c.glPeriod === p.glPeriod && c.fx === p.fx && c.gl622 === p.gl622 && c.gl627 === p.gl627 && Math.abs(c.direct622 - p.direct622) <= 1 && Math.abs(c.direct627 - p.direct627) <= 1 && c.activeDirect === p.activeDirect && Math.abs(c.posted3B - p.posted3B) <= 1
+    && (p.directKey === undefined || c.directKey === p.directKey); // snapshots saved before v1.7 have no key
   return same ? 'CURRENT' : 'OUTDATED - RERUN REQUIRED';
 }
 
@@ -336,9 +341,9 @@ export function doSalesSave() {
     if (pv.from !== null && !confirm(`Validate & Save (${pv.mode})\n\nThay thế toàn bộ dòng cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
     const r = F.validateSaveSales(S.d.salesImport, S.d.salesDB, S.period);
     S.d.salesDB = r.db; if (S.d.pm) S.d.pm.status = 'OUTDATED';
-    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}`);
+    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}; thiếu ngày ${r.stats.undated}${r.stats.droppedUndated ? `; bỏ ${r.stats.droppedUndated} dòng thiếu ngày của lần lưu trước` : ''}`);
     A.markDirty('salesImport', 'salesDB', 'pm', 'audit');
-    A.toast(`Đã lưu ${r.stats.saved} dòng (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ). Price Master → OUTDATED, hãy Update Price Master.`, 'pass');
+    A.toast(`Đã lưu ${r.stats.saved} dòng (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ). Price Master → OUTDATED, hãy Update Price Master.${r.stats.undated ? ` ⚠ ${r.stats.undated} dòng thiếu / sai ngày hoá đơn: STEP 5 sẽ chặn đóng kỳ cho tới khi sửa.` : ''}`, r.stats.undated ? 'review' : 'pass');
   } catch (e) { A.toast('Validate & Save lỗi: ' + e.message, 'block'); }
 }
 export function doPMUpdate() {

@@ -1,7 +1,14 @@
 // Control Center checkpoints (port of 00_CONTROL_CENTER formulas rows 9-70)
-import { ttxt } from './util.js';
+import { ttxt, num, headerCol, isNumeric, cellYM } from './util.js';
 
 const abs = Math.abs;
+export const FALLBACK_REVIEW = 0.05;
+/** Amount allocated through the broad STEP 2 fallbacks ('O fallback ALL', 'S other -> equal T+O'). */
+export function fallbackAlloc(s2) {
+  let a = 0;
+  for (const d of (s2 && s2.detail) || []) { const note = String(d[17] || ''); if (note.includes('fallback ALL') || d[16] === 'FALLBACK EQUAL') a += num(d[15]); }
+  return a;
+}
 function overall(rows, nextOk, nextBad) {
   const st = rows.map((r) => r.status);
   const ok = st.filter((s) => s === 'PASS' || s === 'CURRENT' || s === 'INFO').length;
@@ -14,7 +21,24 @@ function overall(rows, nextOk, nextBad) {
 const cp = (no, label, expected, actual, diff, status, rule) => ({ no, label, expected, actual, diff, status, rule });
 const later = (a, b) => (a || '') >= (b || ''); // ISO timestamps
 
-export function step1Controls(s1, accessLimited = 0) {
+/** audit F-10: rows of an ERP report dated in another month than the costing period (blank dates = total lines, ignored). */
+const dateCache = new WeakMap();
+export function outOfPeriodRows(datasets, period) {
+  const out = [];
+  for (const [k, ds] of Object.entries(datasets || {})) {
+    if (!ds || !ds.rows || !ds.header) continue;
+    let c = dateCache.get(ds);
+    if (!c || c.period !== period) {
+      const dc = headerCol(ds.header, 'Date'), ac = headerCol(ds.header, 'Total Cost');
+      let n = 0, amt = 0; const months = new Set();
+      if (dc >= 0) for (const r of ds.rows) { const ym = cellYM(r[dc]); if (ym && ym !== period) { n++; months.add(ym); if (ac >= 0 && isNumeric(r[ac])) amt += num(r[ac]); } }
+      c = { period, n, amt, months: [...months].sort() }; dateCache.set(ds, c);
+    }
+    if (c.n) out.push({ key: k, n: c.n, amt: c.amt, months: c.months });
+  }
+  return out;
+}
+export function step1Controls(s1, accessLimited = 0, dateIssues = []) {
   const imported = s1.checklist.filter((c) => c.status === 'IMPORTED').length;
   const noData = s1.checklist.filter((c) => c.status === 'NO DATA').length;
   const missing = 21 - imported - noData;
@@ -23,8 +47,9 @@ export function step1Controls(s1, accessLimited = 0) {
     coreReady: `${imported + noData} / 21`, sysReady: `${sysReady} / 3`,
     status: sysReady === 3 && imported + noData === 21 ? 'PASS' : missing === 21 ? 'NOT RUN' : 'REVIEW',
     imported, noData, missing, totalRows: s1.checklist.reduce((a, c) => a + c.dataRows, 0), accessLimited,
-    next: missing === 0 ? 'Chạy STEP 2' : 'Import các báo cáo còn thiếu',
-    result: missing === 0 ? 'PASS' : missing === 21 ? 'NOT RUN' : 'REVIEW',
+    next: missing === 0 ? (dateIssues.length ? `Kiểm tra ${dateIssues.length} báo cáo có dòng ngoài kỳ (STEP 1) rồi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
+    result: missing === 0 ? (dateIssues.length ? 'PASS WITH REVIEW' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
+    dateIssues,
   };
 }
 
@@ -48,6 +73,9 @@ export function step2Controls(st) {
     cp('09', '2B · Dòng Rework bị BLOCK', 0, blocks, blocks, blocks === 0 ? 'PASS' : 'BLOCK', 'Register cột Input Check'),
     cp('10', '2B · Register cập nhật sau STEP 2', s2.runAt, reg ? reg.refreshedAt : '', '', !reg || !reg.refreshedAt ? (curRows.length === 0 ? 'PASS' : 'NOT RUN') : later(reg.refreshedAt, s2.runAt) ? 'CURRENT' : 'RERUN STEP 2', 'Expected = lần chạy STEP 2 | Actual = cập nhật register'),
   ];
+  // audit F-12: Stock Out spread by the broad fallbacks (O → all O lots, S other → equal T+O) is visible, and REVIEW above 5 %
+  const fb = fallbackAlloc(s2);
+  if (s2.detail) rows.push(cp('11', 'Stock Out phân bổ theo quy tắc dự phòng rộng', 'INFO', fb, t.alloc ? fb / t.alloc : 0, fb > 1 && t.alloc && fb / t.alloc > FALLBACK_REVIEW ? 'REVIEW' : 'INFO', `O không khớp Job Code → mọi lô O; S khác → chia đều T+O. REVIEW khi > ${FALLBACK_REVIEW * 100}% Stock Out đã phân bổ`));
   return { rows, ...overall(rows, 'Chạy STEP 3 – Material WIP', 'Xử lý các checkpoint STEP 2 rồi chạy lại STEP 2') };
 }
 
@@ -75,7 +103,19 @@ export function step3Controls(st) {
     cp('09', 'Ngoại lệ cần review', 0, c.exceptions.value, c.exceptions.value, c.exceptions.value === 0 ? 'PASS' : 'REVIEW', 'Số lượng âm / thiếu master data'),
     cp('10', 'Kỳ & freshness', period, s3.period, '', s3.period !== period ? 'BLOCK' : later(s3.runAt, s2 ? s2.runAt : '') && later(s3.runAt, op ? op.changedAt || '' : '') ? 'CURRENT' : 'RERUN STEP 3', 'Chạy sau STEP 2 và sau mọi thay đổi Opening WIP'),
   );
+  // audit F-22: ERP S material issue / consumption is outside the 154 costing (VBA IC_SubsystemMemo) – shown, not costed
+  if (st.datasets) {
+    const mi = dsTotal(st.datasets['MI-M-S']), pc = dsTotal(st.datasets['PC-M-S']);
+    rows.push(cp('11', 'Hệ S: xuất NVL MI-M-S (ngoài giá thành 154)', 'INFO', mi, '', 'INFO', 'STEP 3/4 chỉ tính hệ T và O'),
+      cp('12', 'Hệ S: tiêu hao PC-M-S (ngoài giá thành 154)', 'INFO', pc, mi - pc, 'INFO', 'MI − PC = biến động WIP hệ S, đối chiếu trên FAST'));
+  }
   return { rows, ...overall(rows, 'Chạy STEP 3B – Điều chỉnh WIP trực tiếp', 'Xử lý các checkpoint STEP 3A, chạy lại STEP 3') };
+}
+function dsTotal(ds) {
+  if (!ds || !ds.rows) return 0;
+  const c = headerCol(ds.header, 'Total Cost'); if (c < 0) return 0;
+  let s = 0; for (const r of ds.rows) if (isNumeric(r[c])) s += num(r[c]);
+  return s;
 }
 
 /** Rows whose first column says the ERP user lacked access rights (Control Center M22). */
@@ -128,6 +168,9 @@ export function step3bControls(x) {
     cp('19', 'DIRECT_632 chờ ghi sổ', 0, pending632, pending632, pending632 === 0 ? 'PASS' : 'REVIEW', 'Ghi Nợ/Có 632 trên FAST'),
     cp('20', 'Freshness: Build ≥ STEP 3, Apply ≥ Build', step3 ? step3.runAt : '', appliedAt || builtAt, '', fresh, 'Expected = STEP 3 | Actual = lần Apply'),
   ];
+  // audit F-13: materials whose current-period movement points at another ERP than the map
+  const erpChanged = ((x.erpMap && x.erpMap.rows) || []).filter((r) => String(r.review).startsWith('REVIEW - ERP CHANGED') && !ttxt(r.override)).length;
+  if (x.erpMap) rows.push(cp('21', 'ERP map: vật tư đổi hệ ERP cần xác nhận', 0, erpChanged, erpChanged, erpChanged ? 'REVIEW' : 'PASS', 'Refresh ERP MAP → cột Review = ERP CHANGED → đặt User ERP Override'));
   const o = overall(rows, '', '');
   const s = (i) => rows[i].status;
   let next;
@@ -173,6 +216,9 @@ export function step4Controls(x) {
     cp('12', 'Tất cả cầu nối STEP 4', 'All bridges', fl ? fl.overall : '', '', fl ? fl.overall : 'NOT RUN', '04_RECONCILIATION E18'),
     cp('13', 'Freshness (snapshot vs dữ liệu vào)', 'CURRENT', freshness, '', freshness === 'CURRENT' ? 'CURRENT' : freshness === 'NOT RUN' ? 'NOT RUN' : 'RERUN STEP 4', 'Chạy lại STEP 4 khi dữ liệu trước đó thay đổi'),
   ];
+  // audit F-15 / F-21: prices that need a person to confirm them
+  const flagged = pm && pm.audit ? pm.audit.filter((a) => /^REVIEW - (SO AFTER PERIOD|MANUAL OVERLAP)/.test(String(a.review))) : [];
+  if (pm && pm.audit) rows.push(cp('14', 'Giá bán cần xác nhận (SO sau kỳ / giá thủ công trùng)', 0, flagged.length, flagged.length, flagged.length ? 'REVIEW' : 'PASS', flagged.length ? flagged.slice(0, 5).map((a) => a.product).join(', ') + (flagged.length > 5 ? '…' : '') : 'Price Master cột Review'));
   const o = overall(rows, '', '');
   const s = (i) => rows[i].status;
   const next = s(0) !== 'PASS' ? 'Validate & lưu doanh thu' : s(1) !== 'PASS' || s(2) !== 'PASS' ? 'Chạy UPDATE PRICE / xử lý giá thiếu' : s(3) !== 'PASS' && !s4 ? 'Nhập FX / GL rồi chạy STEP 4' : s(3) !== 'PASS' ? 'Hoàn tất FX / GL' : s(12) !== 'CURRENT' || s(7) !== 'PASS' ? 'Chạy STEP 4' : o.status.startsWith('PASS') ? 'Chạy STEP 5 – FIFO COGS' : 'Xem lại cầu nối STEP 4';

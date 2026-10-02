@@ -75,6 +75,18 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 | Nhập số (F-16) | Ô số chấp nhận 26300, 1,5, 15.506.701.812, 1,234.56…; số mơ hồ như 26.300 bị hỏi lại. |
 | CI (F-12) | GitHub Actions kiểm tra cú pháp + bộ test kiểm soát tổng hợp (`test/unit.mjs`) mỗi lần đẩy code. Test đối chiếu Excel (`npm run test:golden`) chạy với dữ liệu thật ngoài repo. |
 
+### Bổ sung theo audit 02/10/2026 (nhóm A – không đổi số giá thành)
+
+| Kiểm soát | Cách hoạt động |
+|---|---|
+| Freshness theo phân bổ (F-02, F-03) | STEP 4 OUTDATED khi một dòng 622/627 trực tiếp đổi PC/sản phẩm dù tổng không đổi. STEP 5 OUTDATED khi giá thành từng lô ở STEP 4 đổi (3B / rework chuyển giữa các lô) hoặc khi sửa lựa chọn xử lý FIFO (override). |
+| Chuyển kỳ (F-06) | Opening WIP / Rework B/F chỉ tự chuyển từ kỳ đã ĐÓNG (Rework lấy từ số lưu trữ lúc đóng kỳ). Kỳ trước chưa đóng: phải nhập lý do. Số đã chuyển lưu dấu nguồn; kỳ trước đổi sau đó → Control Center báo và chặn đóng kỳ đến khi roll forward lại. |
+| Dòng bán thiếu ngày (F-05, F-23) | Dòng thiếu / sai ngày hoá đơn chặn đóng kỳ (không còn bị bỏ qua lặng lẽ) và không tích luỹ qua các lần lưu. Dòng FIFO có cảnh báo kiểm tra dữ liệu bán được đếm (REVIEW). |
+| Đóng kỳ (F-16, F-25) | Chỉ Quản trị được CLOSE MONTH. Khi dùng cloud, kỳ chỉ ĐÓNG sau khi cloud xác nhận; lỗi mạng → không đóng. Firestore rules: kỳ đã đóng chỉ Quản trị ghi được, chỉ Quản trị đóng / mở kỳ. **Cần dán lại `firestore.rules`.** |
+| Nhật ký cloud (F-26) | Tải đủ mọi sự kiện của kỳ theo trang, sắp theo giờ server. |
+| Cầu nối 154 (F-17) | STEP 5 checkpoint 15a = công thức F200 của Excel (WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối − rework WIP cuối). |
+| Cảnh báo REVIEW (F-10…F-24) | Dòng ERP ngày ngoài kỳ, file không có kỳ trong tên, file NO DATA có số liệu (bị từ chối), Stock Out phân bổ dự phòng rộng > 5%, vật tư đổi hệ ERP, giá từ SO sau kỳ, giá thủ công trùng thời gian, lớp không ngày ở STRICT_DATE, ghi chú hệ S (MI-M-S / PC-M-S). |
+
 ## Bảo mật dữ liệu
 
 - Repo này chỉ chứa **code**. Không commit file ERP, file Costing Master hay dữ liệu xuất ra (`.gitignore` đã chặn `*.xlsx`, `*.xlsm`, `*.xls`).

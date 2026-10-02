@@ -45,6 +45,9 @@ await page.goto(base + '#step4'); await page.click('[data-act=run-step4]'); awai
 await page.goto(base + '#step5'); await page.click('[data-act=s5-run]'); await page.waitForTimeout(1500);
 await page.goto(base + '#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-hist]'); await page.waitForTimeout(1200);
+await page.goto(base + '#cc'); await page.waitForTimeout(400);
+for (const k of ['Cầu nối TK 154', 'Cầu nối TK 155', 'thiếu / sai ngày', 'cảnh báo kiểm tra dữ liệu bán', 'Hệ S: xuất', 'dự phòng rộng', 'Giá bán cần xác nhận', 'ERP map: vật tư đổi']) console.log('CP', k, '|', ((await txt('main')).match(new RegExp(k + '.{0,90}')) || ['(không thấy)'])[0]);
+await page.goto(base + '#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-close]'); await page.waitForTimeout(1200);
 console.log('after close:', await txt('.result'));
 await shot('35-closed.png');
