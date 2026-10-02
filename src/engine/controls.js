@@ -95,8 +95,11 @@ export function step2Controls(st) {
     cp('10', '2B · Register cập nhật sau STEP 2', s2.runAt, reg ? reg.refreshedAt : '', '', !reg || !reg.refreshedAt ? (curRows.length === 0 ? 'PASS' : 'NOT RUN') : later(reg.refreshedAt, s2.runAt) ? 'CURRENT' : 'RERUN STEP 2', 'Expected = lần chạy STEP 2 | Actual = cập nhật register'),
   ];
   // audit F-12: Stock Out spread by the broad fallbacks (O → all O lots, S other → equal T+O) is visible, and REVIEW above 5 %
-  const fb = fallbackAlloc(s2);
-  if (s2.detail) rows.push(cp('11', 'Stock Out phân bổ theo quy tắc dự phòng rộng', 'INFO', fb, t.alloc ? fb / t.alloc : 0, fb > 1 && t.alloc && fb / t.alloc > FALLBACK_REVIEW ? 'REVIEW' : 'INFO', `O không khớp Job Code → mọi lô O; S khác → chia đều T+O. REVIEW khi > ${FALLBACK_REVIEW * 100}% Stock Out đã phân bổ`));
+  const fb = fallbackAlloc(s2), fr = t.alloc ? Math.abs(fb / t.alloc) : 0;
+  const needFbApproval = Math.abs(fb) > 1 && fr > FALLBACK_REVIEW;
+  const ap = s2.fallbackApproval;
+  const fbApproved = !!(ap && Math.abs(num(ap.amount) - fb) <= 1 && Math.abs(num(ap.totalAlloc) - num(t.alloc)) <= 1);
+  if (s2.detail) rows.push(cp('11', 'Stock Out phân bổ theo quy tắc dự phòng rộng', needFbApproval ? 'APPROVAL REQUIRED' : 'INFO', fb, fr, needFbApproval ? (fbApproved ? 'REVIEW - APPROVED' : 'BLOCK - APPROVAL') : 'INFO', `O không khớp Job Code → mọi lô O; S khác → chia đều T+O. > ${FALLBACK_REVIEW * 100}% phải được Quản trị xác nhận kèm lý do`));
   return { rows, ...overall(rows, 'Chạy STEP 3 – Material WIP', 'Xử lý các checkpoint STEP 2 rồi chạy lại STEP 2') };
 }
 
