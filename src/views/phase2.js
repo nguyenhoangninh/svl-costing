@@ -412,7 +412,7 @@ export function view4(el) {
   if (!s4) { box.innerHTML = A.emptyNote('Chưa chạy STEP 4.'); return; }
   if (tab === 'ca' && fl) {
     const T = { qty: 'qty', pcRM: 'num', so: 'num', baseRM: 'num', price: 'qty', fx: 'qty', salesUSD: 'num', salesVND: 'num', contrib: 'num', eligible: 'num', weight: 'pct', d622: 'num', d627: 'num', c622: 'num', c627: 'num', t622: 'num', t627: 'num', baseCost: 'num', unitCost: 'num', rmPct: 'pct', p622: 'pct', p627: 'pct', gpPct: 'pct', wipAdj: 'num', totalRM: 'num', totalCost: 'num', finalUnit: 'num', carryIn: 'num', date: 'date' };
-    const cols = F.CA_FIELDS.map((f, i) => ({ key: f, label: F.CA_HEADERS[i], type: T[f] || 'text', width: f === 'name' ? 240 : T[f] === 'num' ? 140 : f === 'statusText' ? 200 : 110 }));
+    const cols = F.CA_FIELDS.map((f, i) => ({ key: f, label: F.CA_HEADERS[i], type: T[f] || 'text', width: f === 'name' ? 240 : T[f] === 'num' ? 140 : f === 'statusText' ? 200 : f === 'prod' ? 150 : 110, trace: f === 'prod' }));
     A.mountTable(box, { columns: cols, rows: fl.rows, filterKey: 'fam', height: 540, totals: ['qty', 'pcRM', 'so', 'baseRM', 'salesVND', 't622', 't627', 'baseCost', 'wipAdj', 'totalRM', 'totalCost', 'carryIn'], onExport: A.exportTable('04_COST_ALLOCATION', cols) });
   } else if (tab === 'rec') {
     const rr = (r) => `<tr><td>${esc(r.label)}</td><td class="r">${A.cpVal(r.expected)}</td><td class="r">${A.cpVal(r.result)}</td><td class="r">${A.cpVal(r.diff)}</td><td>${A.pill(r.status)}</td><td class="muted">${esc(r.note || '')}</td></tr>`;

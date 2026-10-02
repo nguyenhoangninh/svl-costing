@@ -11,7 +11,7 @@ export function mountTable(el, cfg) {
   const cols = cfg.columns;
   const val = (r, c) => (Array.isArray(r) ? r[c.key] : r[c.key]);
   let view = cfg.rows.slice();
-  let sortCol = null, sortDir = 1, query = '', statusFilter = '';
+  let sortCol = null, sortDir = 1, query = cfg.query || '', statusFilter = '';
   const filterKey = cfg.filterKey;
   const statuses = filterKey ? [...new Set(cfg.rows.map((r) => String(val(r, cols.find((c) => c.key === filterKey)) ?? '')))].filter(Boolean).sort() : [];
 
@@ -92,10 +92,15 @@ export function mountTable(el, cfg) {
       return `<td class="ed"><input data-k="${c.key}" ${c.type === 'date' ? 'type="date"' : right ? 'inputmode="decimal"' : ''} value="${esc(shown)}"></td>`;
     }
     if (c.type === 'status') return `<td><span class="pill ${statusClass(v)}">${esc(v ?? '')}</span></td>`;
+    if (c.trace && v) return `<td><a class="tr-link" href="#trace=${encodeURIComponent(v)}" title="Truy xuất giá thành ${esc(v)}">${esc(v)}</a></td>`;
+    if (c.flag) return `<td class="${v ? 'flag-cell' : ''}" title="${esc(v ?? '')}">${esc(v ?? '')}</td>`;
     return `<td class="${right ? 'r' : ''}${typeof v === 'number' && v < 0 && right ? ' neg' : ''}" title="${esc(c.type === 'text' || !c.type ? v ?? '' : '')}">${fmtCell(v, c.type)}</td>`;
   }
 
   scroll.addEventListener('scroll', () => render(false), { passive: true });
+  if (query) el.querySelector('.vt-search').value = query;
+  if (cfg.onRowClick) el.classList.add('vt-click');
+  if (cfg.onRowClick) tbody.addEventListener('click', (e) => { if (e.target.closest('a,input,select,button')) return; const tr = e.target.closest('tr[data-v]'); if (tr) cfg.onRowClick(view[+tr.dataset.v]); });
   el.querySelector('.vt-search').addEventListener('input', (e) => { query = e.target.value; apply(); });
   const fsel = el.querySelector('.vt-filter');
   if (fsel) fsel.addEventListener('change', (e) => { statusFilter = e.target.value; apply(); });

@@ -10,6 +10,7 @@ import * as store from './store.js';
 import { APP_VERSION } from './config.js';
 import * as P2 from './views/phase2.js';
 import * as P3 from './views/phase3.js';
+import * as TRV from './views/trace.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS];
@@ -316,6 +317,7 @@ const NAV = [
   { id: 'close', no: '5.3', label: 'FG History & đóng kỳ', sub: 'Đóng kỳ', key: 's5c' },
 ];
 const TOOLS = [
+  { id: 'trace', label: 'Truy xuất giá thành sản phẩm' },
   { id: 'data', label: 'Dữ liệu ERP đã import' },
   { id: 'audit', label: 'Nhật ký' },
   { id: 'settings', label: 'Kỳ, cloud & chuyển đổi' },
@@ -393,6 +395,7 @@ VIEWS.step4 = (el) => P2.view4(el);
 VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.close = (el) => P3.viewClose(el);
+VIEWS.trace = (el) => TRV.viewTrace(el);
 
 VIEWS.cc = (el) => {
   const st = statusAll(); const rs = railStatus(st); const s2 = S.d.step2, s3 = S.d.step3;
@@ -1032,7 +1035,13 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('submit', async (e) => {
   if (e.target.id === 'f-new') { e.preventDefault(); const p = new FormData(e.target).get('p').trim(); if (!isPeriod(p)) { toast('Kỳ phải có dạng YYYY-MM.', 'block'); return; } await openPeriod(p); markDirty('audit'); }
 });
-window.addEventListener('hashchange', () => { S.view = location.hash.slice(1) || 'cc'; closeNav(); render(); });
+/** '#view' or '#trace=PRODUCT' */
+function routeFromHash() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  const i = h.indexOf('=');
+  if (i >= 0) { S.view = h.slice(0, i) || 'cc'; if (S.view === 'trace') S.traceProd = h.slice(i + 1); } else S.view = h || 'cc';
+}
+window.addEventListener('hashchange', () => { routeFromHash(); closeNav(); render(); window.scrollTo(0, 0); });
 
 // ======================= installed app (PWA): drawer, install, update, offline =======================
 const isPhone = () => matchMedia('(max-width: 699px)').matches;
@@ -1103,11 +1112,12 @@ window.addEventListener('online', () => { renderSync(); toast('Đã có mạng t
 window.addEventListener('offline', () => { renderSync(); toast('Mất kết nối mạng – xem được dữ liệu trên máy, thay đổi sẽ đồng bộ khi có mạng.', 'review'); });
 
 P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
+TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
 P3.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
 // ======================= boot =======================
 (async function boot() {
-  S.view = location.hash.slice(1) || 'cc';
+  routeFromHash();
   await refreshPeriods();
   const last = localStorage.getItem('svl.period');
   if (last && isPeriod(last)) await openPeriod(last); else if (S.periods[0]) await openPeriod(S.periods[0]); else render();
