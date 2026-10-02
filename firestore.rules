@@ -35,19 +35,33 @@ service cloud.firestore {
     function closedOf(d) { return d.get('summary', {}).get('closed', null); }
     function periodPath(p) { return /databases/$(database)/documents/svl_costing_periods/$(p); }
     function periodOpen(p) { return !exists(periodPath(p)) || closedOf(get(periodPath(p)).data) == null; }
-    // Periods: editors create / update (revision must go up by exactly 1 → no blind overwrite); only admins delete.
+    // Periods: optimistic revisioning. CLOSED periods are immutable until an explicit admin REOPEN revision.
     match /svl_costing_periods/{period} {
       allow read: if canRead();
       allow create: if canWrite() && request.resource.data.rev == 1
         && (isAdmin() || closedOf(request.resource.data) == null);
       allow update: if canWrite() && request.resource.data.rev == resource.data.get('rev', 0) + 1
-        && (isAdmin() || (closedOf(resource.data) == null && closedOf(request.resource.data) == null));
-      allow delete: if isAdmin();
+        && (
+          // Normal work while the existing period is open. Editors cannot close a period.
+          (closedOf(resource.data) == null && (isAdmin() || closedOf(request.resource.data) == null))
+          ||
+          // Explicit REOPEN: admin only, CLOSED → open, and the only manifest change is the closed-state blob.
+          (isAdmin() && closedOf(resource.data) != null && closedOf(request.resource.data) == null
+            && request.resource.data.blobs.diff(resource.data.blobs).affectedKeys().hasOnly(['closed']))
+        );
+      // Draft/open periods may be deleted by admin; a CLOSED accounting period must be reopened first.
+      allow delete: if isAdmin() && closedOf(resource.data) == null;
       match /chunks/{chunk} {
         allow read: if canRead();
-        // Even admins must REOPEN the parent period first; CLOSED data chunks are immutable.
         allow create, update: if canWrite() && periodOpen(period);
-        allow delete: if isAdmin();
+        allow delete: if isAdmin() && periodOpen(period);
+      }
+      // Immutable manifest snapshot for every committed cloud revision.
+      match /revisions/{revision} {
+        allow read: if canRead();
+        allow create: if canWrite() && request.resource.data.by == myEmail()
+          && request.resource.data.period == period;
+        allow update, delete: if false;
       }
     }
     // Append-only audit trail: anyone who can write data can add own events; nobody can change or delete them.
