@@ -1,6 +1,6 @@
 // Synthetic control tests (no private fixtures needed) — run in CI on every push / PR.
-import { parseUserNumber } from '../src/engine/util.js';
-import { validateSaveSales, salesCoverage } from '../src/engine/step4.js';
+import { parseUserNumber, cellDateSerial } from '../src/engine/util.js';
+import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.js';
 import { buildFingerprint } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
 
@@ -11,6 +11,9 @@ const ser = (y, m, d) => (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 8640
 // ---- F-16 user number parsing
 for (const [s, v] of [['26300', 26300], ['1,5', 1.5], ['1.5', 1.5], ['15.506.701.812', 15506701812], ['15,506,701,812', 15506701812], ['1.234.567,89', 1234567.89], ['1,234,567.89', 1234567.89], ['(1.000.000)', -1000000], ['-0,125', -0.125], ['', null]]) eq(`parse ${s}`, parseUserNumber(s).value, v);
 for (const s of ['26.300', '1,500', 'abc', '1.2.3', '1,23,4']) eq(`reject ${s}`, parseUserNumber(s).ok, false);
+eq('date valid leap day', cellDateSerial('2028-02-29') !== null, true);
+eq('date rejects non-leap 29/02', cellDateSerial('2027-02-29'), null);
+eq('date rejects 31/04', cellDateSerial('31/04/2026'), null);
 
 // ---- F-05 sales coverage by mode
 const P = '2026-10';
@@ -116,23 +119,24 @@ import { fp as fpStr } from '../src/engine/util.js';
   eq('F-03 lot key: redistribution with same total → changes', flKey(L(60, 40)) !== flKey(L(40, 60)), true);
   eq('F-03 lot key: identical → same', flKey(L(60, 40)), flKey(L(60, 40)));
   eq('fp deterministic', fpStr('abc'), fpStr('abc'));
-  // F-05: undated sales never silently drop out of FIFO; earlier undated rows do not pile up
-  const und = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 7), 'U1', 'A', 1, 10), { ...row(null, 'U2', 'A', 1, 10), invDate: '' }] }, { rows: sales }, P2);
-  eq('F-05 save counts undated', und.stats.undated, 1);
-  const r5 = F5.runFIFO({ ...ctx({}), salesRows: und.db.rows });
-  eq('F-05 FIFO lists undated row', r5.undated.map((u) => u.inv), ['U2']);
-  const again = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 7), 'U1', 'A', 1, 10)] }, und.db, P2);
-  eq('F-05 resave drops old undated row', [again.stats.droppedUndated, again.db.rows.filter((r) => !r.invDate).length], [1, 0]);
+  // F-05 v1.9: invalid/blank recognition dates are blocked before they can enter Sales DB
+  let undErr = '';
+  try { validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 7), 'U1', 'A', 1, 10), { ...row(null, 'U2', 'A', 1, 10), invDate: '' }] }, { rows: sales }, P2); } catch (e) { undErr = e.message; }
+  eq('F-05 undated sales blocked at save', undErr.includes('BLOCK'), true);
+  let billErr = '';
+  try { validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 7), 'UB', 'A', 1, 10), billDate: '31/02/2026' }] }, { rows: [] }, P2); } catch (e) { billErr = e.message; }
+  eq('F-05 supplied invalid Bill Date never falls back', billErr.includes('BLOCK'), true);
   // F-23: validation REVIEW of a costed line is counted
   const rv = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 8), 'V1', 'A', 1, 10), customer: '' }] }, { rows: [] }, P2);
   eq('F-23 advisory counted', F5.runFIFO({ ...ctx({}), salesRows: rv.db.rows }).stats.advisory, 1);
-  // F-15 / F-21: future SO price and overlapping manual prices are REVIEW
+  // F-15 / F-21 v1.9: future SO price and overlapping manual prices are hard price-policy blocks
   const s2pc = { pc: [{ erp: 'O', pcNo: 'PC-1', prod: 'A', rowIdx: 1 }, { erp: 'O', pcNo: 'PC-2', prod: 'B', rowIdx: 2 }] };
   const pmR = updatePriceMaster({ salesDB: { rows: [{ ...row(ser(2026, 8, 3), 'Z', 'C', 1, 5), include: 'Y' }], savedAt: 'x' }, so: [{ product: 'A', price: 9, soDate: ser(2026, 9, 15), active: 'Y' }],
     manual: [{ product: 'B', price: 4, effFrom: null, effTo: null }, { product: 'B', price: 5, effFrom: null, effTo: null }], step2: s2pc, period: P2 });
-  eq('F-15 SO after period → REVIEW', pmR.pm.audit.find((a) => a.product === 'A').review, 'REVIEW - SO AFTER PERIOD');
-  eq('F-21 manual overlap → REVIEW', pmR.pm.audit.find((a) => a.product === 'B').review.startsWith('REVIEW - MANUAL OVERLAP'), true);
-  eq('F-21 last manual row still wins (parity)', pmR.pm.rows.find((r) => r.product === 'B').finalPrice, 5);
+  eq('F-15 SO after period → BLOCK', pmR.pm.audit.find((a) => a.product === 'A').review, 'BLOCK - SO AFTER PERIOD');
+  eq('F-21 manual overlap → BLOCK', pmR.pm.audit.find((a) => a.product === 'B').review.startsWith('BLOCK - MANUAL OVERLAP'), true);
+  eq('F-21 overlap does not silently choose last row', pmR.pm.rows.find((r) => r.product === 'B').finalPrice, null);
+  eq('F-15/F-21 Price Master overall blocked', pmR.pm.status, 'BLOCKED - PRICE POLICY');
   // F-13: existing map row whose movement moved to another ERP is flagged, not overwritten
   const H = ['Material Code', 'Quantity'];
   const map0 = { rows: [{ code: 'M1', erp: 'T', review: 'OK', b2Review: 'OK', override: '' }] };
@@ -143,15 +147,18 @@ import { fp as fpStr } from '../src/engine/util.js';
   let e24 = ''; try { buildDataset(grid, 'PC-P-O-202608-NO DATA.xlsx', P2); } catch (e) { e24 = e.message; }
   eq('F-24 NO DATA with rows refused', e24.includes('NO DATA'), true);
   eq('F-24 empty NO DATA ok', buildDataset([grid[0]], 'PC-P-O-202608-NO DATA.xlsx', P2).status, 'NO DATA');
-  // F-10: rows dated outside the period are reported
-  const dsD = { 'MI-M-O': { header: ['Date', 'Material Code', 'Total Cost'], rows: [[ser(2026, 8, 2), 'M', 5], [ser(2026, 7, 30), 'M', 7], [null, '', 12]] } };
-  eq('F-10 out-of-period rows', outOfPeriodRows(dsD, P2).map((x) => [x.key, x.n, x.amt, x.months.join()]), [['MI-M-O', 1, 7, '2026-07']]);
+  // F-10 v1.9: outside-period, blank and invalid ERP transaction dates all block
+  const dsD = { 'MI-M-O': { header: ['Date', 'Material Code', 'Total Cost'], rows: [[ser(2026, 8, 2), 'M', 5], [ser(2026, 7, 30), 'M', 7], [null, '', 12], ['31/02/2026', 'M2', 8]] } };
+  const di = outOfPeriodRows(dsD, P2);
+  eq('F-10 ERP date issues classified', di.map((x) => [x.key, x.n, x.outside, x.blank, x.invalid, x.amt, x.months.join()]), [['MI-M-O', 3, 1, 1, 1, 27, '2026-07']]);
   const s1Stub = { checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } };
-  eq('F-10 STEP 1 blocks when ERP rows are outside period', step1Controls(s1Stub, 0, outOfPeriodRows(dsD, P2)).result, 'BLOCK - ERP ROW PERIOD');
+  eq('F-10 STEP 1 blocks ERP date integrity', step1Controls(s1Stub, 0, di).result, 'BLOCK - ERP DATE CONTROL');
   // F-12: broad fallback amount visible in STEP 2 controls
   const s2 = { period: P2, runAt: 'z', status: 'PASS', total: { src: 100, alloc: 100, unalloc: 0 }, detail: [['O', 'X', '', 1, 100, '', 'O', 'ALL', 'PC-1', '', '', '', '', 1, 1, 100, 'ALLOCATED', 'O fallback ALL.']] };
   eq('F-12 fallback amount', fallbackAlloc(s2), 100);
-  eq('F-12 fallback > 5% → REVIEW', step2Controls({ period: P2, step2: s2, register: null, latestImport: '' }).rows.find((r) => r.no === '11').status, 'REVIEW');
+  eq('F-12 fallback > 5% → BLOCK until approval', step2Controls({ period: P2, step2: s2, register: null, latestImport: '' }).rows.find((r) => r.no === '11').status, 'BLOCK - APPROVAL');
+  s2.fallbackApproval = { amount: 100, totalAlloc: 100, by: 'reviewer', reason: 'Reviewed source allocation' };
+  eq('F-12 approved material fallback → REVIEW', step2Controls({ period: P2, step2: s2, register: null, latestImport: '' }).rows.find((r) => r.no === '11').status, 'REVIEW - APPROVED');
   // F-22: ERP S memo rows
   const s3c = step3Controls({ period: P2, opening: { status: 'READY', period: P2, stats: { totalAmt: 0 } }, step3: { period: P2, runAt: 'z', summary: { opening: 0, inAmt: 0, outAmt: 0, closingAmt: 0 }, checks: { soVsStep2: { value: 0, status: 'PASS' }, pcmVsPcp: { value: 0, status: 'PASS' }, exceptions: { value: 0 } } }, step2: { runAt: 'a' },
     datasets: { 'MI-M-S': { header: ['Total Cost'], rows: [[30]] }, 'PC-M-S': { header: ['Total Cost'], rows: [[20]] } } });
@@ -191,7 +198,7 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const pmBill = updatePriceMaster({ salesDB: { rows: bl, savedAt: 'x' }, so: [], manual: [], step2: { pc: [{ erp: 'O', pcNo: 'PC-1', prod: 'A', rowIdx: 1 }] }, period: P2 }).pm;
   eq('#5 Price Master uses bill-date recognition month', pmBill.rows.find((x) => x.product === 'A').finalPrice, 10);
   // #6 return at the original sale's COGS (opening layer 100/unit), with Original Invoice No.
-  const rt = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), origInv: 'X1' }] }, { rows: [] }, P2).db.rows;
+  const rt = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'X1' }] }, { rows: [] }, P2).db.rows;
   let mret = ''; try { F5.runFIFO({ ...ctx({}), salesRows: rt }); } catch (e) { mret = e.message; }
   eq('#6 MONTHLY return requires STRICT_DATE', mret.includes('STRICT_DATE'), true);
   const rr = F5.runFIFO({ ...ctx({}), salesRows: rt, mode: 'STRICT_DATE' });
@@ -199,12 +206,25 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('#6 return restored at original cost', [ln.fin, ln.status, Math.round(ln.tot)], ['RETURN', 'RETURNED', -100]);
   eq('#6 net COGS and roll-forward', [Math.round(rr.totals.cogsQ), Math.round(rr.totals.cogsA), rr.rec[8].status, rr.rec[9].status, rr.rec[10].status, rr.rec[11].status], [2, 200, 'PASS', 'PASS', 'PASS', 'PASS']);
   eq('#6 return layer in closing', rr.closing.some((c) => c.source === 'RETURN' && c.qty === 1), true);
-  const rn = F5.runFIFO({ ...ctx({}), mode: 'STRICT_DATE', salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN2', 'A', -1, -10), origInv: 'NOPE' }] }, { rows: [] }, P2).db.rows });
+  const rh = F5.buildHistory(rr, [], { period: P2, opening, caRows: ca });
+  eq('#6 return reversal included in FG History', rh.rows.some((h) => h.source === 'SALES RETURN REVERSAL' && h.qty === -1 && Math.round(h.tot) === -100), true);
+  eq('#6 return → FG History gate PASS', F5.historyGate(rh, rr, P2).gate, 'PASS');
+  const credit = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 21), 'CR1', 'A', -1, -10), tranType: 'CREDIT NOTE' }] }, { rows: [] }, P2).db.rows;
+  const cr = F5.runFIFO({ ...ctx({}), salesRows: credit, mode: 'STRICT_DATE' });
+  eq('#6 CREDIT NOTE has no physical FG/COGS movement', [cr.sales[0].fin, cr.stats.returns, cr.totals.cogsQ], ['NO COGS', 0, 0]);
+  const multi = validateSaveSales({ mode: 'MONTHLY', rows: [
+    { ...row(ser(2026, 8, 5), 'ML1', 'A', 2, 20), lineNo: '1' },
+    { ...row(ser(2026, 8, 5), 'ML1', 'A', 3, 30), lineNo: '2' },
+    { ...row(ser(2026, 8, 12), 'ML-CN', 'A', -4, -40), tranType: 'SALES RETURN', origInv: 'ML1' },
+  ] }, { rows: [] }, P2).db.rows;
+  const mr = F5.runFIFO({ ...ctx({}), salesRows: multi, mode: 'STRICT_DATE' });
+  eq('#6 multi-line original invoice aggregates returnable qty', [mr.sales.find((x) => x.inv === 'ML-CN').status, Math.round(mr.totals.cogsQ)], ['RETURNED', 1]);
+  const rn = F5.runFIFO({ ...ctx({}), mode: 'STRICT_DATE', salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN2', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'NOPE' }] }, { rows: [] }, P2).db.rows });
   eq('#6 original not found → REVIEW', rn.sales[0].fin, 'REVIEW');
   // return becomes an inventory layer at its return date and can feed a later sale in STRICT_DATE
   const rtFlow = validateSaveSales({ mode: 'MONTHLY', rows: [
     row(ser(2026, 8, 5), 'R-ORIG', 'A', 10, 100),
-    { ...row(ser(2026, 8, 10), 'R-CN', 'A', -5, -50), origInv: 'R-ORIG' },
+    { ...row(ser(2026, 8, 10), 'R-CN', 'A', -5, -50), tranType: 'SALES RETURN', origInv: 'R-ORIG' },
     row(ser(2026, 8, 20), 'R-NEXT', 'A', 5, 50),
   ] }, { rows: [] }, P2).db.rows;
   const unrelatedCA = [{ pc: 'PC-Z', date: ser(2026, 8, 1), prod: 'Z', name: 'Z', qty: 1, totalRM: 0, t622: 0, t627: 0, totalCost: 0, statusText: '' }];
@@ -214,11 +234,22 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   // cumulative returns cannot exceed the original sale
   const rtOver = validateSaveSales({ mode: 'MONTHLY', rows: [
     row(ser(2026, 8, 5), 'R2-ORIG', 'A', 3, 30),
-    { ...row(ser(2026, 8, 10), 'R2-CN1', 'A', -2, -20), origInv: 'R2-ORIG' },
-    { ...row(ser(2026, 8, 11), 'R2-CN2', 'A', -2, -20), origInv: 'R2-ORIG' },
+    { ...row(ser(2026, 8, 10), 'R2-CN1', 'A', -2, -20), tranType: 'SALES RETURN', origInv: 'R2-ORIG' },
+    { ...row(ser(2026, 8, 11), 'R2-CN2', 'A', -2, -20), tranType: 'SALES RETURN', origInv: 'R2-ORIG' },
   ] }, { rows: [] }, P2).db.rows;
   const rOver = F5.runFIFO({ ...ctx({}), salesRows: rtOver, mode: 'STRICT_DATE' });
   eq('#6 cumulative return above sold qty → REVIEW', rOver.sales.find((x) => x.inv === 'R2-CN2').fin, 'REVIEW');
+  // #8 zero-production month: STEP 4 can be zero and STEP 5 sells from Opening FG only
+  const zS2 = { status: 'PASS', period: P2, pc: [], total: { alloc: 0 } };
+  const zS3 = { period: P2, summary: { outAmt: 0, mrAmt: 0 }, checks: { soVsStep2: { status: 'PASS' }, pcmVsPcp: { status: 'PASS' }, exceptions: { value: 0 } } };
+  const zPM = { rows: [{ product: 'A', finalPrice: 10 }], status: 'CURRENT' };
+  const zGL = { fx: 25000, gl622: 0, gl627: 0 };
+  const z4 = runStep4({ period: P2, step2: zS2, step3: zS3, pm: zPM, gl: zGL, directAdj: [] });
+  eq('#8 STEP 4 zero-production valid', [z4.zeroProduction, z4.blocked, z4.rows.length], [true, false, 0]);
+  const zSales = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 9), 'ZSALE', 'A', 2, 20)] }, { rows: [] }, P2).db.rows;
+  const z5 = F5.runFIFO({ period: P2, opening, caRows: [], salesRows: zSales, pmRows: zPM.rows, fx: 25000, overrides: {}, dupDecisions: {}, mode: 'MONTHLY', tol: 1, step4: { current: 'CURRENT', overall: 'PASS', finalCost: 0, qty: 0 } });
+  eq('#8 opening-FG-only FIFO works', [Math.round(z5.totals.prodQ), Math.round(z5.totals.cogsQ), Math.round(z5.totals.closeQ)], [0, 2, 8]);
+
   // #7 NRV with 1.5 % selling cost: unit cost 100, price 4 USD × 25000 = 100000 → NRV 98500; here cost 100 VND so no provision; force price low
   const nv = F5.runFIFO({ ...ctx({}), pmRows: [{ product: 'A', finalPrice: 0.004 }], sellCostRate: 0.015 }); // price 100 VND, NRV 98.5
   const cl = nv.closing.find((c) => c.prod === 'A');
