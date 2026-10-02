@@ -207,7 +207,8 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   ] }, { rows: [] }, P2).db.rows;
   const unrelatedCA = [{ pc: 'PC-Z', date: ser(2026, 8, 1), prod: 'Z', name: 'Z', qty: 1, totalRM: 0, t622: 0, t627: 0, totalCost: 0, statusText: '' }];
   const rFlow = F5.runFIFO({ ...ctx({}), salesRows: rtFlow, caRows: unrelatedCA, mode: 'STRICT_DATE', step4: { current: 'CURRENT', overall: 'PASS', finalCost: 0, qty: 1 } });
-  eq('#6 STRICT return layer reused by later sale', [rFlow.sales.find((x) => x.inv === 'R-NEXT').status, Math.round(rFlow.totals.cogsQ), Math.round(rFlow.totals.closeQ)], ['OK', 10, 0]);
+  const closeA = rFlow.closing.filter((x) => x.prod === 'A').reduce((a, x) => a + x.qty, 0);
+  eq('#6 STRICT return layer reused by later sale', [rFlow.sales.find((x) => x.inv === 'R-NEXT').status, Math.round(rFlow.totals.cogsQ), Math.round(closeA)], ['OK', 10, 0]);
   // cumulative returns cannot exceed the original sale
   const rtOver = validateSaveSales({ mode: 'MONTHLY', rows: [
     row(ser(2026, 8, 5), 'R2-ORIG', 'A', 3, 30),
