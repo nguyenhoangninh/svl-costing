@@ -241,8 +241,11 @@ export function step4Controls(x) {
     cp('13', 'Freshness (snapshot vs dữ liệu vào)', 'CURRENT', freshness, '', freshness === 'CURRENT' ? 'CURRENT' : freshness === 'NOT RUN' ? 'NOT RUN' : 'RERUN STEP 4', 'Chạy lại STEP 4 khi dữ liệu trước đó thay đổi'),
   ];
   // audit F-15 / F-21: prices that need a person to confirm them
-  const flagged = pm && pm.audit ? pm.audit.filter((a) => /^REVIEW - (SO AFTER PERIOD|MANUAL OVERLAP)/.test(String(a.review))) : [];
-  if (pm && pm.audit) rows.push(cp('14', 'Giá bán cần xác nhận (SO sau kỳ / giá thủ công trùng)', 0, flagged.length, flagged.length, flagged.length ? 'REVIEW' : 'PASS', flagged.length ? flagged.slice(0, 5).map((a) => a.product).join(', ') + (flagged.length > 5 ? '…' : '') : 'Price Master cột Review'));
+  const flagged = pm && pm.audit ? pm.audit.filter((a) => /^(REVIEW|BLOCK) - (SO AFTER PERIOD|MANUAL OVERLAP|MANUAL NOT APPROVED)/.test(String(a.review))) : [];
+  if (pm && pm.audit) {
+    const hard = flagged.filter((a) => String(a.review).startsWith('BLOCK')).length;
+    rows.push(cp('14', 'Giá bán cần xử lý (SO sau kỳ / manual overlap / chưa duyệt)', 0, flagged.length, flagged.length, hard ? 'BLOCK' : flagged.length ? 'REVIEW' : 'PASS', flagged.length ? flagged.slice(0, 5).map((a) => a.product).join(', ') + (flagged.length > 5 ? '…' : '') : 'Price Master cột Review'));
+  }
   const o = overall(rows, '', '');
   const s = (i) => rows[i].status;
   const next = s(0) !== 'PASS' ? 'Validate & lưu doanh thu' : s(1) !== 'PASS' || s(2) !== 'PASS' ? 'Chạy UPDATE PRICE / xử lý giá thiếu' : s(3) !== 'PASS' && !s4 ? 'Nhập FX / GL rồi chạy STEP 4' : s(3) !== 'PASS' ? 'Hoàn tất FX / GL' : s(12) !== 'CURRENT' || s(7) !== 'PASS' ? 'Chạy STEP 4' : o.status.startsWith('PASS') ? 'Chạy STEP 5 – FIFO COGS' : 'Xem lại cầu nối STEP 4';
