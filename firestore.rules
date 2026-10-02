@@ -50,14 +50,14 @@ service cloud.firestore {
             && request.resource.data.blobs.diff(resource.data.blobs).affectedKeys().hasOnly(['closed'])
             && request.resource.data.summary.diff(resource.data.summary).affectedKeys().hasOnly(['closed']))
         );
-      // Draft/open periods may be deleted by admin; a CLOSED accounting period must be reopened first.
-      allow delete: if isAdmin() && closedOf(resource.data) == null;
+      // A period that has ever been CLOSED is an accounting record and may not be hard-deleted.
+      allow delete: if isAdmin() && closedOf(resource.data) == null
+        && resource.data.get('summary', {}).get('everClosed', false) != true;
       match /chunks/{chunk} {
         allow read: if canRead();
-        // Normal chunks are mutable only while OPEN. For CLOSED -> OPEN, admin may stage only
-        // the new content-addressed closed-state blob needed by the REOPEN revision.
-        allow create, update: if (canWrite() && periodOpen(period))
-          || (isAdmin() && !periodOpen(period) && chunk.matches('closed@.*'));
+        // Content-addressed accounting chunks are immutable: create while OPEN, never update in place.
+        allow create: if canWrite() && periodOpen(period);
+        allow update: if false;
         allow delete: if isAdmin() && periodOpen(period);
       }
       // Immutable manifest snapshot for every committed cloud revision.
@@ -67,7 +67,9 @@ service cloud.firestore {
           && request.resource.data.period == period
           && request.resource.data.rev == getAfter(periodPath(period)).data.rev
           && request.resource.data.previousRev == request.resource.data.rev - 1
-          && request.resource.data.manifestHash == getAfter(periodPath(period)).data.manifestHash;
+          && request.resource.data.manifestHash == getAfter(periodPath(period)).data.manifestHash
+          && request.resource.data.blobs == getAfter(periodPath(period)).data.blobs
+          && request.resource.data.summary == getAfter(periodPath(period)).data.summary;
         allow update, delete: if false;
       }
     }
