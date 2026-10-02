@@ -100,7 +100,7 @@ import * as TR from '../src/engine/trace.js';
 
 // ---- Audit 2026-10 group A
 import { directKey, postedKey } from '../src/views/phase2.js';
-import { flKey, engineBalances } from '../src/views/phase3.js';
+import { flKey, engineBalances, nrvKey } from '../src/views/phase3.js';
 import { updatePriceMaster } from '../src/engine/step4.js';
 import { refreshErpMap } from '../src/engine/step3b.js';
 import { buildDataset } from '../src/engine/step1.js';
@@ -126,6 +126,9 @@ import { fp as fpStr } from '../src/engine/util.js';
   let billErr = '';
   try { validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 7), 'UB', 'A', 1, 10), billDate: '31/02/2026' }] }, { rows: [] }, P2); } catch (e) { billErr = e.message; }
   eq('F-05 supplied invalid Bill Date never falls back', billErr.includes('BLOCK'), true);
+  let futureBillErr = '';
+  try { validateSaveSales({ mode: 'YTD', rows: [{ ...row(ser(2026, 8, 7), 'UF', 'A', 1, 10), billDate: ser(2026, 9, 1) }] }, { rows: [] }, P2); } catch (e) { futureBillErr = e.message; }
+  eq('F-05 future Bill Date blocked from current period Sales DB', futureBillErr.includes('BLOCK'), true);
   // F-23: validation REVIEW of a costed line is counted
   const rv = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 8), 'V1', 'A', 1, 10), customer: '' }] }, { rows: [] }, P2);
   eq('F-23 advisory counted', F5.runFIFO({ ...ctx({}), salesRows: rv.db.rows }).stats.advisory, 1);
@@ -137,6 +140,8 @@ import { fp as fpStr } from '../src/engine/util.js';
   eq('F-21 manual overlap → BLOCK', pmR.pm.audit.find((a) => a.product === 'B').review.startsWith('BLOCK - MANUAL OVERLAP'), true);
   eq('F-21 overlap does not silently choose last row', pmR.pm.rows.find((r) => r.product === 'B').finalPrice, null);
   eq('F-15/F-21 Price Master overall blocked', pmR.pm.status, 'BLOCKED - PRICE POLICY');
+  const pmA = updatePriceMaster({ salesDB: { rows: [{ ...row(ser(2026, 8, 3), 'ZA', 'B', 1, 5), include: 'Y' }], savedAt: 'x' }, so: [], manual: [{ product: 'B', price: 6, source: 'Approved quote', approvedBy: 'controller', effFrom: null, effTo: null }], step2: { pc: [{ erp: 'O', pcNo: 'PC-2', prod: 'B', rowIdx: 2 }] }, period: P2 });
+  eq('F-21 approved single manual price can become final', [pmA.pm.status, pmA.pm.rows[0].finalPrice], ['CURRENT', 6]);
   // F-13: existing map row whose movement moved to another ERP is flagged, not overwritten
   const H = ['Material Code', 'Quantity'];
   const map0 = { rows: [{ code: 'M1', erp: 'T', review: 'OK', b2Review: 'OK', override: '' }] };
@@ -212,6 +217,7 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const credit = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 21), 'CR1', 'A', -1, -10), tranType: 'CREDIT NOTE' }] }, { rows: [] }, P2).db.rows;
   const cr = F5.runFIFO({ ...ctx({}), salesRows: credit, mode: 'STRICT_DATE' });
   eq('#6 CREDIT NOTE has no physical FG/COGS movement', [cr.sales[0].fin, cr.stats.returns, cr.totals.cogsQ], ['NO COGS', 0, 0]);
+  eq('#6 CREDIT NOTE excluded from selling-price weighting', credit[0].include, 'N');
   const multi = validateSaveSales({ mode: 'MONTHLY', rows: [
     { ...row(ser(2026, 8, 5), 'ML1', 'A', 2, 20), lineNo: '1' },
     { ...row(ser(2026, 8, 5), 'ML1', 'A', 3, 30), lineNo: '2' },
@@ -254,6 +260,8 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const nv = F5.runFIFO({ ...ctx({}), pmRows: [{ product: 'A', finalPrice: 0.004 }], sellCostRate: 0.015 }); // price 100 VND, NRV 98.5
   const cl = nv.closing.find((c) => c.prod === 'A');
   eq('#7 NRV provision = (100 − 98.5) × qty', Math.round(cl.provNeed * 100) / 100, Math.round(1.5 * cl.qty * 100) / 100);
+  const nk1 = nrvKey(nv), nk2 = nrvKey({ ...nv, closing: nv.closing.map((x) => ({ ...x, price: num(x.price) + 0.001 })) });
+  eq('#7 NRV decision key changes when valuation price changes', nk1 !== nk2, true);
   // #3 FAST tie: difference needs approval bound to the figures
   const eng = { a154: 1000, a155: 2000, a632: 3000, a511: 4000 };
   const t0 = F5.fastTie(eng, null);
