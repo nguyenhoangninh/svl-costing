@@ -6,8 +6,9 @@ const rules = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'u
 const store = fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
-ok('closed period reopen changes only closed manifest key', rules.includes("affectedKeys().hasOnly(['closed'])"));
-ok('reopen summary can only change closed + everClosed', rules.includes("affectedKeys().hasOnly(['closed', 'everClosed'])"));
+ok('explicit admin CLOSE transition exists', rules.includes("isAdmin() && closedOf(resource.data) == null && closedOf(request.resource.data) != null"));
+ok('closed period REOPEN changes only closed manifest key', rules.includes("affectedKeys().hasOnly(['closed'])"));
+ok('REOPEN summary permits closed + everClosed + live step5 status', rules.includes("affectedKeys().hasOnly(['closed', 'everClosed', 'step5'])"));
 ok('reopen preserves everClosed=true', rules.includes("request.resource.data.summary.get('everClosed', false) == true"));
 ok('hard delete blocked after everClosed', rules.includes("get('everClosed', false) != true"));
 ok('content-addressed chunks are create-only', rules.includes('allow create: if canWrite() && periodOpen(period);') && rules.includes('allow update: if false;'));
@@ -25,6 +26,9 @@ ok('cloudDelete checks everClosed metadata', store.includes('meta.summary.everCl
 ok('cloudDelete checks historical closed revision', store.includes('r.summary && r.summary.closed'));
 ok('close persists local closedEver retention state', phase3.includes('d.closedEver = true'));
 ok('close snapshots exception package', phase3.includes('exceptions'));
+ok('CLOSE has cloud-state preflight', phase3.includes("Cloud đã ghi kỳ này là CLOSED"));
+ok('REOPEN has cloud-state preflight', phase3.includes("Cloud đang ở trạng thái OPEN"));
+ok('permission error gives rules/admin guidance', phase3.includes('Publish firestore.rules v1.10.1'));
 
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
