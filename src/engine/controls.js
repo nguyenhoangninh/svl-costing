@@ -37,10 +37,9 @@ export function outOfPeriodRows(datasets, period) {
       let outside = 0, blank = 0, invalid = 0, missingDateColumn = 0, amt = 0; const months = new Set();
       const tx = (r) => {
         const keys = kc.map((i) => ttxt(r[i])).filter(Boolean);
+        if (!keys.length) return false; // footer/subtotal rows with an amount but no business key are not transactions
         if (keys.some((v) => /^(TOTAL|NOTICE)$/i.test(v) || /^TOTAL\b/i.test(v))) return false;
-        if (keys.length) return true;
-        if (ac >= 0 && isNumeric(r[ac]) && Math.abs(num(r[ac])) > 0.000001) return true;
-        return qc.some((i) => isNumeric(r[i]) && Math.abs(num(r[i])) > 0.000001);
+        return true;
       };
       for (const r of ds.rows) {
         if (!tx(r)) continue;
