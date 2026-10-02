@@ -77,7 +77,8 @@ export function txnKey(invDate, invNo, lineNo, prod, cust, qty, amt) {
 export function includeInPrice(tranType, qty, amt) {
   switch (utxt(tranType)) {
     case 'NORMAL SALE': return qty !== 0 && amt !== 0 ? 'Y' : 'N';
-    case 'SALES RETURN': case 'CREDIT NOTE': return qty !== 0 && amt !== 0 && Math.sign(qty) === Math.sign(amt) ? 'Y' : 'N';
+    case 'SALES RETURN': return qty !== 0 && amt !== 0 && Math.sign(qty) === Math.sign(amt) ? 'Y' : 'N';
+    case 'CREDIT NOTE': return 'N'; // financial adjustment: no physical quantity basis for selling-price weighting
     default: return 'N';
   }
 }
