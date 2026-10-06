@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.1 (06/10/2026):** 5B · tab "ERP vs FIFO" so giá ERP Stock Out (chỉ NVL) với phần NVL của lô FIFO và với giá thành đầy đủ; dòng ERP cao hơn cả giá thành đầy đủ được đánh dấu BẤT THƯỜNG (lỗi giá xuất kho trên ERP).
+
 > **v1.14.0 (06/10/2026) – 5B · Xử lý Rework (luồng riêng):** FG xuất rework rời kho 155 theo giá FIFO của lô vào WIP rework 154; khi còn treo (OPEN / HOLD) không vào giá thành hay giá vốn, chỉ chuyển kỳ. Mỗi dòng có hướng xử lý riêng: **Hoàn thành** → vào lô mới (STEP 4.3; hàng hỏng chọn tính vào lô mới hoặc ra chi phí), **Trả về kho** nguyên trạng → tạo lại lô FG theo giá gốc (Nợ 155 / Có 154), **Ra chi phí** (hủy / không sửa được) → TK 632 hoặc 811 (Nợ 632/811 / Có 154). Bắt buộc ghi lý do; đổi xử lý làm STEP 5 cần chạy lại. Màn hình có tuổi treo + cảnh báo quá N tháng, luân chuyển 154 + bút toán đề xuất, và so sánh ERP vs FIFO (giá trị ERP trên phiếu Stock Out chỉ là memo). Cầu nối 154 / 155 / 632 và Batch 8 tính cả các hướng xử lý mới.
 
 > **v1.13.0 (06/10/2026) – FIFO tách theo hoá đơn & phân bổ giá vốn theo lô:**

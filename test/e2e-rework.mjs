@@ -20,7 +20,8 @@ await page.goto(base + '#rwflow'); await page.waitForSelector('.result');
 console.log('5B before:', await txt('.result'), '|', await txt('.kpis'));
 console.log('5B ERP note:', ((await txt('main')).match(/Kỳ này: ERP .{0,80}/) || ['?'])[0]);
 await page.click('[data-tabrw="erp"]'); await page.waitForTimeout(300);
-console.log('5B ERP flags:', ((await txt('#rw-box')).match(/LỆCH/g) || []).length);
+console.log('5B ERP checks:', JSON.stringify(((await txt('#rw-box')).match(/BẤT THƯỜNG: ERP|Khớp NVL|ERP thấp hơn NVL|Trong khoảng NVL/g) || []).reduce((o, k) => ({ ...o, [k]: (o[k] || 0) + 1 }), {})));
+console.log('5B ERP box:', ((await txt('main')).match(/Kỳ này có .{0,260}/) || ['?'])[0]);
 await page.screenshot({ path: path.join(outDir, '70-rework-erp.png') });
 await page.click('[data-tabrw="pending"]'); await page.waitForTimeout(300);
 // write off the first pending line to 811, return the second to FG
