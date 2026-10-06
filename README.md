@@ -1,5 +1,9 @@
 # SVL Costing Web
 
+> **v1.13.0 (06/10/2026) – FIFO tách theo hoá đơn & phân bổ giá vốn theo lô:**
+> - **Bước 1:** lô thành phẩm sau cost allocation vào bảng 4.4; mỗi lô ghi rõ đã xuất cho hoá đơn nào, tháng nào (SL, giá vốn), xuất rework bao nhiêu và còn lại bao nhiêu – cộng dồn qua các tháng và roll sang kỳ sau. Tab mới "Phân bổ giá vốn theo hoá đơn"; bấm vào một lô để xem chi tiết. File đầu kỳ có thêm cột tuỳ chọn SL / giá vốn đã xuất trước kỳ.
+> - **Bước 2:** FIFO MONTHLY nay tách theo hoá đơn: từng dòng hoá đơn trong tháng (theo ngày) lấy lô cũ nhất còn tồn, tự tách dòng khi lấy nhiều lô và gắn tháng / hoá đơn / khách / lô. Tổng giá vốn tháng và FG cuối kỳ giữ đúng như workbook (đã kiểm trên số liệu tháng 8); chỉ giá vốn từng hoá đơn thay đổi (theo lô thực tế thay vì bình quân). STRICT_DATE vẫn như trước. Tab FIFO detail hiện ngày HĐ, số HĐ, khách, kỳ nhập lô.
+
 > **v1.12.0 (06/10/2026) – STEP 4.4 Thành phẩm sản xuất lũy kế:** bảng tổng hợp thành phẩm nhập kho từ đầu năm đến kỳ hiện tại (theo sản phẩm, theo tháng, chi tiết lô). Kỳ này tự lấy từ STEP 4.3 sau phân bổ giá thành (sau RUN STEP 4 / RUN FIFO / CLOSE MONTH, hoặc bấm "Cập nhật từ STEP 4.3"). Các tháng trước: **Roll forward** từ kỳ trước (tự động khi tạo kỳ mới sau khi kỳ trước đã đóng; tháng 1 bắt đầu năm mới) hoặc **Upload file đầu kỳ** theo template (Kỳ, Product Code, Complete Qty, Tổng giá thành hoặc RM / 622 / 627). "Tải file đầu kỳ cho kỳ sau" xuất toàn bộ lũy kế đến kỳ này đúng định dạng upload.
 
 > **v1.11.0 (06/10/2026) – tách Doanh thu và Hàng bán bị trả lại:**

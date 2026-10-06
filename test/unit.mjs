@@ -273,6 +273,14 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   ] }, { rows: [] }, P2).db.rows;
   const rOver = F5.runFIFO({ ...ctx({}), salesRows: rtOver, mode: 'STRICT_DATE' });
   eq('#6 cumulative return above sold qty → unresolved', rOver.sales.find((x) => x.inv === 'R2-CN2').status, 'REVIEW');
+  // ---- v1.13 MONTHLY FIFO split by invoice (default) vs workbook pro-rata: same month total, every take tied to an invoice
+  {
+    const two = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 9), 'M2', 'A', 2, 20), row(ser(2026, 8, 3), 'M1', 'A', 3, 30)] }, { rows: [] }, P2).db.rows;
+    const inv = F5.runFIFO({ ...ctx({}), salesRows: two }), pro = F5.runFIFO({ ...ctx({}), salesRows: two, monthlySplit: 'PRORATA' });
+    eq('MONTHLY invoice split: month COGS = pro-rata', [Math.round(inv.totals.cogsA), inv.runResult], [Math.round(pro.totals.cogsA), pro.runResult]);
+    eq('MONTHLY invoice split: every take has an invoice, earliest invoice first', [inv.detail.every((d) => d.line > 0), inv.detail[0].inv, pro.detail.every((d) => d.line === null)], [true, 'M1', true]);
+    eq('MONTHLY invoice split: line COGS = detail', Math.round(inv.sumLineA), Math.round(inv.sumDetA));
+  }
   // ---- v1.11 revenue books: sales (511) and returns / credit notes (5212 / 5213) are separate files, databases and runs
   {
     const mixed = () => ({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'X1' }, { ...row(ser(2026, 8, 21), 'CR1', 'A', 1, -4), qty: null, tranType: 'CREDIT NOTE' }] });
@@ -359,7 +367,7 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('4.4 rows from STEP 4.3 final layer', cur.map((r) => [r.period, r.prod, r.qty, r.totalRM, r.c622, r.c627, r.total, r.unitCost]), [['2026-08', 'A', 10, 640, 200, 160, 1000, 100], ['2026-08', 'B', 5, 350, 100, 50, 500, 100]]);
   // upload file for the earlier months (template layout, header on row 4)
   const tpl = FP.templateAOA([], '2026-08');
-  const grid = [...tpl, ['2026-06', 'O', 'PC-J', '', '', 'A', 'A', '', '', 'PC', 4, 300, 60, 40, 400, ''], ['07/2026', '', '', '', '', 'A', '', '', '', '', 6, '', '', '', 660, 'tổng tháng'], ['2025-12', '', '', '', '', 'A', '', '', '', '', 1, '', '', '', 10, ''], ['2026-08', '', '', '', '', 'A', '', '', '', '', 1, '', '', '', 10, '']];
+  const grid = [...tpl, ['2026-06', 'O', 'PC-J', '', '', 'A', 'A', '', '', 'PC', 4, 300, 60, 40, 400, 1, 100, ''], ['07/2026', '', '', '', '', 'A', '', '', '', '', 6, '', '', '', 660, '', '', 'tổng tháng'], ['2025-12', '', '', '', '', 'A', '', '', '', '', 1, '', '', '', 10, '', '', ''], ['2026-08', '', '', '', '', 'A', '', '', '', '', 1, '', '', '', 10, '', '', '']];
   const op = FP.importOpening({ S: grid }, 'op.xlsx', '2026-08');
   eq('4.4 upload: parsed periods / checks', op.rows.map((r) => [r.period, r.check]), [['2026-06', 'PASS'], ['2026-07', 'PASS'], ['2025-12', 'BLOCK'], ['2026-08', 'BLOCK']]);
   eq('4.4 upload with errors is BLOCKED', [op.status, op.stats.block], ['BLOCKED', 2]);
@@ -377,6 +385,23 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('4.4 roll needs the previous month posted', miss.includes('chưa chuyển kết quả STEP 4.3'), true);
   const back = FP.importOpening({ S: FP.templateAOA(FP.ytdRows(fpAug, '2026-08'), '2026-09') }, 'next.xlsx', '2026-09');
   eq('4.4 "file đầu kỳ cho kỳ sau" round-trips', [back.status, back.stats.rows, back.stats.total], ['VALIDATED', 4, 2560]);
+  // lot allocation: which invoice / month took which lot, what is left (pre-web sales from the upload count too)
+  const res8 = { period: '2026-08', ledger: [{ lid: 'L1', srcPeriod: '2026-06', pc: 'PC-J', prod: 'A' }, { lid: 'L2', srcPeriod: '2026-08', pc: 'PC-1', prod: 'A' }, { lid: 'L9', srcPeriod: '2025-11', pc: 'OLD', prod: 'A' }],
+    sales: [{ seq: 1, inv: 'INV-1', cust: 'C1', date: ser(2026, 8, 5) }, { seq: 2, inv: 'INV-2', cust: 'C2', date: ser(2026, 8, 9) }],
+    detail: [{ line: 1, lid: 'L1', pc: 'PC-J', prod: 'A', qty: 3, tot: 300 }, { line: 1, lid: 'L2', pc: 'PC-1', prod: 'A', qty: 1, tot: 100 }, { line: 2, lid: 'L2', pc: 'PC-1', prod: 'A', qty: 4, tot: 400 }, { line: 2, lid: 'L9', pc: 'OLD', prod: 'A', qty: 1, tot: 90 }],
+    rework: { rows: [{ lid: 'L2', fg: 'A', rid: 'RW-1', issueDate: ser(2026, 8, 20), qty: 2, tot: 200 }] } };
+  const cons = FP.consumptionFromStep5(res8, '2026-08');
+  eq('4.4 consumption tied to month / invoice / lot', cons.map((c) => [c.month, c.kind, c.inv, c.lotPeriod, c.pc, c.qty]), [['2026-08', 'SALE', 'INV-1', '2026-06', 'PC-J', 3], ['2026-08', 'SALE', 'INV-1', '2026-08', 'PC-1', 1], ['2026-08', 'SALE', 'INV-2', '2026-08', 'PC-1', 4], ['2026-08', 'SALE', 'INV-2', '2025-11', 'OLD', 1], ['2026-08', 'REWORK', 'RW-1', '2026-08', 'PC-1', 2]]);
+  const al = FP.allocate(FP.ytdRows(fpAug, '2026-08'), cons);
+  const pj = al.lots.find((r) => r.pc === 'PC-J'), p1 = al.lots.find((r) => r.pc === 'PC-1');
+  eq('4.4 lot PC-J: pre-web sold + FIFO sold → remaining', [pj.soldQty, pj.soldTot, pj.remQty, pj.remTot, pj.invCount], [4, 400, 0, 0, 1]);
+  eq('4.4 lot PC-1: sold to 2 invoices + rework', [p1.soldQty, p1.rwQty, p1.remQty, p1.issuedMonths, p1.invCount], [5, 2, 3, '2026-08: 7', 2]);
+  eq('4.4 lot outside the table reported', al.unmatched.map((u) => u.pc), ['OLD']);
+  const sep2 = FP.rollOpening({ ...fpAug, current: { ...fpAug.current, sales: cons } }, '2026-08', '2026-09');
+  eq('4.4 roll carries the allocation records', [sep2.sales.length, FP.ytdSales({ opening: sep2 }, '2026-09').length], [5, 5]);
+  eq('4.4 sold per product / month in summary', [FP.summarize(FP.ytdRows(fpAug, '2026-08'), '2026-08', cons).prods.find((p) => p.prod === 'A').soldQty, FP.summarize([], '2026-08', cons).months[0].soldTot], [9, 890]);
+  const nx = FP.importOpening({ S: FP.templateAOA(al.lots, '2026-09') }, 'nx.xlsx', '2026-09');
+  eq('4.4 next-month file keeps sold-before qty', nx.rows.find((r) => r.pc === 'PC-1').soldQty0, 7);
   eq('4.4 period parser', ['2026-7', '7/2026', 202607, '2026/07'].map(FP.parsePeriod), ['2026-07', '2026-07', '2026-07', '2026-07']);
 }
 // ---- PWA: every module the app can load is precached by the service worker (offline start)

@@ -19,18 +19,20 @@ function state(S, D4 = null) {
   const posted = fp && fp.current && fp.current.period === S.period ? fp.current : null;
   const opening = fp && fp.opening && fp.opening.period === S.period ? fp.opening : null;
   const outdated = !!(posted && live && posted.key !== FP.rowsKey(live));
-  return { D4, live, fp, posted, opening, outdated };
+  const res = d.step5 && d.step5.period === S.period ? d.step5 : null;
+  const salesOutdated = !!(posted && res && posted.salesAt !== res.runAt); // FIFO ran again after the last post
+  return { D4, live, fp, posted, opening, outdated, res, salesOutdated };
 }
 export function status(S, D4 = null) {
   const x = state(S, D4);
   if (!x.posted) return 'NOT RUN';
-  if (x.outdated || (x.D4 && x.D4.freshness !== 'CURRENT')) return 'RERUN REQUIRED';
+  if (x.outdated || x.salesOutdated || (x.D4 && x.D4.freshness !== 'CURRENT')) return 'RERUN REQUIRED';
   if (!isJan(S.period) && (!x.opening || x.opening.status === 'BLOCKED')) return 'PASS WITH REVIEW';
   return 'PASS';
 }
 export function ccInfo(S, D4 = null) {
   const x = state(S, D4); const rows = FP.ytdRows(x.fp, S.period); const sm = FP.summarize(rows, S.period);
-  return { status: status(S, x.D4), text: rows.length ? `YTD ${A.fmtNum(sm.ytd.total)}` : '', at: x.posted && x.posted.postedAt, next: !x.posted ? 'Chạy STEP 4.3 – kết quả tự chuyển vào bảng' : x.outdated ? 'Cập nhật từ STEP 4.3' : !isJan(S.period) && !x.opening ? 'Roll forward / upload số đầu năm đến tháng trước' : '' };
+  return { status: status(S, x.D4), text: rows.length ? `YTD ${A.fmtNum(sm.ytd.total)}` : '', at: x.posted && x.posted.postedAt, next: !x.posted ? 'Chạy STEP 4.3 – kết quả tự chuyển vào bảng' : x.outdated || x.salesOutdated ? 'Cập nhật từ STEP 4.3 / FIFO' : !isJan(S.period) && !x.opening ? 'Roll forward / upload số đầu năm đến tháng trước' : '' };
 }
 
 /** Post the STEP 4.3 final layer of this month into the YTD table (called after STEP 4 / FIFO and before CLOSE). */
@@ -39,11 +41,14 @@ export function postCurrent(S, { silent = false } = {}) {
   const d = S.d; const D4 = P2.derive(S).d4;
   if (!D4.fl) { if (!silent) A.toast('Chưa có kết quả STEP 4.3 (Phân bổ giá thành).', 'block'); return false; }
   const rows = FP.rowsFromFinalLayer(D4.fl, S.period); const key = FP.rowsKey(rows);
+  // FIFO consumption of the month (which invoice / rework took which lot) – from the latest STEP 5 run of this period
+  const res = d.step5 && d.step5.period === S.period ? d.step5 : null;
+  const sales = FP.consumptionFromStep5(res, S.period); const salesAt = res ? res.runAt : '';
   const cur = d.fgProd && d.fgProd.current;
-  if (cur && cur.period === S.period && cur.key === key) { if (!silent) A.toast('Bảng tổng hợp đã khớp STEP 4.3.', 'pass'); return false; }
+  if (cur && cur.period === S.period && cur.key === key && (cur.salesAt || '') === salesAt) { if (!silent) A.toast('Bảng tổng hợp đã khớp STEP 4.3 và FIFO.', 'pass'); return false; }
   const sm = FP.summarize(rows, S.period);
-  d.fgProd = { ...(d.fgProd || {}), year: S.period.slice(0, 4), current: { period: S.period, rows, key, step4RunAt: d.step4 ? d.step4.runAt : '', step4Freshness: D4.freshness, postedAt: nowISO(), by: A.who() } };
-  A.audit('STEP 4.4 - POST FG PRODUCTION', `${S.period}: ${rows.length} lô · SL ${A.fmtNum(sm.cur.qty)} · ${A.fmtNum(sm.cur.total)} VND`);
+  d.fgProd = { ...(d.fgProd || {}), year: S.period.slice(0, 4), current: { period: S.period, rows, key, sales, salesAt, step4RunAt: d.step4 ? d.step4.runAt : '', step4Freshness: D4.freshness, postedAt: nowISO(), by: A.who() } };
+  A.audit('STEP 4.4 - POST FG PRODUCTION', `${S.period}: ${rows.length} lô · SL ${A.fmtNum(sm.cur.qty)} · ${A.fmtNum(sm.cur.total)} VND · FIFO ${sales.length} dòng phân bổ`);
   A.markDirty('fgProd', 'audit');
   if (!silent) A.toast(`Đã chuyển ${rows.length} lô thành phẩm kỳ ${S.period} (${A.fmtNum(sm.cur.total)} VND) vào bảng lũy kế.`, 'pass');
   return true;
@@ -51,7 +56,9 @@ export function postCurrent(S, { silent = false } = {}) {
 
 export function view(el) {
   const S = A.S; const x = state(S, A.derived().d4); const closed = closedNow(S); const edit = A.canEdit() && !closed;
-  const rows = FP.ytdRows(x.fp, S.period); const sm = FP.summarize(rows, S.period);
+  const rows = FP.ytdRows(x.fp, S.period); const sales = FP.ytdSales(x.fp, S.period); const sm = FP.summarize(rows, S.period, sales);
+  const al = FP.allocate(rows, sales);
+  const soldYtd = sales.filter((r) => r.kind === 'SALE').reduce((a, r) => a + r.tot, 0);
   const st = status(S, x.D4); const tab = S.tabFP || 'sum'; const prev = prevPeriod(S.period);
   const op = x.opening;
   el.innerHTML = `<section class="page">
@@ -69,13 +76,15 @@ export function view(el) {
     ${!x.D4.fl ? '<div class="alert review">Chưa có kết quả STEP 4.3 – chạy Phân bổ giá thành; kết quả tự chuyển vào bảng này.</div>'
       : !x.posted ? `<div class="alert review">Kết quả STEP 4.3 kỳ ${esc(S.period)} chưa được chuyển vào bảng. Bấm <b>Cập nhật từ STEP 4.3</b>.</div>`
         : x.outdated ? '<div class="alert review"><b>STEP 4.3 đã thay đổi</b> sau lần chuyển gần nhất (chạy lại phân bổ / 3B / rework). Bấm <b>Cập nhật từ STEP 4.3</b>.</div>'
+          : x.salesOutdated ? '<div class="alert review"><b>FIFO đã chạy lại</b> sau lần chuyển gần nhất – phân bổ giá vốn theo hoá đơn chưa cập nhật. Bấm <b>Cập nhật từ STEP 4.3</b>.</div>'
+          : !x.res ? '<p class="muted">Chưa chạy FIFO kỳ này – cột "đã xuất" chỉ gồm các tháng trước.</p>'
           : x.D4.freshness !== 'CURRENT' ? `<div class="alert review">STEP 4.3 đang ${esc(x.D4.freshness)} – số kỳ này có thể còn đổi. Chạy lại STEP 4.3.</div>` : ''}
     ${isJan(S.period) ? '<p class="muted">Tháng 1: không có số đầu kỳ (năm mới).</p>'
       : !op ? `<div class="alert review"><b>Chưa có số các tháng trước (01 → ${esc(prev.slice(5))}/${esc(S.period.slice(0, 4))}).</b> Roll forward từ ${esc(prev)} (kỳ trước đã có bảng 4.4), hoặc upload file đầu kỳ (dùng "Tải template trống" – mỗi dòng một lô hoặc một sản phẩm / tháng).</div>`
         : op.status === 'BLOCKED' ? `<div class="alert block"><b>File đầu kỳ có ${op.stats.block} dòng lỗi</b> – chưa được tính. Xem tab "Số đầu kỳ", sửa file rồi upload lại.</div>`
           : `<p class="muted">Số đầu kỳ: ${esc(op.source)} · ${op.stats.rows} dòng · tháng ${esc(op.stats.months.join(', ') || '–')} · ${A.fmtNum(op.stats.total)} VND${op.stats.review ? ` · <b>${op.stats.review} dòng REVIEW</b>` : ''}.</p>`}
-    <div class="kpis">${A.kpiN('SL nhập kho kỳ này', sm.cur.qty)}${A.kpi('Giá thành kỳ này', sm.cur.total, true)}${A.kpiN('SL lũy kế từ đầu năm', sm.ytd.qty)}${A.kpi('Giá thành lũy kế', sm.ytd.total, true)}${A.kpiN('Số tháng', sm.months.length)}${A.kpiN('Số sản phẩm', sm.prods.length)}</div>
-    ${tabsHTML(tab, [['sum', 'Theo sản phẩm'], ['month', 'Theo tháng'], ['lots', `Chi tiết lô (${rows.length})`], ['opening', 'Số đầu kỳ']])}
+    <div class="kpis">${A.kpiN('SL nhập kho kỳ này', sm.cur.qty)}${A.kpi('Giá thành kỳ này', sm.cur.total, true)}${A.kpiN('SL lũy kế từ đầu năm', sm.ytd.qty)}${A.kpi('Giá thành lũy kế', sm.ytd.total, true)}${A.kpi('Giá vốn đã xuất bán YTD (FIFO)', soldYtd)}${A.kpiN('Số tháng', sm.months.length)}${A.kpiN('Số sản phẩm', sm.prods.length)}</div>
+    ${tabsHTML(tab, [['sum', 'Theo sản phẩm'], ['month', 'Theo tháng'], ['lots', `Chi tiết lô (${rows.length})`], ['alloc', `Phân bổ giá vốn theo hoá đơn (${sales.length})`], ['opening', 'Số đầu kỳ']])}
     <div id="tfp"></div></section>`;
   el.querySelectorAll('[data-tabfp]').forEach((b) => b.addEventListener('click', () => { S.tabFP = b.dataset.tabfp; A.render(); }));
   const f = el.querySelector('#f-fgp'); if (f) f.addEventListener('change', (e) => importFile(e.target.files[0]));
@@ -83,13 +92,27 @@ export function view(el) {
   if (tab === 'sum') {
     if (!sm.prods.length) { box.innerHTML = A.emptyNote('Chưa có dữ liệu.'); return; }
     const cols = SUM_COLS;
-    A.mountTable(box, { columns: cols, rows: sm.prods, height: 540, totals: ['curQty', 'curTotal', 'ytdQty', 'ytdRM', 'ytd622', 'ytd627', 'ytdTotal', 'lots'], onExport: A.exportTable('TP_SX_LUY_KE_SP', cols) });
+    A.mountTable(box, { columns: cols, rows: sm.prods, height: 540, totals: ['curQty', 'curTotal', 'ytdQty', 'ytdRM', 'ytd622', 'ytd627', 'ytdTotal', 'soldQty', 'soldTot', 'lots'], onExport: A.exportTable('TP_SX_LUY_KE_SP', cols) });
   } else if (tab === 'month') {
     if (!sm.months.length) { box.innerHTML = A.emptyNote('Chưa có dữ liệu.'); return; }
-    A.mountTable(box, { columns: MONTH_COLS, rows: sm.months, height: 480, totals: ['lots', 'qty', 'totalRM', 'c622', 'c627', 'total'], onExport: A.exportTable('TP_SX_THEO_THANG', MONTH_COLS) });
+    A.mountTable(box, { columns: MONTH_COLS, rows: sm.months, height: 480, totals: ['lots', 'qty', 'totalRM', 'c622', 'c627', 'total', 'soldQty', 'soldTot'], onExport: A.exportTable('TP_SX_THEO_THANG', MONTH_COLS) });
   } else if (tab === 'lots') {
     if (!rows.length) { box.innerHTML = A.emptyNote('Chưa có dữ liệu.'); return; }
-    A.mountTable(box, { columns: LOT_COLS, rows, filterKey: 'period', height: 540, totals: ['qty', 'baseRM', 'wipAdj', 'carryIn', 'totalRM', 'c622', 'c627', 'total'], onExport: A.exportTable('TP_SX_CHI_TIET_LO', LOT_COLS) });
+    box.innerHTML = '<p class="muted">Bấm vào một lô để xem lô đó đã phân bổ giá vốn cho những hoá đơn / tháng nào.</p><div id="tfp-l"></div><div id="tfp-ld"></div>';
+    A.mountTable(box.querySelector('#tfp-l'), { columns: LOT_ALLOC_COLS, rows: al.lots, filterKey: 'period', height: 480, totals: ['qty', 'totalRM', 'c622', 'c627', 'total', 'soldQty', 'soldTot', 'rwQty', 'rwTot', 'remQty', 'remTot'], onExport: A.exportTable('TP_SX_CHI_TIET_LO', LOT_ALLOC_COLS),
+      onRowClick: (r) => {
+        const recs = sales.filter((x) => FP.lotKey(x.lotPeriod, x.pc, x.prod) === FP.lotKey(r.period, r.pc, r.prod));
+        const ld = box.querySelector('#tfp-ld');
+        ld.innerHTML = `<h2>Lô ${esc(r.pc || '(không PC)')} · ${esc(r.prod)} · nhập kho ${esc(r.period)} · SL ${A.fmtNum(r.qty)}</h2>${r.soldQty0 ? `<p class="muted">Đã xuất trước khi dùng web (file đầu kỳ): SL ${A.fmtNum(r.soldQty0)} · ${A.fmtNum(r.soldTot0)} VND.</p>` : ''}<div id="tfp-ldt"></div>`;
+        if (!recs.length) { ld.querySelector('#tfp-ldt').innerHTML = A.emptyNote('Lô này chưa xuất cho hoá đơn nào.'); return; }
+        A.mountTable(ld.querySelector('#tfp-ldt'), { columns: ALLOC_COLS, rows: recs, height: Math.min(420, 30 * recs.length + 110), totals: ['qty', 'tot'], onExport: A.exportTable(`TP_SX_LO_${r.pc}`, ALLOC_COLS) });
+        ld.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } });
+  } else if (tab === 'alloc') {
+    if (!sales.length) { box.innerHTML = A.emptyNote('Chưa có phân bổ – chạy FIFO (STEP 5.2) rồi Cập nhật từ STEP 4.3.'); return; }
+    const recs = sales.map((x) => ({ ...x, unit: x.qty ? x.tot / x.qty : null, inTable: FP.lotKey(x.lotPeriod, x.pc, x.prod) && al.unmatched.includes(x) ? 'Ngoài bảng (FG đầu kỳ cũ)' : 'Lô trong bảng' }));
+    box.innerHTML = `<p class="muted">Mỗi dòng = một phần lô thành phẩm đã xuất cho một dòng hoá đơn (hoặc xuất rework) trong tháng, theo FIFO. ${al.unmatched.length ? `<b>${al.unmatched.length}</b> dòng lấy từ lô không có trong bảng (FG tồn từ trước năm / chưa upload số đầu kỳ của lô đó).` : ''}</p><div id="tfp-a"></div>`;
+    A.mountTable(box.querySelector('#tfp-a'), { columns: [...ALLOC_COLS, { key: 'inTable', label: 'Lô', width: 170 }], rows: recs, filterKey: 'month', height: 540, totals: ['qty', 'tot'], onExport: A.exportTable('TP_SX_PHAN_BO_GIA_VON', ALLOC_COLS) });
   } else {
     if (isJan(S.period)) { box.innerHTML = A.emptyNote('Tháng 1 – không cần số đầu kỳ.'); return; }
     if (!op) { box.innerHTML = A.emptyNote('Chưa có số đầu kỳ.'); return; }
@@ -101,11 +124,17 @@ export function view(el) {
 const N = (key, label, width = 140) => ({ key, label, type: 'num', width });
 const Q = (key, label, width = 110) => ({ key, label, type: 'qty', width });
 const SUM_COLS = [{ key: 'prod', label: 'Product Code', width: 150, trace: true }, { key: 'name', label: 'Product Name', width: 240 }, { key: 'unit', label: 'Unit', width: 60 },
-  Q('curQty', 'SL kỳ này'), N('curTotal', 'Giá thành kỳ này'), N('curUnit', 'Đơn giá kỳ này', 120), Q('ytdQty', 'SL lũy kế'), N('ytdRM', 'RM lũy kế'), N('ytd622', '622 lũy kế'), N('ytd627', '627 lũy kế'), N('ytdTotal', 'Giá thành lũy kế'), N('ytdUnit', 'Đơn giá bình quân YTD', 130), { key: 'lots', label: 'Số lô', type: 'int', width: 70 }];
-const MONTH_COLS = [{ key: 'period', label: 'Kỳ', width: 90 }, { key: 'products', label: 'Số SP', type: 'int', width: 70 }, { key: 'lots', label: 'Số lô', type: 'int', width: 70 }, Q('qty', 'SL nhập kho'), N('totalRM', 'RM'), N('c622', '622'), N('c627', '627'), N('total', 'Tổng giá thành'), N('unitAvg', 'Đơn giá bình quân', 120), Q('cumQty', 'SL lũy kế'), N('cumTotal', 'Giá thành lũy kế')];
+  Q('curQty', 'SL kỳ này'), N('curTotal', 'Giá thành kỳ này'), N('curUnit', 'Đơn giá kỳ này', 120), Q('ytdQty', 'SL lũy kế'), N('ytdRM', 'RM lũy kế'), N('ytd622', '622 lũy kế'), N('ytd627', '627 lũy kế'), N('ytdTotal', 'Giá thành lũy kế'), N('ytdUnit', 'Đơn giá bình quân YTD', 130), Q('soldQty', 'SL đã xuất bán YTD'), N('soldTot', 'Giá vốn đã xuất YTD'), { key: 'lots', label: 'Số lô', type: 'int', width: 70 }];
+const MONTH_COLS = [{ key: 'period', label: 'Kỳ', width: 90 }, { key: 'products', label: 'Số SP', type: 'int', width: 70 }, { key: 'lots', label: 'Số lô', type: 'int', width: 70 }, Q('qty', 'SL nhập kho'), N('totalRM', 'RM'), N('c622', '622'), N('c627', '627'), N('total', 'Tổng giá thành'), N('unitAvg', 'Đơn giá bình quân', 120), Q('cumQty', 'SL lũy kế'), N('cumTotal', 'Giá thành lũy kế'), Q('soldQty', 'SL xuất bán trong tháng'), N('soldTot', 'Giá vốn xuất bán trong tháng')];
 const LOT_COLS = [{ key: 'period', label: 'Kỳ', width: 80 }, { key: 'erp', label: 'ERP', width: 50 }, { key: 'pc', label: 'PC No.', width: 150 }, { key: 'date', label: 'PC Date', type: 'date', width: 95 }, { key: 'mo', label: 'MO No.', width: 140 },
   { key: 'prod', label: 'Product Code', width: 150, trace: true }, { key: 'name', label: 'Product Name', width: 220 }, { key: 'unit', label: 'Unit', width: 60 }, Q('qty', 'Complete Qty', 100),
   N('baseRM', 'RM gốc'), N('wipAdj', 'Điều chỉnh 3B', 120), N('carryIn', 'Rework chuyển vào', 120), N('totalRM', 'Total RM'), N('c622', '622'), N('c627', '627'), N('total', 'Tổng giá thành'), N('unitCost', 'Giá thành / đv', 110), { key: 'source', label: 'Nguồn', width: 130 }, { key: 'note', label: 'Ghi chú', width: 180 }];
+const LOT_ALLOC_COLS = [{ key: 'period', label: 'Kỳ nhập kho', width: 90 }, { key: 'pc', label: 'PC No.', width: 150 }, { key: 'date', label: 'PC Date', type: 'date', width: 95 }, { key: 'prod', label: 'Product Code', width: 150, trace: true }, { key: 'name', label: 'Product Name', width: 200 }, Q('qty', 'SL nhập kho', 100),
+  N('totalRM', 'Total RM'), N('c622', '622'), N('c627', '627'), N('total', 'Tổng giá thành'), N('unitCost', 'Giá thành / đv', 110),
+  Q('soldQty', 'SL đã xuất bán', 100), N('soldTot', 'Giá vốn đã xuất'), Q('rwQty', 'SL xuất rework', 90), N('rwTot', 'Giá trị xuất rework', 120), Q('remQty', 'SL còn lại', 90), N('remTot', 'Giá trị còn lại'),
+  { key: 'issuedMonths', label: 'Xuất theo tháng (SL)', width: 260 }, { key: 'invCount', label: 'Số HĐ', type: 'int', width: 70 }, { key: 'source', label: 'Nguồn', width: 120 }];
+const ALLOC_COLS = [{ key: 'month', label: 'Tháng xuất', width: 90 }, { key: 'kind', label: 'Loại', width: 80 }, { key: 'sdate', label: 'Ngày HĐ / xuất', type: 'date', width: 100 }, { key: 'inv', label: 'Hoá đơn / phiếu', width: 170 }, { key: 'cust', label: 'Khách hàng', width: 200 },
+  { key: 'prod', label: 'Product Code', width: 150, trace: true }, { key: 'lotPeriod', label: 'Kỳ nhập lô', width: 90 }, { key: 'pc', label: 'PC No. (lô)', width: 150 }, Q('qty', 'SL', 90), N('tot', 'Giá vốn'), N('unit', 'Giá vốn / đv', 110)];
 
 async function importFile(file) {
   if (!file || !A.guardEdit()) return;
@@ -153,7 +182,7 @@ export async function doRoll() {
 export async function doTemplate(next) {
   const S = A.S; const x = state(S);
   if (!next) { await A.exportBook(`SVL_TP_SX_DauKy_Template_${S.period}.xlsx`, [{ name: 'FG_PRODUCTION', aoa: FP.templateAOA([], S.period), cols: COLW }]); return; }
-  const rows = FP.ytdRows(x.fp, S.period);
+  const rows = FP.allocate(FP.ytdRows(x.fp, S.period), FP.ytdSales(x.fp, S.period)).lots;
   const np = nextP(S.period);
   if (np.slice(5) === '01') { A.toast(`Kỳ sau (${np}) là tháng 1 – bắt đầu năm mới, không cần file đầu kỳ.`, 'review'); return; }
   await A.exportBook(`SVL_TP_SX_DauKy_${np}.xlsx`, [{ name: 'FG_PRODUCTION', aoa: FP.templateAOA(rows, np, `Lũy kế đến hết ${S.period}${x.outdated || !x.posted ? ' (CHÚ Ý: chưa cập nhật đủ từ STEP 4.3)' : ''}`), cols: COLW }]);
@@ -161,13 +190,15 @@ export async function doTemplate(next) {
 const COLW = [12, 6, 18, 12, 18, 18, 30, 14, 12, 8, 12, 16, 16, 16, 18, 24];
 const nextP = (p) => { let y = +p.slice(0, 4), m = +p.slice(5, 7) + 1; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, '0')}`; };
 export async function doExport() {
-  const S = A.S; const x = state(S); const rows = FP.ytdRows(x.fp, S.period); const sm = FP.summarize(rows, S.period);
+  const S = A.S; const x = state(S); const rows = FP.ytdRows(x.fp, S.period); const sales = FP.ytdSales(x.fp, S.period); const sm = FP.summarize(rows, S.period, sales);
+  const al = FP.allocate(rows, sales);
   const aoa = (cols, list) => [cols.map((c) => c.label), ...list.map((r) => cols.map((c) => { const v = r[c.key]; return c.type === 'date' && typeof v === 'number' ? serialToISO(v) : v ?? ''; }))];
   const w = (cols) => cols.map((c) => Math.round((c.width || 120) / 7));
   await A.exportBook(`SVL_TP_SX_LuyKe_${S.period}.xlsx`, [
     { name: 'Theo san pham', aoa: aoa(SUM_COLS, sm.prods), cols: w(SUM_COLS) },
     { name: 'Theo thang', aoa: aoa(MONTH_COLS, sm.months), cols: w(MONTH_COLS) },
-    { name: 'Chi tiet lo', aoa: aoa(LOT_COLS, rows), cols: w(LOT_COLS) },
+    { name: 'Chi tiet lo', aoa: aoa(LOT_ALLOC_COLS, al.lots), cols: w(LOT_ALLOC_COLS) },
+    { name: 'Phan bo gia von', aoa: aoa(ALLOC_COLS, sales.map((r) => ({ ...r, unit: r.qty ? r.tot / r.qty : null }))), cols: w(ALLOC_COLS) },
   ]);
 }
 /** New period: roll the YTD table forward automatically when the previous month was closed. */

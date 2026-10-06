@@ -332,7 +332,7 @@ export function viewFIFO(el) {
       <label>Chi phí bán hàng ước tính (NRV) <input id="s5-rate" inputmode="decimal" value="${(sellRate(S) * 100).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}" ${edit ? '' : 'disabled'} style="width:70px;text-align:right"> % doanh thu</label>
       <button class="btn" data-act="s5-run" type="button">RUN FIFO COGS</button>
     </div>
-    <p class="muted">${conf.mode === 'STRICT_DATE' ? '<b>STRICT_DATE</b> = FIFO theo ngày: dòng bán (ngày Bill / hoá đơn) và phiếu xuất rework (ngày xuất) chạy chung theo thứ tự thời gian; mỗi sự kiện chỉ dùng lớp có ngày ≤ ngày của nó.' : '<b>MONTHLY</b> = FIFO định kỳ theo tháng: cộng SL bán cả tháng của từng sản phẩm, lấy lớp cũ nhất trước, rồi chia giá vốn cho các dòng bán theo tỷ lệ SL. Tổng giá vốn tháng là FIFO; giá vốn từng hoá đơn là bình quân của tháng.'}</p>
+    <p class="muted">${conf.mode === 'STRICT_DATE' ? '<b>STRICT_DATE</b> = FIFO theo ngày: dòng bán (ngày Bill / hoá đơn) và phiếu xuất rework (ngày xuất) chạy chung theo thứ tự thời gian; mỗi sự kiện chỉ dùng lớp có ngày ≤ ngày của nó.' : '<b>MONTHLY</b> = FIFO theo tháng, tách theo hoá đơn: lần lượt từng dòng hoá đơn trong tháng (theo ngày) lấy lô cũ nhất còn tồn; một hoá đơn lấy nhiều lô thì tự tách thành nhiều dòng ở tab FIFO detail (gắn tháng, hoá đơn, khách, lô). Tổng giá vốn tháng giống workbook Excel; lô sản xuất trong tháng dùng được cho mọi hoá đơn của tháng. Phân bổ theo lô xem thêm ở 4.4 → Phân bổ giá vốn theo hoá đơn.'}</p>
     <div class="row">
       <span class="muted">${res ? `Chạy ${A.fmtTs(res.runAt)} · ${res.runSeconds}s · ${A.pill(D5.fresh)}` : ''}</span>
     </div>
@@ -360,7 +360,8 @@ export function viewFIFO(el) {
     A.mountTable(box.querySelector('#t5s'), { columns: cols, rows, filterKey: 'status', height: 520, totals: ['qty', 'usd', 'vnd', 'fq', 'rm', 'c622', 'c627', 'tot'], onExport: A.exportTable('05_SALES_COGS', cols),
       onEdit: !edit ? undefined : (row, key, val) => { const o = S.d.fifoOverrides || (S.d.fifoOverrides = {}); if (val) o[row.key] = val; else delete o[row.key]; row.ovr = val; A.audit('STEP 5 OVERRIDE', `${row.key} = ${val || '(xoá)'}`); A.markDirty('fifoOverrides', 'audit'); } });
   } else if (tab === 'detail') {
-    const cols = colsOf(F5.DETAIL_FIELDS, F5.DETAIL_HEADERS, { date: 'date', layerQty: 'qty', qty: 'qty', rm: 'num', a622: 'num', a627: 'num', tot: 'num', unit: 'num', left: 'qty', seq: 'int', line: 'int' }, { lid: 220 });
+    const cols = [{ key: 'saleDate', label: 'Ngày HĐ', type: 'date', width: 95 }, { key: 'inv', label: 'Hoá đơn', width: 150 }, { key: 'cust', label: 'Khách hàng', width: 180 }, { key: 'srcPeriod', label: 'Kỳ nhập lô', width: 85 },
+      ...colsOf(F5.DETAIL_FIELDS, F5.DETAIL_HEADERS, { date: 'date', layerQty: 'qty', qty: 'qty', rm: 'num', a622: 'num', a627: 'num', tot: 'num', unit: 'num', left: 'qty', seq: 'int', line: 'int' }, { lid: 220 })];
     A.mountTable(box, { columns: cols, rows: res.detail, filterKey: 'take', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot'], onExport: A.exportTable('05_FIFO_DETAIL', cols) });
   } else if (tab === 'ledger') {
     const cols = colsOf(F5.LEDGER_FIELDS, F5.LEDGER_HEADERS, { date: 'date', qtyIn: 'qty', rm: 'num', a622: 'num', a627: 'num', tot: 'num', unitCost: 'num', qtyOut: 'qty', rmOut: 'num', o622: 'num', o627: 'num', totOut: 'num', remQ: 'qty', remTot: 'num', seq: 'int' }, { lid: 220, name: 220, flag: 260 });

@@ -36,6 +36,18 @@ console.log('4.4 months:', ((await txt('#tfp')).match(/2026-0\d/g) || []).join('
 await page.screenshot({ path: path.join(outDir, '60-fgprod-month.png') });
 await page.click('[data-tabfp="sum"]'); await page.waitForTimeout(300);
 await page.screenshot({ path: path.join(outDir, '61-fgprod-sum.png') });
+// FIFO → allocation by invoice / month per lot
+await page.goto(base + '#step5'); await page.waitForSelector('.result'); await page.click('[data-act=s5-run]'); await page.waitForTimeout(1500);
+await page.click('[data-tab5="detail"]'); await page.waitForTimeout(300);
+console.log('5.2 detail has invoices:', ((await txt('#t5')).match(/O-INV-2608-\d+/g) || []).length > 0);
+await page.goto(base + '#fgprod'); await page.waitForSelector('.result');
+console.log('4.4 after FIFO:', await txt('.result'), '|', await txt('.kpis'));
+await page.click('[data-tabfp="alloc"]'); await page.waitForTimeout(300);
+console.log('4.4 alloc tab:', ((await txt('main')).match(/Phân bổ giá vốn theo hoá đơn \(\d+\)/) || ['?'])[0], '|', ((await txt('#tfp')).match(/\d+ dòng lấy từ lô không có trong bảng/) || ['all lots in table'])[0]);
+await page.click('[data-tabfp="lots"]'); await page.waitForTimeout(300);
+await page.click('#tfp-l tbody tr[data-v="7"]'); await page.waitForTimeout(400);
+console.log('4.4 lot drill-down:', ((await txt('#tfp-ld')).match(/Lô .{0,120}/) || ['?'])[0]);
+await page.screenshot({ path: path.join(outDir, '62-fgprod-lot.png') });
 const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=fgp-next]')]);
 const f = path.join(outDir, dl.suggestedFilename()); await dl.saveAs(f);
 const back = XLSX.utils.sheet_to_json(XLSX.readFile(f).Sheets.FG_PRODUCTION, { header: 1 });

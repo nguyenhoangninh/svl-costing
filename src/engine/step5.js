@@ -284,8 +284,28 @@ export function runFIFO(ctx) {
     const p = utxt(r.fg); if (!rwByProd.has(p)) rwByProd.set(p, []);
     rwByProd.get(p).push({ i, d: dateVal(r.issueDate) || 0, qty: num(r.issueQty) });
   });
+  // MONTHLY split (owner decision 06/10/2026): 'INVOICE' (default) – each invoice line, in date order, takes the oldest
+  // remaining layers of the month, so every FIFO take is tied to a month, an invoice and a lot; the month total is the same
+  // as the workbook. 'PRORATA' – the workbook's original method (month FIFO total spread over lines by quantity).
+  const monthlySplit = ctx.monthlySplit === 'PRORATA' ? 'PRORATA' : 'INVOICE';
   for (const [prod, list] of lines) {
-    if (mode === 'MONTHLY') {
+    if (mode === 'MONTHLY' && monthlySplit === 'INVOICE') {
+      const ord = [...list].sort((a, b) => a.date - b.date || a.dbRow - b.dbRow);
+      let pos = first.get(prod), short = 0;
+      for (const s of ord) {
+        let nd = s.qty;
+        while (nd > TOLQ && pos <= last.get(prod)) {
+          const l = sorted[pos]; const avail = l.qty - l.oq;
+          if (avail <= TOLQ) { pos++; continue; }
+          const take = avail <= nd + TOLQ ? avail : nd;
+          const d = takeLayer(l, take, D, prod, s.seq);
+          s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
+          nd -= take;
+        }
+        if (nd > TOLQ) { short += nd; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (FG of the month used up by earlier invoices); `; } else s.status = 'OK';
+      }
+      if (short > TOLQ) shortProducts++;
+    } else if (mode === 'MONTHLY') {
       let nd = need.get(prod), tq = 0, trm = 0, t622 = 0, t627 = 0, ttot = 0;
       for (let pos = first.get(prod); pos <= last.get(prod); pos++) {
         if (nd <= TOLQ) break;
@@ -453,7 +473,8 @@ export function runFIFO(ctx) {
   let sumDetA = 0;
   const detail = D.map((d, k) => {
     sumDetA += d.tot;
-    return { seq: k + 1, prod: d.prod, line: d.line > 0 ? d.line : null, lid: d.L.lid, source: d.L.src, pc: d.L.pc, date: d.L.dt > 0 ? d.L.dt : null, layerQty: d.L.qty, qty: d.qty, rm: d.rm, a622: d.a622, a627: d.a627, tot: d.tot, unit: d.qty !== 0 ? d.tot / d.qty : null, take: Math.abs(d.qty - d.L.qty) <= TOLQ ? 'FULL' : 'PARTIAL', left: d.L.qty - d.L.oq };
+    const sl = d.line > 0 ? S[d.line - 1] : null; // sales line of this take (invoice, customer, date) – display only, not a workbook column
+    return { inv: sl ? sl.inv : '', cust: sl ? sl.cust : '', saleDate: sl ? sl.date : null, srcPeriod: d.L.sp, seq: k + 1, prod: d.prod, line: d.line > 0 ? d.line : null, lid: d.L.lid, source: d.L.src, pc: d.L.pc, date: d.L.dt > 0 ? d.L.dt : null, layerQty: d.L.qty, qty: d.qty, rm: d.rm, a622: d.a622, a627: d.a627, tot: d.tot, unit: d.qty !== 0 ? d.tot / d.qty : null, take: Math.abs(d.qty - d.L.qty) <= TOLQ ? 'FULL' : 'PARTIAL', left: d.L.qty - d.L.oq };
   });
   const totals = { ...T, cogsRM: cCogs[0], cogs622: cCogs[1], cogs627: cCogs[2], eligQ: sumEligQ, layers: closing.length, retQ, retA, nrvProv: closing.reduce((a, c) => a + num(c.provNeed), 0) };
 
@@ -482,7 +503,7 @@ export function runFIFO(ctx) {
   return {
     period, runAt: nowISO(), mode, tol, runSeconds: Math.round((Date.now() - t0) / 100) / 10, overridesUsed, openLayers: nO, runResult,
     ledger, sales, returnRegister: returnControl.rows, returnControl, detail, closing, summary: sum, totals, rec, sumDetA, sumLineA, step4Qty, step4Cost,
-    stats: { lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size, returns: retN, sellRate },
+    stats: { monthlySplit: mode === 'MONTHLY' ? monthlySplit : '', lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size, returns: retN, sellRate },
     undated,
     // internal (dropped before saving): layers for the rework pass
     _sorted: sorted, _rwPlan: mode !== 'MONTHLY' ? rwPlan : null,

@@ -1140,7 +1140,7 @@ document.addEventListener('click', async (e) => {
     case 's5-validate': P3.doValidateOpen(); render(); break;
     case 's5-template': await P3.doTemplate(); break;
     case 's5-run': await busy('Đang chạy FIFO COGS (bán hàng)…', async () => { await P3.doRunFIFO(false); FGP.postCurrent(S, { silent: true }); }); render(); break;
-    case 's5r-run': await busy('Đang chạy STEP 5R – hàng bán bị trả lại…', async () => P3.doRun5R()); render(); break;
+    case 's5r-run': await busy('Đang chạy STEP 5R – hàng bán bị trả lại…', async () => { await P3.doRun5R(); FGP.postCurrent(S, { silent: true }); }); render(); break;
     case 'ret-save': await busy('Đang Validate & Save hàng trả lại / giảm giá…', async () => P3.doReturnsSave()); render(); break;
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
     case 's5-close': await P3.doClose(); render(); break;

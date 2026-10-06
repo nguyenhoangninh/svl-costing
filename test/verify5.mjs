@@ -55,8 +55,16 @@ expect('open layers', opening.stats.layers, cell(oG, 'D3'), 0); expect('open amt
 const sG = G('05_SALES_COGS'); const overrides = {};
 for (let r = 5; r < sG.length; r++) { const x = sG[r] || []; if (ttxt(x[22]) && ttxt(x[12])) overrides[ttxt(x[22])] = x[12]; }
 const recG = G('05_RECONCILIATION');
-const res = F5.runFIFO({ period: PERIOD, opening, caRows: fl0.rows, salesRows: salesDB.rows, pmRows: pm.rows, fx: gl.fx, overrides, mode: cell(recG, 'L3'), tol: cell(recG, 'L4'),
-  step4: { current: 'CURRENT', overall: fl0.overall, finalCost: fl0.totals.totalCost, qty: s4.recon.rows[1].result } });
+const fifoArgs = { monthlySplit: 'PRORATA', period: PERIOD, opening, caRows: fl0.rows, salesRows: salesDB.rows, pmRows: pm.rows, fx: gl.fx, overrides, mode: cell(recG, 'L3'), tol: cell(recG, 'L4'),
+  step4: { current: 'CURRENT', overall: fl0.overall, finalCost: fl0.totals.totalCost, qty: s4.recon.rows[1].result } };
+const res = F5.runFIFO(fifoArgs);
+// v1.13 default MONTHLY split by invoice: same month totals / closing as the workbook, every take tied to an invoice
+{ const inv = F5.runFIFO({ ...fifoArgs, monthlySplit: 'INVOICE' }); const sumBy = (r) => Object.fromEntries(r.summary.map((x) => [x.prod, Math.round(x.cogsA)]));
+  expect('INVOICE split: month COGS = workbook', inv.totals.cogsA, res.totals.cogsA, 1); expect('INVOICE split: closing FG = workbook', inv.totals.closeA, res.totals.closeA, 1);
+  expect('INVOICE split: COGS by product = workbook', JSON.stringify(sumBy(inv)), JSON.stringify(sumBy(res)));
+  expect('INVOICE split: every take has an invoice', inv.detail.every((d) => d.line > 0 && d.inv !== undefined), true);
+  expect('INVOICE split: line COGS = detail', inv.sumLineA, inv.sumDetA, 1); expect('INVOICE split: run result', inv.runResult, res.runResult); }
+
 // Policy since v1.9 (owner decision #1, 02/10/2026): active FG rework must run STRICT_DATE; the workbook ran MONTHLY.
 expect('gate MONTHLY blocked by policy', F5.reworkGate(register, salesDB.rows, PERIOD, 'MONTHLY').startsWith('BLOCK - STRICT DATE REQUIRED'), true);
 expect('gate STRICT_DATE ok', F5.reworkGate(register, salesDB.rows, PERIOD, 'STRICT_DATE'), '');
