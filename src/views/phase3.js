@@ -763,7 +763,7 @@ export function doBuildHistory() {
 const cloudTransitionMessage = (op, err) => {
   const msg = err && err.message ? err.message : String(err || '');
   return /missing or insufficient permissions/i.test(msg)
-    ? `${op}: Firestore từ chối quyền ghi. Kiểm tra đã Publish firestore.rules v1.10.1 và tài khoản hiện tại có role Admin; nếu Rules chưa đồng bộ, CLOSE/REOPEN sẽ không được commit.`
+    ? `${op}: Firestore từ chối quyền ghi. Kiểm tra (1) tài khoản đang đăng nhập là Quản trị (email chủ sở hữu trong firestore.rules trên Firebase console hoặc role admin ở Cài đặt → Người dùng); (2) đã Publish firestore.rules mới nhất. Kỳ vẫn giữ nguyên trạng thái trên cloud.`
     : `${op}: ${msg}`;
 };
 

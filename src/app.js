@@ -132,8 +132,10 @@ async function pushCloudOnce() {
     if (baseRev === undefined || baseRev === null) baseRev = (await store.localGet(lk(p, 'cloudAt'))) || null; // legacy device state
     const blobs = blobsOf(data);
     const live = summaryForCloud();
-    // REOPEN may change only the 'closed' blob and summary.closed / everClosed / step5 (firestore.rules)
-    const summary = reopen ? { ...meta0.summary, closed: null, everClosed: true, step5: live.step5 } : live;
+    // REOPEN changes only the 'closed' blob and summary.closed / everClosed. That is allowed by every published version of
+    // firestore.rules (v1.10.0 did not allow summary.step5 to change in the REOPEN revision). The live step5 status follows
+    // in the next normal save, which the rules allow once the period is OPEN.
+    const summary = reopen ? { ...meta0.summary, closed: null, everClosed: true } : live;
     const meta = await store.cloudSave(p, blobs, summary, (m) => { S.syncMsg = m; renderSync(); }, baseRev, reopen ? { keepAllExcept: ['closed'] } : {});
     await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
     if ((S.editSeq || 0) === seq && !reopen) await store.localDel(lk(p, 'unsynced'));

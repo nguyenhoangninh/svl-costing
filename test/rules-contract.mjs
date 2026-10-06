@@ -5,6 +5,7 @@ const ok = (label, cond) => { total++; console.log(`${cond ? '✓' : '✗'} ${la
 const rules = fs.readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
 const store = fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
+const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 
 ok('explicit admin CLOSE transition exists', rules.includes("isAdmin() && closedOf(resource.data) == null && closedOf(request.resource.data) != null"));
 ok('closed period REOPEN changes only closed manifest key', rules.includes("affectedKeys().hasOnly(['closed'])"));
@@ -27,7 +28,8 @@ ok('close persists local closedEver retention state', phase3.includes('d.closedE
 ok('close snapshots exception package', phase3.includes('exceptions'));
 ok('CLOSE has cloud-state preflight', phase3.includes("Cloud đã ghi kỳ này là CLOSED"));
 ok('REOPEN has cloud-state preflight', phase3.includes("Cloud đang ở trạng thái OPEN"));
-ok('permission error gives rules/admin guidance', phase3.includes('Publish firestore.rules v1.10.1'));
+ok('permission error gives rules/admin guidance', phase3.includes('Publish firestore.rules mới nhất') && phase3.includes('Quản trị'));
+ok('REOPEN revision changes only closed / everClosed (accepted by every published rules version)', app.includes('closed: null, everClosed: true }') && !app.includes('step5: live.step5'));
 
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
