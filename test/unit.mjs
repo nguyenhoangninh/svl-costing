@@ -3,6 +3,7 @@ import { parseUserNumber, cellDateSerial, num } from '../src/engine/util.js';
 import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.js';
 import { buildFingerprint } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
+import { recheckRegisterRow } from '../src/engine/step2.js';
 import { splitBooks, bookOf } from '../src/engine/revenue.js';
 import * as FP from '../src/engine/fgprod.js';
 
@@ -200,6 +201,27 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const rS2 = F5.runFIFO({ ...base, mode: 'STRICT_DATE', register: reg2 }); F5.runReworkFIFO(rS2, reg2, { period: P2, opening: op0, salesRows: [], step4Carry: 0 });
   eq('#1 STRICT: rework after production takes it', [reg2.rows[0].fifoStatus, Math.round(reg2.rows[0].fifoCost)], ['PASS', 200]);
   eq('#1 STRICT: gate allows rework', F5.reworkGate(reg2, [], P2, 'STRICT_DATE'), '');
+  // ---- 5B rework dispositions: pending stays in 154; returned → FG layer; written off → expense; scrap share expensed
+  {
+    const disp = (extra) => { const rg = { rows: [{ ...reg.rows[0], outFG: 'A', issueDate: ser(2026, 8, 25), ...extra }] }; rg.rows.forEach(recheckRegisterRow); const r = F5.runFIFO({ ...base, mode: 'STRICT_DATE', register: rg }); F5.runReworkFIFO(r, rg, { period: P2, opening: op0, salesRows: [], step4Carry: 0 }); return { r, row: rg.rows[0] }; };
+    const open = disp({});
+    eq('5B pending: cost parked in 154, not FG / COGS', [Math.round(open.row.closingWIP), Math.round(open.r.totals.cogsA), Math.round(open.r.totals.closeA), open.r.rework.gate8], [200, 0, 300, 'PASS']);
+    const back = disp({ rwStatus: 'RETURNED TO FG', dispNote: 'Khách huỷ yêu cầu sửa', compDate: ser(2026, 8, 28) });
+    const lay = back.r.closing.find((c) => c.source === 'REWORK RETURN');
+    eq('5B returned to FG: new FG layer at the same cost, 154 = 0', [Math.round(back.row.returnedFG), back.row.closingWIP, lay && lay.qty, lay && Math.round(lay.tot), Math.round(back.r.totals.closeA)], [200, 0, 2, 200, 500]);
+    eq('5B returned to FG: roll-forward 8 / 9 / 10 and Batch 8 pass', [back.r.rec[8].status, back.r.rec[9].status, back.r.rec[10].status, back.r.rework.gate8], ['PASS', 'PASS', 'PASS', 'PASS']);
+    const noNote = disp({ rwStatus: 'WRITTEN OFF' });
+    eq('5B write-off without reason stays in 154 (REVIEW)', [noNote.row.inputCheck, Math.round(noNote.row.closingWIP), noNote.row.writeOff], ['REVIEW - NOTE REQUIRED', 200, 0]);
+    const wo = disp({ rwStatus: 'WRITTEN OFF', dispNote: 'Không sửa được, huỷ', woAccount: '811' });
+    eq('5B written off: expensed to chosen account, out of 154', [Math.round(wo.row.writeOff), wo.row.closingWIP, wo.r.rework.woByAcc, wo.r.rework.gate8], [200, 0, { 811: 200 }, 'PASS']);
+    const scrap = disp({ rwStatus: 'COMPLETED', pcNo: 'PC-RW', outFG: 'A', compQty: 1, scrapQty: 1, scrapTreat: 'EXPENSE' });
+    eq('5B completed with scrap expensed: half to new lot, half to expense', [Math.round(scrap.row.carryIn), Math.round(scrap.row.writeOff), scrap.row.closingWIP], [100, 100, 0]);
+    const absorb = disp({ rwStatus: 'COMPLETED', pcNo: 'PC-RW', outFG: 'A', compQty: 1, scrapQty: 1 });
+    eq('5B completed, scrap absorbed (default): all to new lot', [Math.round(absorb.row.carryIn), absorb.row.writeOff], [200, 0]);
+    const bfRow = { active: 'B/F', rid: 'RB', fg: 'A', fgName: 'A', bfQty: 3, bfCost: 270, issueDate: ser(2026, 6, 2), rwStatus: 'RETURNED TO FG', rwType: 'NORMAL', dispNote: 'Trả kho', outFG: 'A', originPeriod: '2026-06', period: P2 };
+    const rgB = { rows: [recheckRegisterRow({ ...bfRow })] }; const rB = F5.runFIFO({ ...base, mode: 'STRICT_DATE', register: rgB }); F5.runReworkFIFO(rB, rgB, { period: P2, opening: op0, salesRows: [], step4Carry: 0 });
+    eq('5B B/F rework returned to FG this month', [Math.round(rgB.rows[0].returnedFG), rB.closing.some((c) => c.source === 'REWORK RETURN' && c.qty === 3), rB.rec[9].status, rB.rework.gate8], [270, true, 'PASS', 'PASS']);
+  }
   let monthlyRwErr = ''; try { F5.runFIFO({ ...base, mode: 'MONTHLY', register: reg2 }); } catch (e) { monthlyRwErr = e.message; }
   eq('#1 MONTHLY active rework is blocked by engine', monthlyRwErr.includes('STRICT_DATE'), true);
   const undatedRun = F5.runFIFO({ ...base, caRows: [{ ...ca1[0], date: null }], mode: 'STRICT_DATE', register: { rows: [] }, salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 6), 'U9', 'A', 1, 10)] }, { rows: [] }, P2).db.rows });

@@ -53,15 +53,18 @@ export function engineBalances(S, p2, res) {
     a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0) - w632,
     a155: res ? res.totals.closeA : 0,
     a2294: nrvAdj,
-    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj,
+    // rework written off to 632 (unrepairable / scrap expensed, owner request 06/10/2026) is part of the 632 movement
+    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
     ...(() => { const bk = books(S); const rb = F5.revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions); return { a511: rb.a511, a5212: rb.a5212, a5213: rb.a5213 }; })(),
   };
 }
 function snap(S, D4) {
   const d = S.d; const fl = D4 && D4.fl;
   return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode, dupKey: dupKey(S),
-    flKey: flKey(fl), ovKey: ovKey(S), rate: sellRate(S) };
+    flKey: flKey(fl), ovKey: ovKey(S), rate: sellRate(S), rwKey: rwKey(S) };
 }
+/** Rework dispositions entered by the user (status / scrap / expense account / completion) – a change needs RUN FIFO again. */
+export const rwKey = (S) => fpRows((S.d.register && S.d.register.rows) || [], (r) => [ttxt(r.rid), utxt(r.rwType), utxt(r.rwStatus), ttxt(r.pcNo), num(r.compQty), num(r.scrapQty), utxt(r.scrapTreat), ttxt(r.woAccount), ttxt(r.dispNote).length >= 5 ? 1 : 0].join('|'));
 /** STEP 5R resolutions (original invoice / manual unit cost per return line). */
 export const rmKey = (S) => fpRows(Object.entries(S.d.returnMatches || {}), ([k, v]) => `${k}=${ttxt(v.origInv)}|${num(v.unitCost)}`);
 /** Audit F-03: final STEP 4 cost per lot (3B / rework carry-in can move between lots with an unchanged total) and the FIFO overrides. */
@@ -98,6 +101,7 @@ function staleReason(S, D4, d3b) {
   if (p.flKey !== undefined && c.flKey !== p.flKey) return 'Giá thành từng lô ở STEP 4 đã đổi (điều chỉnh 3B / rework chuyển giữa các lô)';
   if (p.ovKey !== undefined && c.ovKey !== p.ovKey) return 'Lựa chọn xử lý FIFO (override) đã đổi';
   if (p.rate !== undefined && c.rate !== p.rate) return 'Tỷ lệ chi phí bán hàng (NRV) đã đổi';
+  if (p.rwKey !== undefined && c.rwKey !== p.rwKey) return 'Xử lý rework đã đổi (hoàn thành / trả về kho / ra chi phí)';
   return '';
 }
 function freshness(S, D4, d3b) {
@@ -177,22 +181,27 @@ function step5Controls(S, x) {
   const rw = res && res.rework ? res.rework : null;
   const srcQ = sumOf(reg, 'issueQty'), fifoQ = rw ? rw.fifoQty : 0, fifoC = rw ? rw.fifoCost : 0;
   const bf = reg.filter((r) => r.active === 'B/F').reduce((a, r) => a + num(r.bfCost), 0);
-  const e12 = fifoC + bf, f12 = sumOf(reg, 'closingWIP') + sumOf(reg, 'carryIn');
+  const rwOut = sumOf(reg, 'writeOff') + sumOf(reg, 'returnedFG');
+  const e12 = fifoC + bf, f12 = sumOf(reg, 'closingWIP') + sumOf(reg, 'carryIn') + rwOut;
   const comp = sumOf(reg, 'carryIn'), stepCarry = fl ? fl.totals.carryIn : 0;
   add('11', '5B · SL rework = SL chuyển FIFO', srcQ, fifoQ, stale ? 'RERUN FIFO' : Math.abs(fifoQ - srcQ) <= 0.000001 ? 'PASS' : 'CHECK', 'Sổ rework ↔ FIFO rework');
   add('12', '5B · FIFO + B/F = WIP rework cuối + chuyển vào', e12, f12, stale ? 'RERUN FIFO' : Math.abs(f12 - e12) <= 1 ? 'PASS' : 'CHECK', 'Không mất giá trị rework');
   add('13', '5B · Rework hoàn thành = chuyển vào STEP 4', comp, stepCarry, stale ? 'RERUN FIFO' : Math.abs(stepCarry - comp) <= 1 ? 'PASS' : 'CHECK', 'Giá trị lô rework vào STEP 4');
+  { const ageN = num((d.rwCfg && d.rwCfg.agingMonths) || 3); const mb = (x) => (/^\d{4}-\d{2}$/.test(x) ? (+S.period.slice(0, 4) - +x.slice(0, 4)) * 12 + (+S.period.slice(5) - +x.slice(5)) : 0);
+    const aged = reg.filter((r) => num(r.closingWIP) > 1 && mb(ttxt(r.originPeriod) || S.period) >= ageN);
+    if (reg.length) add('13b', `5B · Rework treo từ ${ageN} tháng trở lên`, 0, aged.length, aged.length ? 'REVIEW' : 'PASS', aged.length ? `${A.fmtNum(aged.reduce((a, r) => a + num(r.closingWIP), 0))} VND – xử lý ở màn hình 5B (hoàn thành / trả về kho / ra chi phí)` : 'Không có'); }
   const conf = rw ? rw.conflicts : 0;
   add('14', '5B · Xung đột thứ tự thời gian', 0, conf, conf === 0 ? 'PASS' : 'BLOCK', rw && rw.mode === 'STRICT_DATE' ? `STRICT_DATE: bán hàng và rework chạy chung theo ngày (${rw.rawConflicts || 0} trường hợp đã xử lý)` : 'Phải bằng 0 ở chế độ MONTHLY');
   if (rw && rw.mode !== 'STRICT_DATE' && rw.lateLayers) add('14b', '5B · Rework lấy lớp hoàn thành sau ngày xuất', 0, rw.lateLayers, 'REVIEW', 'MONTHLY lấy lớp cũ nhất còn lại sau bán hàng – dùng STRICT_DATE để FIFO theo ngày xuất');
   const T = res ? res.totals : null;
-  const f201 = T ? T.openA + (fl ? fl.totals.totalCost : 0) - T.cogsA - num(T.rwTot) - T.closeA : 0;
-  add('15', 'Cầu nối TK 155 (gồm rework)', 0, f201, Math.abs(f201) <= 1 ? 'PASS' : 'REVIEW', 'Đầu kỳ + nhập kho − COGS − rework − cuối kỳ');
+  const rfA = rw ? num(rw.returnedFG) : 0;
+  const f201 = T ? T.openA + (fl ? fl.totals.totalCost : 0) - T.cogsA - num(T.rwTot) + rfA - T.closeA : 0;
+  add('15', 'Cầu nối TK 155 (gồm rework)', 0, f201, Math.abs(f201) <= 1 ? 'PASS' : 'REVIEW', 'Đầu kỳ + nhập kho − COGS − xuất rework + rework trả về kho − cuối kỳ');
   // audit F-17: VBA Control Center F200 "WIP 154 bridge (incl. 3B & Rework)"
   const s3 = d.step3, s4 = d.step4;
   if (res && s3 && fl && x.d3b && s4 && !s4.blocked) {
     const S3 = s3.summary;
-    const f200 = num(s3.openingAmt) + num(S3.miAmt) + num(S3.soAmt) + num(s4.alloc622) + num(s4.alloc627) + fifoC + bf - num(S3.mrAmt) - fl.totals.totalCost - x.d3b.wf.finalClosing - sumOf(reg, 'closingWIP');
+    const f200 = num(s3.openingAmt) + num(S3.miAmt) + num(S3.soAmt) + num(s4.alloc622) + num(s4.alloc627) + fifoC + bf - num(S3.mrAmt) - fl.totals.totalCost - x.d3b.wf.finalClosing - sumOf(reg, 'closingWIP') - rwOut;
     add('15a', 'Cầu nối TK 154 (gồm 3B & rework)', 0, f200, Math.abs(f200) <= 1 ? 'PASS' : stale ? 'RERUN FIFO' : 'REVIEW', 'WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối (sau 3B) − rework WIP cuối');
   }
   if (res && x.tie) add('15b', 'Đối chiếu FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213', 0, x.tie.diffs, x.tie.status === 'PASS' ? 'PASS' : x.tie.status === 'APPROVED' ? 'REVIEW' : x.tie.status === 'NOT ENTERED' ? 'REVIEW' : 'REVIEW', x.tie.status === 'NOT ENTERED' ? 'Chưa nhập số dư FAST' : x.tie.status === 'APPROVED' ? `Chênh lệch đã xác nhận bởi ${x.tie.approval.by}` : x.tie.diffs ? 'Lệch – cần xác nhận trước khi đóng kỳ' : 'Khớp FAST');

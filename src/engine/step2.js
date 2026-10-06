@@ -234,13 +234,17 @@ export function rawStockOutAmounts(datasets, period) {
 
 // ======================= 2B — FG Rework register =======================
 export const RW_FIELDS = ['active', 'period', 'rid', 'erp', 'doc', 'srcRow', 'issueDate', 'fg', 'fgName', 'itemType', 'loc', 'uom', 'issueQty', 'erpRef', 'reason', 'jobKey',
-  'rwType', 'rwStatus', 'pcNo', 'outFG', 'compDate', 'compQty', 'scrapQty', 'note', 'inputCheck', 'fifoStatus', 'fifoQty', 'fifoCost', 'closingWIP', 'carryIn', 'lastFifoRun', 'rowSource', 'bfQty', 'bfCost', 'originPeriod'];
+  'rwType', 'rwStatus', 'pcNo', 'outFG', 'compDate', 'compQty', 'scrapQty', 'note', 'inputCheck', 'fifoStatus', 'fifoQty', 'fifoCost', 'closingWIP', 'carryIn', 'lastFifoRun', 'rowSource', 'bfQty', 'bfCost', 'originPeriod', 'scrapTreat', 'woAccount', 'dispNote', 'dispBy', 'dispAt', 'writeOff', 'returnedFG', 'scrapCost'];
 export const RW_HEADERS = ['Active', 'Period', 'Rework ID', 'ERP', 'Stock Out Doc', 'Source Row', 'Issue Date', 'FG Code', 'FG Name', 'Item Type', 'Location', 'UOM', 'Issue Qty', 'ERP Amount Ref - Memo', 'Reason / Division', 'Job Code / Customer',
-  'Rework Type', 'Rework Status', 'Rework PC No.', 'Output FG Code', 'Completion Date', 'Completed Qty', 'Scrap Qty', 'Note', 'Input Check', 'FIFO Status', 'FIFO Transfer Qty', 'FIFO Transfer Cost', 'Closing Rework WIP', 'Completed Carry-In', 'Last FIFO Run', 'Row Source', 'B/F Qty', 'B/F Carry Cost', 'Origin Period'];
+  'Rework Type', 'Rework Status', 'Rework PC No.', 'Output FG Code', 'Completion Date', 'Completed Qty', 'Scrap Qty', 'Note', 'Input Check', 'FIFO Status', 'FIFO Transfer Qty', 'FIFO Transfer Cost', 'Closing Rework WIP', 'Completed Carry-In', 'Last FIFO Run', 'Row Source', 'B/F Qty', 'B/F Carry Cost', 'Origin Period', 'Scrap Treatment', 'Expense Account', 'Disposition Note', 'Disposition By', 'Disposition At', 'Written Off', 'Returned To FG', 'Scrap Expense'];
 export const RW_EDITABLE = ['rwType', 'rwStatus', 'pcNo', 'outFG', 'compDate', 'compQty', 'scrapQty', 'note'];
 
-export function rwInputCheck(rwType, status, pcNo, issueQty, compQty, scrapQty, outFG) {
+/** Rework statuses. OPEN / HOLD = pending (cost stays in rework WIP 154); the other three are dispositions (owner request 06/10/2026). */
+export const RW_STATUSES = ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF'];
+export function rwInputCheck(rwType, status, pcNo, issueQty, compQty, scrapQty, outFG, dispNote = null) {
   rwType = utxt(rwType); status = utxt(status); pcNo = ttxt(pcNo); outFG = ttxt(outFG);
+  // returned unchanged to FG stock / written off (cannot be repaired, abnormal): a reason is required, no output FG / PC
+  if (status === 'RETURNED TO FG' || status === 'WRITTEN OFF') return ttxt(dispNote).length >= 5 ? 'PASS' : 'REVIEW - NOTE REQUIRED';
   if (!outFG) return 'BLOCK - OUTPUT FG REQUIRED';
   if (rwType === 'ABNORMAL') return 'REVIEW - ABNORMAL REWORK';
   if (status === 'COMPLETED') {
@@ -252,6 +256,25 @@ export function rwInputCheck(rwType, status, pcNo, issueQty, compQty, scrapQty, 
   }
   if (status === 'OPEN' || status === 'HOLD') return 'PASS';
   return 'BLOCK - STATUS';
+}
+/**
+ * Where a rework line's carrying cost goes (cost = FIFO transfer this period, or B/F cost):
+ *  COMPLETED (NORMAL)  → carry-in to the rework PC lot (STEP 4); scrap share to expense when scrapTreat = EXPENSE
+ *  RETURNED TO FG      → back to FG stock as a new layer at the same cost (Dr 155 / Cr 154)
+ *  WRITTEN OFF         → expense, account woAccount (default 632) (Dr 632 or 811 / Cr 154)
+ *  OPEN / HOLD / not passed → stays in rework WIP 154 and rolls to the next period.
+ */
+export function rwAllocate(row, cost, fifoOk = true) {
+  const o = { closingWIP: 0, carryIn: 0, writeOff: 0, returnedFG: 0, scrapCost: 0 };
+  const st = utxt(row.rwStatus);
+  if (!fifoOk || utxt(row.inputCheck) !== 'PASS') { o.closingWIP = cost; return o; }
+  if (st === 'COMPLETED' && utxt(row.rwType) === 'NORMAL') {
+    const comp = num(row.compQty), scrap = num(row.scrapQty);
+    if (scrap > TOL_QTY && utxt(row.scrapTreat) === 'EXPENSE' && comp + scrap > TOL_QTY) { o.scrapCost = cost * scrap / (comp + scrap); o.writeOff = o.scrapCost; o.carryIn = cost - o.scrapCost; } else o.carryIn = cost;
+  } else if (st === 'WRITTEN OFF') o.writeOff = cost;
+  else if (st === 'RETURNED TO FG') o.returnedFG = cost;
+  else o.closingWIP = cost;
+  return o;
 }
 
 export function collectFGSource(datasets, period) {
@@ -298,8 +321,9 @@ export function buildReworkRegister(datasets, period, oldRows = [], bf = []) {
       row.rwStatus = blank(o.rwStatus) ? 'OPEN' : o.rwStatus;
       row.pcNo = o.pcNo; row.outFG = blank(o.outFG) ? v.fg : o.outFG;
       row.compDate = o.compDate; row.compQty = o.compQty; row.scrapQty = o.scrapQty; row.note = o.note;
+      row.scrapTreat = o.scrapTreat ?? null; row.woAccount = o.woAccount ?? null; row.dispNote = o.dispNote ?? null; row.dispBy = o.dispBy ?? null; row.dispAt = o.dispAt ?? null;
     } else { row.rwType = 'NORMAL'; row.rwStatus = 'OPEN'; row.outFG = v.fg; }
-    row.inputCheck = rwInputCheck(row.rwType, row.rwStatus, row.pcNo, num(row.issueQty), num(row.compQty), num(row.scrapQty), txt(row.outFG));
+    row.inputCheck = rwInputCheck(row.rwType, row.rwStatus, row.pcNo, num(row.issueQty), num(row.compQty), num(row.scrapQty), txt(row.outFG), row.dispNote ?? null);
     row.fifoStatus = 'NOT RUN'; row.fifoQty = 0; row.fifoCost = 0; row.closingWIP = 0; row.carryIn = 0; row.lastFifoRun = null;
     if (o) {
       const of = utxt(o.fifoStatus);
@@ -307,7 +331,7 @@ export function buildReworkRegister(datasets, period, oldRows = [], bf = []) {
         if (Math.abs(num(o.issueQty) - num(row.issueQty)) <= TOL_QTY && Math.abs(num(o.fifoQty) - num(row.issueQty)) <= TOL_QTY) {
           const t = num(o.fifoCost);
           row.fifoStatus = 'PASS'; row.fifoQty = num(o.fifoQty); row.fifoCost = t;
-          if (utxt(row.rwStatus) === 'COMPLETED' && utxt(row.rwType) === 'NORMAL') { row.closingWIP = 0; row.carryIn = t; } else { row.closingWIP = t; row.carryIn = 0; }
+          Object.assign(row, rwAllocate(row, t));
           row.lastFifoRun = o.lastFifoRun;
         } else row.fifoStatus = 'RERUN FIFO - QTY CHANGED';
       } else if (of && of !== 'NOT RUN') row.fifoStatus = 'RERUN FIFO';
@@ -325,7 +349,8 @@ export function buildReworkRegister(datasets, period, oldRows = [], bf = []) {
     row.rwStatus = blank(src.rwStatus) ? 'OPEN' : src.rwStatus;
     row.pcNo = src.pcNo; row.outFG = blank(src.outFG) ? h.fg : src.outFG;
     row.compDate = src.compDate; row.compQty = src.compQty; row.scrapQty = src.scrapQty; row.note = src.note;
-    row.inputCheck = rwInputCheck(row.rwType, row.rwStatus, row.pcNo, num(h.bfQty), num(row.compQty), num(row.scrapQty), txt(row.outFG));
+    row.scrapTreat = src.scrapTreat ?? null; row.woAccount = src.woAccount ?? null; row.dispNote = src.dispNote ?? null; row.dispBy = src.dispBy ?? null; row.dispAt = src.dispAt ?? null;
+    row.inputCheck = rwInputCheck(row.rwType, row.rwStatus, row.pcNo, num(h.bfQty), num(row.compQty), num(row.scrapQty), txt(row.outFG), row.dispNote ?? null);
     row.fifoStatus = 'OPENING B/F'; row.fifoQty = 0; row.fifoCost = 0; row.closingWIP = num(h.carryCost); row.carryIn = 0; row.lastFifoRun = null;
     row.rowSource = 'OPENING B/F'; row.bfQty = num(h.bfQty); row.bfCost = num(h.carryCost); row.originPeriod = h.originPeriod;
     bfCost += num(h.carryCost);
@@ -341,11 +366,9 @@ export function buildReworkRegister(datasets, period, oldRows = [], bf = []) {
 /** Re-evaluate Input Check after the user edits manual columns. */
 export function recheckRegisterRow(row) {
   const qty = row.active === 'B/F' ? num(row.bfQty) : num(row.issueQty);
-  row.inputCheck = rwInputCheck(row.rwType, row.rwStatus, row.pcNo, qty, num(row.compQty), num(row.scrapQty), txt(row.outFG));
-  if (utxt(row.fifoStatus) === 'PASS') {
-    const t = num(row.fifoCost);
-    if (utxt(row.rwStatus) === 'COMPLETED' && utxt(row.rwType) === 'NORMAL') { row.closingWIP = 0; row.carryIn = t; } else { row.closingWIP = t; row.carryIn = 0; }
-  }
+  row.inputCheck = rwInputCheck(row.rwType, row.rwStatus, row.pcNo, qty, num(row.compQty), num(row.scrapQty), txt(row.outFG), row.dispNote ?? null);
+  if (utxt(row.fifoStatus) === 'PASS') Object.assign(row, rwAllocate(row, num(row.fifoCost)));
+  else if (utxt(row.fifoStatus) === 'OPENING B/F') Object.assign(row, rwAllocate(row, num(row.bfCost)));
   return row;
 }
 

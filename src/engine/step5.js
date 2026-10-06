@@ -4,6 +4,7 @@
 import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, cellDateSerial, recognitionDate, fp } from './util.js';
 import * as RET from './return.js';
 import { bookOf } from './revenue.js';
+import { rwAllocate } from './step2.js';
 
 export const TOLQ = 0.0001;          // S5_TOLQ
 const TOL_QTY = 0.000001;            // modSTEP5_MonthClose / RW
@@ -602,7 +603,8 @@ export function runReworkFIFO(res, register, ctx) {
     }
     const fs = nd > TOL_QTY ? (plan ? 'BLOCK - INSUFFICIENT FG AT ISSUE DATE' : 'BLOCK - INSUFFICIENT FG') : 'PASS';
     r.fifoStatus = fs; r.fifoQty = tq; r.fifoCost = tt;
-    if (utxt(r.rwStatus) === 'COMPLETED' && utxt(r.rwType) === 'NORMAL' && fs === 'PASS') { r.closingWIP = 0; r.carryIn = tt; } else { r.closingWIP = tt; r.carryIn = 0; }
+    Object.assign(r, rwAllocate(r, tt, fs === 'PASS'));
+    r._comp = { rm: trm, a622: t622, a627: t627 };
     r.lastFifoRun = now;
   }
   // RW_ProcessOpeningRework
@@ -610,7 +612,7 @@ export function runReworkFIFO(res, register, ctx) {
     if (utxt(r.active) !== 'B/F') continue;
     const cost = num(r.bfCost);
     r.fifoStatus = 'OPENING B/F'; r.fifoQty = 0; r.fifoCost = 0;
-    if (utxt(r.rwStatus) === 'COMPLETED' && utxt(r.rwType) === 'NORMAL' && utxt(r.inputCheck) === 'PASS') { r.closingWIP = 0; r.carryIn = cost; } else { r.closingWIP = cost; r.carryIn = 0; }
+    Object.assign(r, rwAllocate(r, cost, true));
     r.lastFifoRun = now;
   }
   // RW_RefreshClosingFromLedger
@@ -632,6 +634,22 @@ export function runReworkFIFO(res, register, ctx) {
     if (utxt(c.status) === 'REVIEW - COST > PRICE') nrv++;
     closing.push(c);
   }
+  // Rework returned unchanged to FG stock (owner request 06/10/2026): a new FG layer at the rework carrying cost (Dr 155 / Cr 154)
+  const RF = { q: 0, rm: 0, a622: 0, a627: 0, tot: 0, rows: 0 };
+  const rfByProd = new Map();
+  for (const r of register.rows) {
+    const amt = num(r.returnedFG); if (!(amt > TOL_AMT)) continue;
+    const q = utxt(r.active) === 'B/F' ? num(r.bfQty) : num(r.fifoQty); if (!(q > TOL_QTY)) continue;
+    const c = r._comp && Math.abs(r._comp.rm + r._comp.a622 + r._comp.a627 - amt) <= TOL_AMT ? r._comp : { rm: amt, a622: 0, a627: 0 };
+    const prod = utxt(r.fg); const dt = dateVal(r.compDate) || dateVal(r.issueDate) || 0;
+    const lid = `RWR-${period.replace('-', '')}-${ttxt(r.rid).replace(/[^A-Za-z0-9]/g, '').slice(-20)}`;
+    const layer = { period, srcPeriod: period, lid, source: 'REWORK RETURN', pc: ttxt(r.doc), date: dt || null, mo: '', prod, name: ttxt(r.fgName), loc: ttxt(r.loc), unit: ttxt(r.uom), qty: q, rm: c.rm, a622: c.a622, a627: c.a627, tot: amt, unitCost: amt / q, price: null, prov: 0, cons: '', status: 'OK', msg: `Rework trả về kho: ${ttxt(r.rid)}` };
+    closing.push(layer);
+    ledger.push({ seq: ledger.length + 1, lid, source: 'REWORK RETURN', srcPeriod: period, pc: layer.pc, date: layer.date, mo: '', prod, name: layer.name, unit: layer.unit, qtyIn: q, rm: c.rm, a622: c.a622, a627: c.a627, tot: amt, unitCost: amt / q, qtyOut: 0, rmOut: 0, o622: 0, o627: 0, totOut: 0, remQ: q, remTot: amt, flag: layer.msg });
+    RF.q += q; RF.rm += c.rm; RF.a622 += c.a622; RF.a627 += c.a627; RF.tot += amt; RF.rows++;
+    const pr = rfByProd.get(prod) || { q: 0, a: 0, name: layer.name }; pr.q += q; pr.a += amt; rfByProd.set(prod, pr);
+  }
+  for (const r of register.rows) delete r._comp;
   // NRV after rework: layers that changed quantity need their provision proposal recomputed
   for (const c of closing) if (num(c.nrvUnit) > 0 && num(c.qty) > TOL_QTY) { const net = (num(c.tot) + num(c.prov)) / num(c.qty); c.provNeed = Math.max(0, net - num(c.nrvUnit)) * num(c.qty); }
   res.totals.nrvProv = closing.reduce((a, c) => a + num(c.provNeed), 0);
@@ -645,13 +663,15 @@ export function runReworkFIFO(res, register, ctx) {
   for (const f of rwf) { const p = ttxt(f.fg).toUpperCase(); if (!p) continue; add(dq, p, f.qty); add(drm, p, f.rm); add(d622, p, f.a622); add(d627, p, f.a627); add(dt, p, f.tot); }
   for (const c of closing) { const p = ttxt(c.prod).toUpperCase(); if (!p) continue; add(cq, p, num(c.qty)); add(ca, p, num(c.tot)); add(cl, p, 1); }
   const g = (m, k) => m.get(k) || 0;
+  for (const [p, v] of rfByProd) if (!res.summary.some((k) => ttxt(k.prod).toUpperCase() === p)) res.summary.push({ prod: p, name: v.name, openQ: null, openA: null, prodQ: null, prodA: null, cogsQ: 0, cogsRM: 0, cogs622: 0, cogs627: 0, cogsA: 0, closeQ: null, closeA: null, eligQ: null, layers: null, status: 'OK', msg: 'Rework trả về kho' });
   const RT = { q: 0, rm: 0, a622: 0, a627: 0, tot: 0 };
   for (const k of res.summary) {
     const p = ttxt(k.prod).toUpperCase(); if (!p) continue;
     k.rwQ = g(dq, p); k.rwRM = g(drm, p); k.rw622 = g(d622, p); k.rw627 = g(d627, p); k.rwTot = g(dt, p);
     k.closeQ = g(cq, p); k.closeA = g(ca, p); k.layers = g(cl, p);
-    const qd = num(k.openQ) + num(k.prodQ) - num(k.cogsQ) - k.rwQ - k.closeQ;
-    const ad = num(k.openA) + num(k.prodA) - num(k.cogsA) - k.rwTot - k.closeA;
+    const rf = rfByProd.get(p) || { q: 0, a: 0 }; k.rfQ = rf.q; k.rfA = rf.a;
+    const qd = num(k.openQ) + num(k.prodQ) - num(k.cogsQ) - k.rwQ + rf.q - k.closeQ;
+    const ad = num(k.openA) + num(k.prodA) - num(k.cogsA) - k.rwTot + rf.a - k.closeA;
     k.rollStatus = Math.abs(qd) <= TOL_QTY && Math.abs(ad) <= TOL_AMT ? 'PASS' : 'CHECK';
     RT.q += k.rwQ; RT.rm += k.rwRM; RT.a622 += k.rw622; RT.a627 += k.rw627; RT.tot += k.rwTot;
   }
@@ -662,34 +682,35 @@ export function runReworkFIFO(res, register, ctx) {
   // RW_PatchStep5Reconciliation
   const T = res.totals;
   const st = (d, t) => (Math.abs(d) <= t ? 'PASS' : 'CHECK');
-  const q8 = T.openQ + T.prodQ - T.cogsQ - RT.q - T.closeQ;
-  res.rec[8] = { expected: 0, result: q8, diff: q8, status: st(q8, TOL_QTY), note: 'Opening + Production - Sales COGS - FG Rework - Closing' };
-  const a9 = T.openA + T.prodA - T.cogsA - RT.tot - T.closeA;
-  res.rec[9] = { expected: 0, result: a9, diff: a9, status: st(a9, TOL_AMT), note: 'Opening + Production - Sales COGS - FG Rework - Closing' };
+  const q8 = T.openQ + T.prodQ - T.cogsQ - RT.q + RF.q - T.closeQ;
+  res.rec[8] = { expected: 0, result: q8, diff: q8, status: st(q8, TOL_QTY), note: 'Opening + Production - Sales COGS - FG Rework - Closing' + (RF.rows ? ' + Rework returned to FG' : '') };
+  const a9 = T.openA + T.prodA - T.cogsA - RT.tot + RF.tot - T.closeA;
+  res.rec[9] = { expected: 0, result: a9, diff: a9, status: st(a9, TOL_AMT), note: 'Opening + Production - Sales COGS - FG Rework - Closing' + (RF.rows ? ' + Rework returned to FG' : '') };
   const sumOf = (rows, f) => rows.reduce((a, r) => a + num(r[f]), 0);
   const openRows = (opening && opening.rows || []).filter((r) => ttxt(r.lid));
   const prodRows = ledger.filter((l) => l.source === 'PRODUCTION');
-  const comp = ['rm', 'a622', 'a627'].map((f, i) => sumOf(openRows, f) + sumOf(prodRows, f) - sumOf(res.sales, ['rm', 'c622', 'c627'][i]) - [RT.rm, RT.a622, RT.a627][i] - sumOf(closing, f));
+  const comp = ['rm', 'a622', 'a627'].map((f, i) => sumOf(openRows, f) + sumOf(prodRows, f) - sumOf(res.sales, ['rm', 'c622', 'c627'][i]) - [RT.rm, RT.a622, RT.a627][i] + [RF.rm, RF.a622, RF.a627][i] - sumOf(closing, f));
   const cd = Math.max(...comp.map(Math.abs));
   res.rec[10] = { expected: 0, result: cd, diff: cd, status: cd <= TOL_AMT ? 'PASS' : 'CHECK', note: 'Max abs component diff after subtracting Rework RM / 622 / 627' };
   // Batch 8
   const regRows = register.rows;
   const srcQty = sumOf(regRows, 'issueQty'), erpRef = sumOf(regRows, 'erpRef');
   const completed = sumOf(regRows, 'carryIn'), openWIP = sumOf(regRows, 'closingWIP');
+  const writeOff = sumOf(regRows, 'writeOff'), returnedFG = sumOf(regRows, 'returnedFG'), out = writeOff + returnedFG;
   const bfCost = regRows.filter((r) => r.active === 'B/F').reduce((a, r) => a + num(r.bfCost), 0);
   const conflicts = chronologyConflicts(register, salesRows, period);
   const b8 = [
     { label: 'FG Rework source qty', expected: srcQty, result: RT.q, diff: RT.q - srcQty, status: st(RT.q - srcQty, TOL_QTY) },
     { label: 'FG Rework FIFO cost', expected: RT.tot, result: RT.rm + RT.a622 + RT.a627, diff: RT.rm + RT.a622 + RT.a627 - RT.tot, status: st(RT.rm + RT.a622 + RT.a627 - RT.tot, TOL_AMT) },
     { label: 'Completed Rework carry-in', expected: completed, result: num(step4Carry), diff: num(step4Carry) - completed, status: st(num(step4Carry) - completed, TOL_AMT), note: 'Completed NORMAL Rework FIFO cost posted to target Rework PC' },
-    { label: 'Closing Rework WIP', expected: bfCost + RT.tot - completed, result: openWIP, diff: openWIP - (bfCost + RT.tot - completed), status: st(openWIP - (bfCost + RT.tot - completed), TOL_AMT), note: 'B/F Rework WIP + FIFO transfer - Completed carry-in = Closing Rework WIP (outside FG Closing)' },
+    { label: 'Closing Rework WIP', expected: bfCost + RT.tot - completed - out, result: openWIP, diff: openWIP - (bfCost + RT.tot - completed - out), status: st(openWIP - (bfCost + RT.tot - completed - out), TOL_AMT), note: 'B/F Rework WIP + FIFO transfer - Completed carry-in' + (out ? ' - Returned to FG - Written off' : '') + ' = Closing Rework WIP (outside FG Closing)' },
     { label: 'ERP Stock Out reference amount', expected: erpRef, result: RT.tot, diff: RT.tot - erpRef, status: 'INFO', note: 'Informational difference only. FIFO cost is used for inventory valuation.' },
     { label: 'Chronology safety', expected: 0, result: plan ? 0 : conflicts, diff: plan ? 0 : conflicts, status: plan || conflicts === 0 ? 'PASS' : 'BLOCK', note: plan ? `STRICT_DATE: ${conflicts} same-product sales on/after an issue date handled in date order` : '' },
     ...(plan ? [] : [{ label: 'Rework layers dated after issue date', expected: 0, result: lateLayers, diff: lateLayers, status: lateLayers ? 'REVIEW' : 'PASS', note: 'MONTHLY takes the oldest layer left after sales; use STRICT_DATE for issue-date FIFO' }]),
   ];
   const gate8 = b8.some((r) => r.status === 'CHECK' || r.status === 'BLOCK') ? 'CHECK' : 'PASS';
   const fifoQty = sumOf(rwf, 'qty'), fifoCost = sumOf(rwf, 'tot');
-  const rollDiff = bfCost + fifoCost - completed - openWIP;
+  const rollDiff = bfCost + fifoCost - completed - out - openWIP;
   const fgRows = activeReworkCount(register);
   const control = [
     { label: 'FG Source Rows', value: fgRows, note: '', status: fgRows > 0 ? 'INFO' : 'PASS' },
@@ -703,7 +724,9 @@ export function runReworkFIFO(res, register, ctx) {
     { label: 'Opening Rework WIP (B/F)', value: bfCost, note: 'From the previous closed period', status: 'INFO' },
     { label: 'Rework WIP Roll-forward Diff', value: rollDiff, note: 'B/F + FIFO Transfer - Completed - Closing = 0', status: Math.abs(rollDiff) <= TOL_AMT ? 'PASS' : 'CHECK' },
   ];
-  res.rework = { rows: rwf, batch8: b8, gate8, control, runAt: now, srcQty, fifoQty, fifoCost, completed, openWIP, bfCost, erpRef, conflicts: plan ? 0 : conflicts, rawConflicts: conflicts, lateLayers, mode: plan ? 'STRICT_DATE' : 'MONTHLY' };
+  // write-off by expense account (default 632) – Dr 632 / 811 … Cr 154
+  const woByAcc = {}; for (const r of regRows) if (num(r.writeOff) > TOL_AMT) { const a = ttxt(r.woAccount) || '632'; woByAcc[a] = num(woByAcc[a]) + num(r.writeOff); }
+  res.rework = { rows: rwf, batch8: b8, gate8, control, runAt: now, srcQty, fifoQty, fifoCost, completed, openWIP, bfCost, erpRef, writeOff, returnedFG, woByAcc, rfQty: RF.q, conflicts: plan ? 0 : conflicts, rawConflicts: conflicts, lateLayers, mode: plan ? 'STRICT_DATE' : 'MONTHLY' };
   return res;
 }
 
@@ -736,7 +759,7 @@ export function buildRollforward(res, opening, prevItems) {
   for (const s of res.sales) if (s.fin === 'FIFO COGS') addItem(s.prod, ttxt(s.name), '');
   const S = (rows, f, pred) => { const m = new Map(); for (const r of rows) if (pred(r)) { const k = ttxt(r.prod).toUpperCase(); m.set(k, (m.get(k) || 0) + num(r[f])); } return m; };
   const oq = S(res.ledger, 'qtyIn', (l) => l.source === 'OPENING'), oa = S(res.ledger, 'tot', (l) => l.source === 'OPENING');
-  const iq = S(res.ledger, 'qtyIn', (l) => l.source === 'PRODUCTION'), ia = S(res.ledger, 'tot', (l) => l.source === 'PRODUCTION');
+  const iq = S(res.ledger, 'qtyIn', (l) => l.source === 'PRODUCTION' || l.source === 'REWORK RETURN'), ia = S(res.ledger, 'tot', (l) => l.source === 'PRODUCTION' || l.source === 'REWORK RETURN');
   const sq = S(res.sales, 'fq', (s) => s.fin === 'FIFO COGS' || s.fin === 'RETURN'), sa = S(res.sales, 'tot', (s) => s.fin === 'FIFO COGS' || s.fin === 'RETURN');
   const rq = S(res.ledger, 'remQ', () => true), ra = S(res.ledger, 'remTot', () => true);
   const g = (m, k) => m.get(k) || 0;
@@ -918,7 +941,7 @@ export function archiveReworkWIP(register, period) {
   const out = [];
   for (const r of (register && register.rows) || []) {
     const tag = utxt(r.active), cost = num(r.closingWIP);
-    if ((tag === 'Y' || tag === 'B/F') && cost > TOL_AMT) out.push({ archive: period, originPeriod: tag === 'B/F' ? r.originPeriod : period, rid: r.rid, erp: r.erp, doc: r.doc, srcRow: r.srcRow, issueDate: r.issueDate, fg: r.fg, fgName: r.fgName, itemType: r.itemType, loc: r.loc, uom: r.uom, bfQty: tag === 'B/F' ? num(r.bfQty) : num(r.fifoQty), carryCost: cost, reason: r.reason, jobKey: r.jobKey, rwType: r.rwType, rwStatus: r.rwStatus, pcNo: r.pcNo, outFG: r.outFG, compDate: r.compDate, compQty: r.compQty, scrapQty: r.scrapQty, note: r.note });
+    if ((tag === 'Y' || tag === 'B/F') && cost > TOL_AMT) out.push({ archive: period, originPeriod: tag === 'B/F' ? r.originPeriod : period, rid: r.rid, erp: r.erp, doc: r.doc, srcRow: r.srcRow, issueDate: r.issueDate, fg: r.fg, fgName: r.fgName, itemType: r.itemType, loc: r.loc, uom: r.uom, bfQty: tag === 'B/F' ? num(r.bfQty) : num(r.fifoQty), carryCost: cost, reason: r.reason, jobKey: r.jobKey, rwType: r.rwType, rwStatus: r.rwStatus, pcNo: r.pcNo, outFG: r.outFG, compDate: r.compDate, compQty: r.compQty, scrapQty: r.scrapQty, note: r.note, scrapTreat: r.scrapTreat, woAccount: r.woAccount, dispNote: r.dispNote, dispBy: r.dispBy, dispAt: r.dispAt });
   }
   return out;
 }

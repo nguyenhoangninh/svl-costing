@@ -12,15 +12,16 @@ import * as P2 from './views/phase2.js';
 import * as P3 from './views/phase3.js';
 import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
+import * as RWV from './views/rework.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS];
+const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -335,6 +336,7 @@ const NAV = [
   { id: 'fgprod', no: '4.4', label: 'Thành phẩm SX lũy kế', sub: 'YTD · đầu kỳ · roll', key: 'fgp' },
   { id: 'fgopen', no: '5.1', label: 'FG đầu kỳ', sub: 'Lớp FIFO đầu kỳ', key: 's5o' },
   { id: 'step5', no: '5.2', label: 'FIFO giá vốn', sub: 'COGS · rework 5B', key: 's5' },
+  { id: 'rwflow', no: '5B', label: 'Xử lý Rework', sub: 'Treo · hoàn thành · chi phí', key: 'rwf' },
   { id: 'salesreturn', no: '5R', label: 'Hàng trả lại & giảm giá', sub: 'Sales Return 5212 · 5213', key: 's5r' },
   { id: 'close', no: '5.3', label: 'FG History & đóng kỳ', sub: 'Đóng kỳ', key: 's5c' },
 ];
@@ -355,6 +357,7 @@ function railStatus(st) {
     pm: !S.d.pm ? 'NOT RUN' : S.d.pm.status !== 'CURRENT' ? S.d.pm.status : S.d.pm.rows.some((r) => r.status === 'MISSING PRICE') ? 'BLOCK' : 'PASS',
     gl: S.d.gl && S.d.gl.period === S.period && num(S.d.gl.fx) > 0 ? 'PASS' : 'NOT RUN',
     fgp: FGP.status(S, st.p2.d4),
+    rwf: RWV.status(S),
   };
 }
 
@@ -431,6 +434,7 @@ VIEWS.sales = (el) => P2.viewSales(el);
 VIEWS.gl = (el) => P2.viewGL(el);
 VIEWS.step4 = (el) => P2.view4(el);
 VIEWS.fgprod = (el) => FGP.view(el);
+VIEWS.rwflow = (el) => RWV.view(el);
 VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.salesreturn = (el) => P3.viewReturns(el);
@@ -452,6 +456,7 @@ VIEWS.cc = (el) => {
     (() => { const c = FGP.ccInfo(S, st.p2.d4); return ['4.4', 'Thành phẩm SX lũy kế', c.status, c.text, c.at, c.next, 'fgprod']; })(),
     ['5.1', 'FG đầu kỳ', rs.s5o, S.d.fgOpen && S.d.fgOpen.stats ? fmtNum(S.d.fgOpen.stats.amt) : '', S.d.fgOpen && (S.d.fgOpen.validatedAt || S.d.fgOpen.loadedAt), S.d.fgOpen ? '' : 'Roll forward / import FG đầu kỳ', 'fgopen'],
     ['5.2', 'FIFO giá vốn & rework', rs.s5, st.d5 && st.d5.res ? fmtNum(st.d5.res.totals.cogsA) : '', st.d5 && st.d5.res && st.d5.res.runAt, st.s5c.next, 'step5'],
+    (() => { const r = RWV.summary(S); return ['5B', 'Xử lý Rework', rs.rwf, S.d.register && S.d.register.rows.length ? `154 rework ${fmtNum(r.closing)} · ${r.pending} treo` : '', r.runAt, rs.rwf === 'NOT RUN' ? 'RUN FIFO để tính giá rework' : r.aged ? `${r.aged} dòng treo quá ${r.agingMonths} tháng` : '', 'rwflow']; })(),
     ['5R', 'Hàng trả lại & giảm giá', rs.s5r, st.d5 && st.d5.res && st.d5.res.withReturns && st.d5.res.returnControl ? `${st.d5.res.returnControl.processed}/${st.d5.res.returnControl.total} đã xử lý` : '', st.d5 && st.d5.res && st.d5.res.withReturns && st.d5.res.runAt, rs.s5r === 'PASS' ? '' : rs.s5r === 'NOT RUN' || rs.s5r === 'RERUN REQUIRED' ? 'RUN STEP 5R' : 'Kiểm tra hoá đơn gốc / SL trả / giảm giá vốn', 'salesreturn'],
     ['5.3', 'FG History & đóng kỳ', rs.s5c, st.d5 && st.d5.res ? st.d5.recon.finalStatus : '', S.d.closed && S.d.closed.period === S.period ? S.d.closed.closedAt : S.d.fgHistory && S.d.fgHistory.builtAt, S.d.closed && S.d.closed.period === S.period ? '' : st.d5 && st.d5.res ? (st.d5.closeReason || 'CLOSE MONTH') : '', 'close'],
   ];
@@ -636,21 +641,21 @@ function doStep2() {
   render();
 }
 function bfFromRow(r) {
-  return { rid: r.rid, erp: r.erp, doc: r.doc, srcRow: r.srcRow, issueDate: r.issueDate, fg: r.fg, fgName: r.fgName, itemType: r.itemType, loc: r.loc, uom: r.uom, bfQty: r.bfQty, carryCost: r.bfCost, reason: r.reason, jobKey: r.jobKey, rwType: r.rwType, rwStatus: r.rwStatus, pcNo: r.pcNo, outFG: r.outFG, compDate: r.compDate, compQty: r.compQty, scrapQty: r.scrapQty, note: r.note, originPeriod: r.originPeriod };
+  return { rid: r.rid, erp: r.erp, doc: r.doc, srcRow: r.srcRow, issueDate: r.issueDate, fg: r.fg, fgName: r.fgName, itemType: r.itemType, loc: r.loc, uom: r.uom, bfQty: r.bfQty, carryCost: r.bfCost, reason: r.reason, jobKey: r.jobKey, rwType: r.rwType, rwStatus: r.rwStatus, pcNo: r.pcNo, outFG: r.outFG, compDate: r.compDate, compQty: r.compQty, scrapQty: r.scrapQty, note: r.note, originPeriod: r.originPeriod, scrapTreat: r.scrapTreat, woAccount: r.woAccount, dispNote: r.dispNote, dispBy: r.dispBy, dispAt: r.dispAt };
 }
 
 // ---------- 2B register ----------
 VIEWS.rework = (el) => {
   const reg = S.d.register;
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">FG xuất kho đi rework không phải tiêu hao NVL. Cập nhật loại, trạng thái và lô PC rework ở đây; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO được tính khi chạy STEP 5.2 (FIFO rework).</p></div>
+    <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">FG xuất kho đi rework không phải tiêu hao NVL. Cập nhật loại, trạng thái và lô PC rework ở đây; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO được tính khi chạy STEP 5.2 (FIFO rework). Xử lý dòng treo (hoàn thành / trả về kho / ra chi phí) ở <a href="#rwflow">màn hình 5B · Xử lý Rework</a>.</p></div>
     ${reg ? `<div class="result"><span>Kiểm tra dữ liệu nhập</span>${pill(reg.rows.filter((r) => String(r.inputCheck).startsWith('BLOCK')).length ? 'BLOCK' : 'PASS')}<small>${reg.stats.rows} dòng kỳ này · ${reg.stats.bfRows} dòng B/F</small></div>` : ''}</header>
-    ${reg ? `<div class="kpis">${kpiN('Số lượng FG xuất', reg.stats.issueQty)}${kpi('Giá trị ERP (memo)', reg.stats.erpRef)}${kpi('Rework WIP chuyển sang (B/F)', reg.stats.bfCost)}${kpi('Closing Rework WIP', reg.rows.reduce((a, r) => a + num(r.closingWIP), 0))}</div>
+    ${reg ? `<div class="kpis">${kpiN('Số lượng FG xuất', reg.stats.issueQty)}${kpi('Giá trị ERP (memo – không dùng tính giá)', reg.stats.erpRef)}${kpi('Giá trị FIFO (dùng tính giá)', reg.rows.filter((r) => r.active === 'Y').reduce((a, r) => a + num(r.fifoCost), 0))}${kpi('Rework WIP chuyển sang (B/F)', reg.stats.bfCost)}${kpi('Closing Rework WIP', reg.rows.reduce((a, r) => a + num(r.closingWIP), 0))}</div>
     <div id="t-rw"></div>` : emptyNote('Sổ được tạo khi chạy STEP 2.', 'step2', 'Mở STEP 2')}
   </section>`;
   if (!reg) return;
   const types = { issueQty: 'qty', erpRef: 'num', compQty: 'qty', scrapQty: 'qty', fifoQty: 'qty', fifoCost: 'num', closingWIP: 'num', carryIn: 'num', bfQty: 'qty', bfCost: 'num', issueDate: 'date', compDate: 'date', srcRow: 'int', inputCheck: 'status', fifoStatus: 'status', lastFifoRun: 'date' };
-  const editable = { rwType: ['NORMAL', 'ABNORMAL'], rwStatus: ['OPEN', 'HOLD', 'COMPLETED'], pcNo: null, outFG: null, compDate: null, compQty: null, scrapQty: null, note: null };
+  const editable = { rwType: ['NORMAL', 'ABNORMAL'], rwStatus: ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF'], pcNo: null, outFG: null, compDate: null, compQty: null, scrapQty: null, note: null };
   const cols = RW_FIELDS.map((f, i) => ({ key: f, label: RW_HEADERS[i], type: types[f] || 'text', width: f === 'rid' ? 250 : f === 'fgName' ? 240 : f === 'note' ? 200 : ['inputCheck', 'fifoStatus'].includes(f) ? 190 : 110, editable: f in editable, options: editable[f] || undefined }))
     .filter((c) => !['period'].includes(c.key));
   mountTable($('#t-rw'), {
@@ -965,7 +970,7 @@ async function migrateWorkbook(file) {
         validateOpening(S.d.opening, S.d.datasets, period);
       }
       const ri = g['03_FG_REWORK_INPUT']; const oldRows = [];
-      if (ri) for (let r = 8; r < ri.length; r++) { const x = ri[r] || []; if (!x[2]) continue; oldRows.push(Object.fromEntries(RW_FIELDS.map((f, i) => [f, x[i] ?? null]))); }
+      if (ri) for (let r = 8; r < ri.length; r++) { const x = ri[r] || []; if (!x[2]) continue; oldRows.push(Object.fromEntries(RW_FIELDS.slice(0, RW_FIELDS.indexOf('originPeriod') + 1).map((f, i) => [f, x[i] ?? null]))); }
       S.d.register = { period, refreshedAt: '', rows: oldRows, stats: {} };
       audit('MIGRATE FROM EXCEL', `${file.name} · ${Object.keys(S.d.datasets).length} báo cáo ERP · Opening ${S.d.opening ? S.d.opening.rows.length : 0} dòng · Rework ${oldRows.length} dòng`);
       // re-run engine
@@ -1245,6 +1250,7 @@ window.addEventListener('offline', () => { renderSync(); toast('Mất kết nố
 
 P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
 TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
+RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render });
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
