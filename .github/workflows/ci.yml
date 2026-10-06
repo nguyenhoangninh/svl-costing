@@ -27,10 +27,10 @@ jobs:
       - name: Release / PWA / security contract tests
         run: node test/release-contract.mjs
 
-  # Production deploy: main only, after all checks pass, and only when repo variable PAGES_FROM_ACTIONS == 'true'.
+  # Production deploy: main only, after all checks pass (GitHub Pages source = GitHub Actions).
   deploy:
     needs: checks
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_FROM_ACTIONS == 'true'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       pages: write
