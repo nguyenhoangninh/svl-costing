@@ -3,6 +3,7 @@
 // modSTEP5_MonthClose (STEP5_Build_FG_History_B333 / STEP5_Close_Month_B333) and the 05_RECONCILIATION formulas.
 import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, cellDateSerial, recognitionDate, fp } from './util.js';
 import * as RET from './return.js';
+import { bookOf } from './revenue.js';
 
 export const TOLQ = 0.0001;          // S5_TOLQ
 const TOL_QTY = 0.000001;            // modSTEP5_MonthClose / RW
@@ -226,11 +227,14 @@ export function runFIFO(ctx) {
   const returnsOn = ctx.returns !== 'LEGACY';
   const sellRate = num(ctx.sellCostRate); // NRV: estimated selling cost as a share of the selling price
   const undated = []; // audit F-05: sales rows whose date cannot be read never silently drop out of COGS
-  (ctx.salesRows || []).forEach((r, idx) => {
+  // v1.11: sales book (Sales Database, TK 511) and returns book (Returns Database, TK 5212 / 5213) are separate inputs.
+  // STEP 5.2 runs the sales book only; STEP 5R runs both. Line keys are numbered sales first, so a sales line keeps its key.
+  const srcRows = [...(ctx.salesRows || []).map((r, idx) => [r, idx, 'SALES']), ...(ctx.returnRows || []).map((r, idx) => [r, idx, 'RETURNS'])];
+  srcRows.forEach(([r, idx, book]) => {
     const d = saleDate(r); // Bill (B/L) date when present, else invoice date (owner decision 02/10/2026)
-    if (d === null) { if (utxt(r.product) || num(r.qty) !== 0) undated.push({ dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), qty: num(r.qty), vnd: num(r.amtVND), rawDate: r.invDate === null || r.invDate === undefined ? '' : String(r.invDate) }); return; }
+    if (d === null) { if (utxt(r.product) || num(r.qty) !== 0) undated.push({ book, dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), qty: num(r.qty), vnd: num(r.amtVND), rawDate: r.invDate === null || r.invDate === undefined ? '' : String(r.invDate) }); return; }
     if (d < pStart || d > pEnd) return;
-    const s = { seq: S.length + 1, date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
+    const s = { seq: S.length + 1, book, acc: bookOf(r), date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
     s.key = lineKey(r, d, keyCount);
     if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
     else if (!s.prod && s.qty !== 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(s.type)) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
@@ -441,7 +445,7 @@ export function runFIFO(ctx) {
   }
   let sumLineA = 0;
   const sales = S.map((s) => {
-    const o = { seq: s.seq, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
+    const o = { seq: s.seq, book: s.book, acc: s.acc, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
     else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv, matchedOrigInv: s.matchedOrigInv, matchMode: s.matchMode, returnLid: s.returnLid });
     return o;
@@ -905,9 +909,24 @@ export const FAST_ACCOUNTS = [
   ['a154', '154', 'WIP cuối kỳ (vật tư sau 3B + rework WIP)'],
   ['a155', '155', 'Thành phẩm cuối kỳ'],
   ['a2294', '2294', 'Phát sinh dự phòng giảm giá HTK đã ghi trong kỳ'],
-  ['a632', '632', 'Giá vốn trong kỳ (FIFO + DIRECT_632 + NRV recorded adjustment)'],
-  ['a511', '511', 'Doanh thu trong kỳ (Sales Database)'],
+  ['a632', '632', 'Giá vốn thuần trong kỳ (FIFO bán ra − giá vốn hàng trả lại + DIRECT_632 + NRV đã ghi)'],
+  ['a511', '511', 'Doanh thu bán hàng – phát sinh Có, trước kết chuyển giảm trừ (file doanh thu)'],
+  ['a5212', '5212', 'Hàng bán bị trả lại – phát sinh Nợ (file trả lại: SALES RETURN)'],
+  ['a5213', '5213', 'Giảm giá hàng bán – phát sinh Nợ (file trả lại: CREDIT NOTE)'],
 ];
+/** Accounts that need no typing when the web figure is 0 and the FAST figure is left blank (no entry this month). */
+const AUTO_ZERO = new Set(['a2294', 'a5212', 'a5213']);
+/** TK 511 / 5212 / 5213 of the period from the two books. Deductions are positive (debit) amounts. */
+export function revenueBooks(salesRows, returnRows, period, dupDecisions = null) {
+  const { start, end } = periodBounds(period);
+  const o = { a511: periodRevenue(salesRows, period, dupDecisions), a5212: 0, a5213: 0, n5212: 0, n5213: 0, physical: 0, physicalQty: 0 };
+  for (const r of returnRows || []) {
+    const d = saleDate(r); if (d === null || d < start || d > end) continue;
+    const v = -num(r.amtVND);
+    if (bookOf(r) === '5213') { o.a5213 += v; o.n5213++; } else { o.a5212 += v; o.n5212++; if (num(r.qty) < 0) { o.physical++; o.physicalQty += -num(r.qty); } }
+  }
+  return o;
+}
 /** Revenue VND of the period by recognition date (all transaction types, returns negative). */
 export function periodRevenue(salesRows, period, dupDecisions = null) {
   const { start, end } = periodBounds(period); let s = 0;
@@ -927,7 +946,7 @@ export function periodRevenue(salesRows, period, dupDecisions = null) {
 export function fastTie(engine, tie) {
   const rows = FAST_ACCOUNTS.map(([k, acc, label]) => {
     const e = num(engine[k]); let f = tie && tie.fast && tie.fast[k] !== undefined && tie.fast[k] !== null && tie.fast[k] !== '' ? num(tie.fast[k]) : null;
-    if (f === null && k === 'a2294' && Math.abs(e) <= 1 && tie && tie.fast && Object.keys(tie.fast).length) f = 0; // no NRV entry this month → 2294 movement 0 needs no typing
+    if (f === null && AUTO_ZERO.has(k) && Math.abs(e) <= 1 && tie && tie.fast && Object.keys(tie.fast).length) f = 0; // nothing this month (NRV / returns / price reductions) → 0 needs no typing
     const diff = f === null ? null : e - f;
     return { k, acc, label, engine: e, fast: f, diff, status: f === null ? 'NOT ENTERED' : Math.abs(diff) <= 1 ? 'PASS' : 'DIFF' };
   });

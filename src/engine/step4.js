@@ -3,6 +3,7 @@
 // Port of modSTEP4 (STEP4_Import_Sales_Revenue, STEP4_Validate_Save_Sales, STEP4_Update_Price_Master,
 // STEP4_Run_Cost_Allocation[_Gated]), V3_RefreshPCAndStep4, RW_SyncCompletedToStep4, SVL_LotCostCheck_Build.
 import { txt, ttxt, utxt, num, isNumeric, isPeriod, serialToYMD, nowISO, cellDateSerial, recognitionDate as recognitionDateShared } from './util.js';
+import { isReturnRow } from './revenue.js';
 
 const EPOCH = Date.UTC(1899, 11, 30);
 const ymdSerial = (y, m, d) => (Date.UTC(y, m - 1, d) - EPOCH) / 86400000;
@@ -80,15 +81,37 @@ export function includeInPrice(tranType, qty, amt) {
 }
 const KNOWN_TYPES = ['NORMAL SALE', 'SALES RETURN', 'CREDIT NOTE', 'FOC', 'SAMPLE', 'OTHER', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'];
 
-/** STEP4_Validate_Save_Sales — accounting validation + controlled Sales DB replacement. */
-export function validateSaveSales(staging, salesDB, period) {
+/** Rows of a staging file that belong to a book ('SALES' = TK 511, 'RETURNS' = TK 5212 / 5213); no book = all rows (legacy / tests). */
+export function bookRows(staging, book) {
+  const rows = (staging && staging.rows) || [];
+  if (!book) return { take: rows, skip: [] };
+  const take = [], skip = [];
+  for (const r of rows) ((book === 'RETURNS') === isReturnRow(r) ? take : skip).push(r);
+  return { take, skip };
+}
+/**
+ * STEP4_Validate_Save_Sales — accounting validation + controlled Sales DB replacement.
+ * opts.book (v1.11): 'SALES' keeps only sales lines (Sales Database, TK 511); 'RETURNS' keeps only SALES RETURN / CREDIT NOTE
+ * lines (Returns Database, TK 5212 / 5213). Lines of the other book are marked SKIPPED, so one combined ERP file can be
+ * imported on both screens. The replaced date range is the range of the whole file.
+ */
+export function validateSaveSales(staging, salesDB, period, opts = {}) {
   if (!staging || !staging.rows.length) throw new Error('Chưa có dữ liệu doanh thu trong vùng staging.');
+  const book = opts.book || '';
+  const { take, skip } = bookRows(staging, book);
+  for (const r of skip) {
+    r.validStat = 'SKIPPED'; r.saveStat = 'SKIPPED';
+    r.validMsg = book === 'SALES' ? 'Dòng hàng bán bị trả lại / giảm giá (SALES RETURN / CREDIT NOTE) – không thuộc file doanh thu, import ở màn hình 5R' : 'Dòng doanh thu bán hàng – không thuộc file trả lại / giảm giá, import ở màn hình 4.1';
+  }
+  if (!take.length) throw new Error(book === 'RETURNS' ? 'File không có dòng SALES RETURN / CREDIT NOTE nào. Kỳ không có hàng trả lại / giảm giá thì không cần import.' : 'File không có dòng doanh thu bán hàng nào (toàn bộ là SALES RETURN / CREDIT NOTE – import ở màn hình 5R).');
   const periodStart = periodStartSerial(period), periodEnd = periodEndSerial(period);
   const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
   const yearStart = periodStartSerial(period.slice(0, 4) + '-01');
   const batchKeys = new Set();
   let minInv = 0, maxInv = 0, latest = 0, pass = 0, review = 0, block = 0, dup = 0;
-  for (const r of staging.rows) {
+  // lines of the other book still define which dates the file covers (only inside the range this mode may replace)
+  if (book) for (const r of skip) { const d = recognitionDate(r); if (d === null || d < (mode === 'MONTHLY' ? periodStart : yearStart)) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
+  for (const r of take) {
     const hard = [], warn = [];
     const invD = toSerial(r.invDate);
     const billSupplied = r.billDate !== null && r.billDate !== undefined && ttxt(r.billDate) !== '';
@@ -167,11 +190,11 @@ export function validateSaveSales(staging, salesDB, period) {
   }
   if (block) {
     staging.status = 'BLOCKED - FIX SALES DATA';
-    throw new Error(`Sales validation có ${block} dòng BLOCK. Sửa Recognition/Bill Date, Transaction Type, Product/Quantity rồi Validate & Save lại.`);
+    throw new Error(`${book === 'RETURNS' ? 'Returns' : 'Sales'} validation có ${block} dòng BLOCK. Sửa Recognition/Bill Date, Transaction Type, Product/Quantity rồi Validate & Save lại.`);
   }
 
   const saveAt = nowISO();
-  const newRows = staging.rows.map((r) => {
+  const newRows = take.map((r) => {
     const prod = utxt(r.product);
     const inc = !prod || recognitionDate(r) === null ? 'N' : includeInPrice(r.tranType, num(r.qty), num(r.amtUSD));
     r.saveStat = 'SAVED'; r.savedAt = saveAt;
@@ -188,7 +211,7 @@ export function validateSaveSales(staging, salesDB, period) {
   }
   staging.status = review ? 'VALIDATED & SAVED - WITH REVIEW' : 'VALIDATED & SAVED';
   const rows = kept.concat(newRows);
-  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, pass, review, block: 0, dup, replaced, droppedUndated, undated: 0, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
+  return { db: { rows, savedAt: saveAt, latestInvoice: latest || (salesDB && salesDB.latestInvoice) || null }, stats: { saved: newRows.length, skipped: skip.length, pass, review, block: 0, dup, replaced, droppedUndated, undated: 0, minInv, maxInv, mode, from: cov ? cov.from : null, to: cov ? cov.to : null } };
 }
 
 /**
@@ -205,13 +228,16 @@ export function salesCoverage(mode, minInv, maxInv, period) {
   return { from: ser(a.y, 0, 1), to: periodEndSerial(period) };
 }
 /** What Validate & Save would do, for the confirmation dialog. */
-export function salesSavePreview(staging, salesDB, period) {
+export function salesSavePreview(staging, salesDB, period, opts = {}) {
   const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
   let minInv = 0, maxInv = 0;
-  for (const r of staging.rows) { const d = recognitionDate(r); if (d === null) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
+  const { take, skip } = bookRows(staging, opts.book);
+  const lo = mode === 'MONTHLY' ? periodStartSerial(period) : periodStartSerial(period.slice(0, 4) + '-01');
+  for (const r of take) { const d = recognitionDate(r); if (d === null) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
+  if (opts.book) for (const r of skip) { const d = recognitionDate(r); if (d === null || d < lo) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
   const cov = salesCoverage(mode, minInv, maxInv, period);
   const replaced = cov ? ((salesDB && salesDB.rows) || []).filter((r) => { const d = recognitionDate(r); return d !== null && d >= cov.from && d <= cov.to; }).length : 0;
-  return { mode, from: cov ? cov.from : null, to: cov ? cov.to : null, replaced, inserted: staging.rows.length, kept: ((salesDB && salesDB.rows) || []).length - replaced };
+  return { mode, from: cov ? cov.from : null, to: cov ? cov.to : null, replaced, inserted: take.length, skipped: skip.length, kept: ((salesDB && salesDB.rows) || []).length - replaced };
 }
 
 // ======================= PRICE MASTER =======================

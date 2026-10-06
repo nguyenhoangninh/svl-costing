@@ -1,5 +1,10 @@
 # SVL Costing Web
 
+> **v1.11.0 (06/10/2026) – tách Doanh thu và Hàng bán bị trả lại:**
+> - **File & dữ liệu riêng:** 4.1 chỉ nhận doanh thu bán hàng (TK 511); hàng bán bị trả lại (SALES RETURN → TK 5212) và giảm giá / credit note (CREDIT NOTE → TK 5213) import, Validate & Save ở **màn hình 5R** vào Returns Database riêng. Dùng chung được một file ERP: mỗi màn hình bỏ qua (SKIPPED) dòng không thuộc sổ của mình. Dữ liệu cũ (trả lại nằm trong Sales DB) vẫn được đọc và tự chuyển sang 5R ở lần lưu tiếp theo.
+> - **Chạy riêng:** STEP 5.2 RUN FIFO chỉ tính giá vốn bán hàng; **RUN STEP 5R** chạy riêng sau đó (nhập lại kho theo giá vốn hoá đơn gốc, giảm 632). Đổi dữ liệu trả lại / cách xử lý chỉ làm STEP 5R cần chạy lại, không đụng Price Master / STEP 4 / 5.2. BUILD FG HISTORY và CLOSE MONTH chờ STEP 5R xong.
+> - **Báo cáo & FAST:** đối chiếu riêng 511 (doanh thu gộp), 5212, 5213; 632 hiển thị giá vốn bán ra, giảm giá vốn hàng trả lại và giá vốn thuần. Price Master tính giá bán chỉ từ doanh thu bán hàng.
+
 > **v1.10.2 (06/10/2026) – sửa sau rà soát toàn bộ:**
 > - **Doanh thu:** dòng không có số lượng (điều chỉnh / phí / ghi nhớ ERP–FAST) không còn chặn lưu Sales DB: NO COGS + REVIEW. Bill Date sang kỳ sau chỉ cảnh báo, giá vốn tính ở kỳ của Bill Date.
 > - **Duyệt (quyết định #8):** người có quyền chỉnh sửa duyệt được giá thủ công, Direct 622/627, fallback STEP 2, chênh lệch FAST, quyết định NRV – kể cả mục do chính mình lập (vẫn bắt ghi lý do + nhật ký). CLOSE / REOPEN vẫn chỉ Quản trị.

@@ -4,6 +4,8 @@ import * as F from '../engine/step4.js';
 import { step2Controls, step3Controls, step3bControls, step4Controls } from '../engine/controls.js';
 import { num, ttxt, txt, utxt, serialToISO, nowISO, isoToSerial, fpRows } from '../engine/util.js';
 import { RW_FIELDS } from '../engine/step2.js';
+import { splitBooks } from '../engine/revenue.js';
+import { revenueBooks } from '../engine/step5.js';
 
 let A = null; // app API
 export function install(api) { A = api; }
@@ -236,10 +238,14 @@ export function viewSales(el) {
   const st = d.salesImport; const db = d.salesDB; const pm = d.pm;
   const missing = pm ? pm.rows.filter((r) => r.status === 'MISSING PRICE').length : null;
   const dup = A.dupStatus();
+  const bk = splitBooks(db, d.returnsDB);
+  const rb = revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions);
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 4.1 · Doanh thu &amp; Price Master</h1><p class="lead">Import file doanh thu (MONTHLY hoặc YTD) → Validate &amp; Save. Lỗi Recognition/Bill Date, Transaction Type hoặc inventory quantity bị BLOCK; các cảnh báo còn lại được giữ để review. Sau đó Update Price Master: giá tháng hiện tại → giá thực tế gần nhất → YTD → Sales Order; giá thủ công luôn được ưu tiên.</p></div>
+    <header class="ph"><div><h1>STEP 4.1 · Doanh thu bán hàng &amp; Price Master</h1><p class="lead">Chỉ doanh thu bán hàng (TK 511). Hàng bán bị trả lại (TK 5212) và giảm giá / credit note (TK 5213) import, lưu và xử lý riêng ở <a href="#salesreturn">màn hình 5R</a>. Import file doanh thu (MONTHLY hoặc YTD) → Validate &amp; Save → Update Price Master (giá tháng hiện tại → giá thực tế gần nhất → YTD → Sales Order; giá thủ công luôn được ưu tiên).</p></div>
       <div class="result"><span>Price Master</span>${A.pill(pm ? pm.status : 'NOT RUN')}<small>${pm ? `${pm.rows.length} sản phẩm · thiếu giá ${missing}` : ''}</small></div></header>
-    <div class="kpis">${A.kpiN('Dòng staging', st ? st.rows.length : 0)}${A.kpiN('Sales Database', db ? db.rows.length : 0)}${A.kpiN('SO fallback', (d.soPrice || []).length)}${A.kpiN('Giá thủ công', (d.manualPrice || []).length)}</div>
+    <div class="kpis">${A.kpi('Doanh thu 511 kỳ này', rb.a511)}${A.kpiN('Dòng staging', st ? st.rows.length : 0)}${A.kpiN('Sales Database', bk.sales.length)}${A.kpiN('SO fallback', (d.soPrice || []).length)}${A.kpiN('Giá thủ công', (d.manualPrice || []).length)}</div>
+    ${bk.usingLegacy ? `<div class="alert review">Sales Database (dữ liệu cũ) còn <b>${bk.legacyCount}</b> dòng SALES RETURN / CREDIT NOTE. Chúng đang được đọc như file trả lại riêng và sẽ tự chuyển sang màn hình 5R ở lần Validate &amp; Save tiếp theo.</div>` : ''}
+    ${rb.n5212 || rb.n5213 ? `<p class="muted">Giảm trừ doanh thu kỳ này (xem 5R): 5212 = ${A.fmtNum(rb.a5212)} VND (${rb.n5212} dòng) · 5213 = ${A.fmtNum(rb.a5213)} VND (${rb.n5213} dòng).</p>` : ''}
     ${dup.groups.length ? `<div class="alert ${dup.pending ? 'review' : 'pass'}">Kỳ ${esc(S.period)} có <b>${dup.groups.length}</b> nhóm dòng doanh thu giống hệt nhau (cùng ngày, hoá đơn, sản phẩm, số lượng, tiền – file không có Invoice Line No.). ${dup.pending ? `Còn <b>${dup.pending}</b> dòng lặp chưa xác nhận → <a href="#sales" data-tab-dup>xác nhận ở tab Nghi trùng</a>. Chưa xác nhận thì không đóng kỳ được.` : `Đã xác nhận hết (loại ${dup.excluded} dòng).`}</div>` : ''}
     ${tabsHTML(tab, [['import', 'Import & Validate'], ['db', 'Sales Database'], ['dup', `Nghi trùng${dup.pending ? ' (' + dup.pending + ')' : ''}`], ['pm', 'Price Master'], ['so', 'Sales Order fallback'], ['manual', 'Giá thủ công']], 'data-tabs')}
     <div id="ts"></div></section>`;
@@ -253,7 +259,7 @@ export function viewSales(el) {
       <label class="btn">Chọn file doanh thu…<input type="file" id="f-sales" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label>
       <button class="btn" type="button" data-act="sales-save" ${st && st.rows.length && !String(st.status).includes('SAVED') ? '' : 'disabled'}>Validate &amp; Save</button>
       <span class="muted">${st ? `${esc(st.fileName || '')} · ${esc(st.mode || '')} · ${A.pill(st.status)}` : 'Chưa import.'}</span></div>
-      <p class="muted">File cần có Invoice Date, Product Number, Quantity, Amount (USD). Nếu có Bill/B.L. Date thì đây là Recognition Date bắt buộc và phải hợp lệ; giao dịch âm phải có Transaction Type rõ ràng. YTD chỉ thay dữ liệu đến hết kỳ giá thành, không đụng các kỳ tương lai.</p><div id="t-stg"></div>`;
+      <p class="muted">File cần có Invoice Date, Product Number, Quantity, Amount (USD). Nếu có Bill/B.L. Date thì đây là Recognition Date bắt buộc và phải hợp lệ. YTD chỉ thay dữ liệu đến hết kỳ giá thành, không đụng các kỳ tương lai. Dòng SALES RETURN / CREDIT NOTE trong file được bỏ qua (SKIPPED) – import chúng ở <a href="#salesreturn">màn hình 5R</a> (có thể dùng cùng file).</p><div id="t-stg"></div>`;
     box.querySelector('#f-sales').addEventListener('change', (e) => importSalesFile(e.target.files[0], box.querySelector('#s-mode').value));
     if (st && st.rows.length) {
       const cols = [...salesCols, { key: 'validStat', label: 'Validation', type: 'status', width: 100 }, { key: 'validMsg', label: 'Validation Message', width: 320 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }, { key: 'saveStat', label: 'Save', width: 80 }];
@@ -273,8 +279,8 @@ export function viewSales(el) {
   } else if (tab === 'db') {
     if (!db) { box.innerHTML = A.emptyNote('Sales Database trống.'); return; }
     const cols = [...salesCols, { key: 'include', label: 'Include in Price', width: 90 }, { key: 'validResult', label: 'Validation', type: 'status', width: 100 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }, { key: 'batchID', label: 'Batch', width: 150 }];
-    box.innerHTML = `<p class="muted">Lưu lần cuối ${A.fmtTs(db.savedAt)} · ${db.rows.length} dòng. Sales Database được mang sang kỳ sau.</p><div id="t-db"></div>`;
-    A.mountTable(box.querySelector('#t-db'), { columns: cols, rows: db.rows, filterKey: 'tranType', height: 520, totals: ['qty', 'amtUSD', 'amtVND'], onExport: A.exportTable('04_SALES_DATA', cols) });
+    box.innerHTML = `<p class="muted">Lưu lần cuối ${A.fmtTs(db.savedAt)} · ${bk.sales.length} dòng doanh thu bán hàng. Sales Database được mang sang kỳ sau. Hàng trả lại / giảm giá: <a href="#salesreturn">màn hình 5R</a>.</p><div id="t-db"></div>`;
+    A.mountTable(box.querySelector('#t-db'), { columns: cols, rows: bk.sales, filterKey: 'tranType', height: 520, totals: ['qty', 'amtUSD', 'amtVND'], onExport: A.exportTable('04_SALES_DATA', cols) });
   } else if (tab === 'pm') {
     box.innerHTML = `<div class="row"><button class="btn" type="button" data-act="pm-update">Update Price Master</button><span class="muted">${pm ? `Cập nhật ${A.fmtTs(pm.updatedAt)} · nguồn đến ${serialToISO(pm.sourceThrough)}` : ''}</span></div><div id="t-pm"></div><h2>Chi tiết giá tham chiếu</h2><div id="t-pma"></div>`;
     if (pm) {
@@ -361,23 +367,36 @@ async function importSOFile(file) {
   });
   A.render();
 }
+/** v1.11: return / credit lines saved inside the Sales Database by earlier versions move to their own Returns Database once. */
+export function migrateLegacyReturns(S) {
+  const d = S.d; const bk = splitBooks(d.salesDB, d.returnsDB);
+  if (!bk.legacyCount) return 0;
+  if (!d.returnsDB) d.returnsDB = { rows: d.salesDB.rows.filter((r) => !bk.sales.includes(r)), savedAt: d.salesDB.savedAt || nowISO(), migratedFrom: 'salesDB', migratedAt: nowISO() };
+  d.salesDB = { ...d.salesDB, rows: bk.sales };
+  A.audit('RETURNS SPLIT', `Chuyển ${bk.legacyCount} dòng SALES RETURN / CREDIT NOTE từ Sales Database sang Returns Database (5R)`);
+  A.markDirty('salesDB', 'returnsDB', 'audit');
+  return bk.legacyCount;
+}
+/** Selling-price weighting uses the sales book only (v1.11): saving returns never makes Price Master / STEP 4 outdated. */
+export const priceRows = (d) => ({ rows: splitBooks(d.salesDB, d.returnsDB).sales, savedAt: d.salesDB ? d.salesDB.savedAt : '' });
 export function doSalesSave() {
   const S = A.S;
   try {
-    const pv = F.salesSavePreview(S.d.salesImport, S.d.salesDB, S.period);
-    if (pv.from !== null && !confirm(`Validate & Save (${pv.mode})\n\nThay thế toàn bộ dòng cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
-    const r = F.validateSaveSales(S.d.salesImport, S.d.salesDB, S.period);
+    const moved = migrateLegacyReturns(S);
+    const pv = F.salesSavePreview(S.d.salesImport, S.d.salesDB, S.period, { book: 'SALES' });
+    if (pv.from !== null && !confirm(`Validate & Save doanh thu bán hàng (${pv.mode})\n\nThay thế toàn bộ dòng cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng${pv.skipped ? `\nBỏ qua ${pv.skipped} dòng SALES RETURN / CREDIT NOTE (import ở màn hình 5R)` : ''}\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
+    const r = F.validateSaveSales(S.d.salesImport, S.d.salesDB, S.period, { book: 'SALES' });
     S.d.salesDB = r.db; if (S.d.pm) S.d.pm.status = 'OUTDATED';
-    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; BLOCK ${r.stats.block || 0}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}${r.stats.droppedUndated ? `; bỏ ${r.stats.droppedUndated} dòng thiếu ngày của lần lưu trước` : ''}`);
+    A.audit('SALES VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; bỏ qua (trả lại / giảm giá) ${r.stats.skipped}; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; BLOCK ${r.stats.block || 0}; lặp ${r.stats.dup}; thay thế ${r.stats.replaced}${r.stats.droppedUndated ? `; bỏ ${r.stats.droppedUndated} dòng thiếu ngày của lần lưu trước` : ''}`);
     A.markDirty('salesImport', 'salesDB', 'pm', 'audit');
-    A.toast(`Đã lưu ${r.stats.saved} dòng (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ). Price Master → OUTDATED, hãy Update Price Master.`, r.stats.review ? 'review' : 'pass');
+    A.toast(`Đã lưu ${r.stats.saved} dòng doanh thu (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced} dòng cũ)${r.stats.skipped ? `; bỏ qua ${r.stats.skipped} dòng trả lại / giảm giá → import ở màn hình 5R` : ''}${moved ? `; ${moved} dòng trả lại cũ đã chuyển sang 5R` : ''}. Price Master → OUTDATED, hãy Update Price Master.`, r.stats.review || r.stats.skipped ? 'review' : 'pass');
   } catch (e) { A.toast('Validate & Save lỗi: ' + e.message, 'block'); }
 }
 export function doPMUpdate() {
   const S = A.S;
   try {
     if (!S.d.step2) throw new Error('Cần chạy STEP 2 trước (danh sách sản phẩm lấy từ PC-P).');
-    const r = F.updatePriceMaster({ salesDB: S.d.salesDB, so: S.d.soPrice, manual: S.d.manualPrice, step2: S.d.step2, period: S.period });
+    const r = F.updatePriceMaster({ salesDB: priceRows(S.d), so: S.d.soPrice, manual: S.d.manualPrice, step2: S.d.step2, period: S.period });
     S.d.pm = r.pm; S.d.soPrice = r.so;
     A.audit('UPDATE PRICE MASTER', `${r.stats.products} sản phẩm; thiếu giá ${r.stats.missing}; manual overlap ${r.stats.overlap}; manual chưa duyệt ${r.stats.unapprovedManual || 0}; manual date lỗi ${r.stats.invalidManualDate || 0}; SO sau kỳ ${r.stats.afterSO}; SO date lỗi ${r.stats.invalidSODate || 0}; cũ ${r.stats.stale}`);
     A.markDirty('pm', 'soPrice', 'audit');
@@ -648,6 +667,7 @@ export function carryForward(prev, newPeriod) {
   const out = {};
   if (prev.erpMap) out.erpMap = { period: newPeriod, rows: prev.erpMap.rows };
   if (prev.salesDB) out.salesDB = prev.salesDB;
+  if (prev.returnsDB) out.returnsDB = prev.returnsDB;
   if (prev.soPrice) out.soPrice = prev.soPrice.map((r) => ({ ...r, check: '' }));
   if (prev.manualPrice) out.manualPrice = prev.manualPrice;
   if (prev.lotParams) out.lotParams = prev.lotParams;
@@ -655,5 +675,5 @@ export function carryForward(prev, newPeriod) {
   return out;
 }
 
-export const PHASE2_BLOBS = ['erpMap', 'wipadj', 'salesImport', 'salesDB', 'soPrice', 'manualPrice', 'pm', 'gl', 'directAdj', 'directPreparedBy', 'directApproval', 'step4', 'lotCheck', 'lotParams', 'fgRef'];
+export const PHASE2_BLOBS = ['erpMap', 'wipadj', 'salesImport', 'salesDB', 'returnsImport', 'returnsDB', 'soPrice', 'manualPrice', 'pm', 'gl', 'directAdj', 'directPreparedBy', 'directApproval', 'step4', 'lotCheck', 'lotParams', 'fgRef'];
 export { RW_FIELDS, F, B };

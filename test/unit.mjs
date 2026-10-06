@@ -3,6 +3,7 @@ import { parseUserNumber, cellDateSerial, num } from '../src/engine/util.js';
 import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.js';
 import { buildFingerprint } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
+import { splitBooks, bookOf } from '../src/engine/revenue.js';
 
 let n = 0, fail = 0;
 const eq = (label, got, want) => { n++; const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) { fail++; console.log(`✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); } };
@@ -271,6 +272,41 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   ] }, { rows: [] }, P2).db.rows;
   const rOver = F5.runFIFO({ ...ctx({}), salesRows: rtOver, mode: 'STRICT_DATE' });
   eq('#6 cumulative return above sold qty → unresolved', rOver.sales.find((x) => x.inv === 'R2-CN2').status, 'REVIEW');
+  // ---- v1.11 revenue books: sales (511) and returns / credit notes (5212 / 5213) are separate files, databases and runs
+  {
+    const mixed = () => ({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'X1' }, { ...row(ser(2026, 8, 21), 'CR1', 'A', 1, -4), qty: null, tranType: 'CREDIT NOTE' }] });
+    const sOnly = validateSaveSales(mixed(), { rows: [] }, P2, { book: 'SALES' });
+    eq('books: sales file keeps only sales lines, skips returns', [sOnly.db.rows.map((r) => r.invNo), sOnly.stats.skipped], [['X1'], 2]);
+    const rOnly = validateSaveSales(mixed(), { rows: [] }, P2, { book: 'RETURNS' });
+    eq('books: returns file keeps only SALES RETURN / CREDIT NOTE', [rOnly.db.rows.map((r) => r.invNo), rOnly.stats.skipped], [['CN1', 'CR1'], 1]);
+    let noRet = ''; try { validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X9', 'A', 1, 10)] }, { rows: [] }, P2, { book: 'RETURNS' }); } catch (e) { noRet = e.message; }
+    eq('books: returns file without return lines is refused', noRet.includes('không có dòng SALES RETURN'), true);
+    let noSale = ''; try { validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN7', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'X1' }] }, { rows: [] }, P2, { book: 'SALES' }); } catch (e) { noSale = e.message; }
+    eq('books: returns-only file on the sales screen is refused (cannot wipe sales)', noSale.includes('không có dòng doanh thu bán hàng'), true);
+    const r2 = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 22), 'CN8', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'X1' }] }, rOnly.db, P2, { book: 'RETURNS' });
+    eq('books: saving returns replaces only the returns database range', r2.db.rows.map((r) => r.invNo), ['CN8']);
+    const legacy = splitBooks({ rows: validateSaveSales(mixed(), { rows: [] }, P2).db.rows }, null);
+    eq('books: legacy combined Sales DB still read as two books', [legacy.sales.length, legacy.returns.length, legacy.usingLegacy], [1, 2, true]);
+    eq('books: once a returns DB exists, legacy return lines are ignored', [splitBooks({ rows: legacy.sales.concat(legacy.returns) }, rOnly.db).ignoredLegacy, splitBooks({ rows: [] }, rOnly.db).returns.length], [2, 2]);
+    const rb = F5.revenueBooks(sOnly.db.rows, rOnly.db.rows, P2);
+    eq('books: 511 gross, 5212 returns, 5213 price reductions', [rb.a511, rb.a5212, rb.a5213, rb.physical], [30 * 25000, 10 * 25000, 4 * 25000, 1]);
+    eq('books: bookOf', [bookOf(rOnly.db.rows[0]), bookOf(rOnly.db.rows[1]), bookOf(sOnly.db.rows[0])], ['5212', '5213', '511']);
+    // STEP 5.2 = sales only; STEP 5R = same engine + returns book; sales results unchanged
+    for (const mode of ['MONTHLY', 'STRICT_DATE']) {
+      const a = F5.runFIFO({ ...ctx({}), mode, salesRows: sOnly.db.rows });
+      const b = F5.runFIFO({ ...ctx({}), mode, salesRows: sOnly.db.rows, returnRows: rOnly.db.rows });
+      const c = F5.runFIFO({ ...ctx({}), mode, salesRows: validateSaveSales(mixed(), { rows: [] }, P2).db.rows });
+      const x1 = (r) => r.sales.find((z) => z.inv === 'X1');
+      eq(`books ${mode}: 5.2 has no return lines`, [a.sales.some((z) => z.book === 'RETURNS'), a.returnControl.total], [false, 0]);
+      eq(`books ${mode}: sale COGS identical in 5.2 and 5R`, [Math.round(x1(a).tot), x1(a).key], [Math.round(x1(b).tot), x1(b).key]);
+      eq(`books ${mode}: 5R books the return at original cost`, [b.sales.find((z) => z.inv === 'CN1').status, Math.round(b.totals.retA), b.returnControl.status, b.sales.find((z) => z.inv === 'CN1').acc], ['RETURNED', 100, 'PASS', '5212']);
+      eq(`books ${mode}: separate inputs = legacy combined result`, [Math.round(b.totals.cogsA), Math.round(b.totals.closeA), b.sales.find((z) => z.inv === 'CN1').key], [Math.round(c.totals.cogsA), Math.round(c.totals.closeA), c.sales.find((z) => z.inv === 'CN1').key]);
+    }
+    const tie0 = F5.fastTie({ a154: 1, a155: 1, a2294: 0, a632: 1, a511: 1, a5212: 0, a5213: 0 }, { fast: { a154: 1, a155: 1, a632: 1, a511: 1 } });
+    eq('FAST: 5212 / 5213 blank = 0 when the web has none', [tie0.entered, tie0.status, tie0.rows.map((r) => r.acc)], [true, 'PASS', ['154', '155', '2294', '632', '511', '5212', '5213']]);
+    const tie1 = F5.fastTie({ a154: 1, a155: 1, a2294: 0, a632: 1, a511: 1, a5212: 250000, a5213: 0 }, { fast: { a154: 1, a155: 1, a632: 1, a511: 1 } });
+    eq('FAST: 5212 must be entered when the web has returns', [tie1.entered, tie1.status], [false, 'NOT ENTERED']);
+  }
   // #8 zero-production month: STEP 4 can be zero and STEP 5 sells from Opening FG only
   const zS2 = { status: 'PASS', period: P2, pc: [], total: { alloc: 0 } };
   const zS3 = { period: P2, summary: { outAmt: 0, mrAmt: 0 }, checks: { soVsStep2: { status: 'PASS' }, pcmVsPcp: { status: 'PASS' }, exceptions: { value: 0 } } };

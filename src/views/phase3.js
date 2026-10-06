@@ -1,6 +1,8 @@
 // Phase 3 views: STEP 5 — Opening FG, FIFO COGS + FG Rework FIFO (5B), FG History & month close.
 import * as F5 from '../engine/step5.js';
+import * as F4 from '../engine/step4.js';
 import * as P2 from './phase2.js';
+import { splitBooks, bookOf } from '../engine/revenue.js';
 import { num, ttxt, utxt, txt, nowISO, prevPeriod, serialToISO, fpRows } from '../engine/util.js';
 
 let A = null;
@@ -11,19 +13,31 @@ const colsOf = (fields, headers, types = {}, widths = {}) => fields.map((f, i) =
 
 export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'closedEver', 'rwArchive', 'fastTie', 'nrvDecision', 'returnMatches'];
 export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_SALES_RETURN', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
-export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist']);
+export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist']);
 
 // ======================= derived =======================
-const salesReturnsInPeriod = (S) => ((S.d.salesDB && S.d.salesDB.rows) || []).filter((r) => {
-  if (utxt(r.tranType) !== 'SALES RETURN' || !(num(r.qty) < 0)) return false; // physical returns only; amount-only credits are revenue reductions
-  const d = F5.saleDate(r);
-  return d !== null && serialToISO(d).slice(0, 7) === S.period;
-});
+/** Sales book (TK 511) and returns book (TK 5212 / 5213) of the period's data – owner decision 06/10/2026. */
+export const books = (S) => splitBooks(S.d.salesDB, S.d.returnsDB);
+const inPeriod = (S, r) => { const d = F5.saleDate(r); return d !== null && serialToISO(d).slice(0, 7) === S.period; };
+/** Return / credit lines of the period (both kinds). */
+export const returnsInPeriod = (S) => books(S).returns.filter((r) => inPeriod(S, r));
+/** Physical returns of the period (negative qty SALES RETURN) – the only lines with a COGS reversal in STEP 5R. */
+const salesReturnsInPeriod = (S) => returnsInPeriod(S).filter((r) => utxt(r.tranType) === 'SALES RETURN' && num(r.qty) < 0);
+/** Fingerprint of everything STEP 5R depends on beyond STEP 5.2: the period's return lines and the STEP 5R resolutions. */
+export const retKey = (S) => fpRows(returnsInPeriod(S), (r) => [ttxt(r.txnKey), utxt(r.tranType), num(r.qty), num(r.amtVND).toFixed(0), ttxt(r.origInv), ttxt(r.billDate), utxt(r.product)].join('|')) + '#' + rmKey(S);
+/** Why the STEP 5R part of the STEP 5 result is missing or out of date ('' = current). */
+export function returnStale(S, D5) {
+  if (!salesReturnsInPeriod(S).length) return '';
+  if (!D5 || !D5.res) return 'Chưa chạy STEP 5.2 (RUN FIFO bán hàng)';
+  if (D5.fresh !== 'CURRENT') return 'STEP 5.2 OUTDATED – chạy lại RUN FIFO rồi STEP 5R';
+  if (!D5.res.withReturns) return 'Chưa chạy STEP 5R sau lần RUN FIFO gần nhất';
+  if (D5.res.retKey !== retKey(S)) return 'Dữ liệu hàng trả lại hoặc cách xử lý (hoá đơn gốc / đơn giá) đã đổi sau lần chạy STEP 5R';
+  return '';
+}
 export function returnStepStatus(S, D5) {
-  const n = salesReturnsInPeriod(S).length;
-  if (!n) return 'PASS';
-  if (!D5 || !D5.res) return 'NOT RUN';
-  if (D5.fresh !== 'CURRENT') return 'RERUN REQUIRED';
+  if (!salesReturnsInPeriod(S).length) return 'PASS';
+  if (!D5 || !D5.res || !D5.res.withReturns) return 'NOT RUN';
+  if (returnStale(S, D5)) return 'RERUN REQUIRED';
   const rc = D5.res.returnControl;
   return rc && rc.status === 'BLOCK' ? 'BLOCK' : rc && rc.status === 'REVIEW' ? 'PASS WITH REVIEW' : 'PASS';
 }
@@ -39,13 +53,13 @@ export function engineBalances(S, p2, res) {
     a155: res ? res.totals.closeA : 0,
     a2294: nrvAdj,
     a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj,
-    a511: F5.periodRevenue(d.salesDB ? d.salesDB.rows : [], S.period, d.dupDecisions),
+    ...(() => { const bk = books(S); const rb = F5.revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions); return { a511: rb.a511, a5212: rb.a5212, a5213: rb.a5213 }; })(),
   };
 }
 function snap(S, D4) {
   const d = S.d; const fl = D4 && D4.fl;
   return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode, dupKey: dupKey(S),
-    flKey: flKey(fl), ovKey: ovKey(S), rate: sellRate(S), rmKey: rmKey(S) };
+    flKey: flKey(fl), ovKey: ovKey(S), rate: sellRate(S) };
 }
 /** STEP 5R resolutions (original invoice / manual unit cost per return line). */
 export const rmKey = (S) => fpRows(Object.entries(S.d.returnMatches || {}), ([k, v]) => `${k}=${ttxt(v.origInv)}|${num(v.unitCost)}`);
@@ -59,7 +73,7 @@ export const sellRate = (S) => { const c = cfg(S); return c.sellCostRate === und
 export const nrvKey = (res) => fpRows((res && res.closing) || [], (r) => [ttxt(r.lid), utxt(r.prod), num(r.qty).toFixed(4), num(r.tot).toFixed(0), num(r.price).toFixed(6), num(r.nrvUnit).toFixed(2), num(r.prov).toFixed(0), num(r.provNeed).toFixed(0)].join('|'));
 /** Repeated sales lines of the period and how many still need a KEEP / EXCLUDE decision (F-03). */
 export function dupStatus(S) {
-  const groups = F5.duplicateGroups(S.d.salesDB ? S.d.salesDB.rows : [], S.period);
+  const groups = F5.duplicateGroups(books(S).sales, S.period);
   const dec = S.d.dupDecisions || {};
   let pending = 0, excluded = 0;
   for (const g of groups) for (const l of g) if (l.occ > 1) { const v = dec[l.key]; if (!v) pending++; else if (v === 'EXCLUDE') excluded++; }
@@ -82,7 +96,6 @@ function staleReason(S, D4, d3b) {
   if (dupKey(S) !== (p.dupKey || '')) return 'Quyết định dòng nghi trùng đã đổi';
   if (p.flKey !== undefined && c.flKey !== p.flKey) return 'Giá thành từng lô ở STEP 4 đã đổi (điều chỉnh 3B / rework chuyển giữa các lô)';
   if (p.ovKey !== undefined && c.ovKey !== p.ovKey) return 'Lựa chọn xử lý FIFO (override) đã đổi';
-  if ((p.rmKey !== undefined || Object.keys(S.d.returnMatches || {}).length) && c.rmKey !== p.rmKey) return 'Cách xử lý hàng trả lại (STEP 5R) đã đổi';
   if (p.rate !== undefined && c.rate !== p.rate) return 'Tỷ lệ chi phí bán hàng (NRV) đã đổi';
   return '';
 }
@@ -111,20 +124,23 @@ export function derive(S, p2) {
   if (!closeReason && res && (S.prevDrift || []).length && !(d.closed && d.closed.period === S.period)) closeReason = `Số dư đầu kỳ đã lệch so với kỳ trước: ${S.prevDrift[0]}`;
   if (!closeReason && res && res.undated && res.undated.length) closeReason = `Sales Database có ${res.undated.length} dòng thiếu / sai ngày hoá đơn (vd. ${res.undated.slice(0, 3).map((u) => u.inv || 'dòng ' + u.dbRow).join(', ')}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.`;
   if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
-  if (!closeReason && res && res.returnControl && res.returnControl.status === 'BLOCK') closeReason = `STEP 5R Sales Return còn ${res.returnControl.blocked} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).`;
+  const r5 = { res, fresh };
+  const rStale = res && !(d.closed && d.closed.period === S.period) ? returnStale(S, r5) : '';
+  if (!closeReason && rStale) closeReason = `STEP 5R (hàng bán bị trả lại) chưa hoàn tất: ${rStale}. Mở màn hình 5R → RUN STEP 5R.`;
+  if (!closeReason && res && res.withReturns && res.returnControl && res.returnControl.status === 'BLOCK') closeReason = `STEP 5R Sales Return còn ${res.returnControl.blocked} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).`;
   if (!closeReason && res && num(res.totals && res.totals.nrvProv) > 1 && !(d.closed && d.closed.period === S.period)) {
     const nd = d.nrvDecision, key = nrvKey(res);
     if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
   }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
-    if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 (STEP 5.3 → tab Đối chiếu FAST).';
+    if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213 (STEP 5.3 → tab Đối chiếu FAST).';
     else {
       const r511 = tie.rows.find((r) => r.acc === '511');
       if (r511 && Math.abs(num(r511.engine)) <= 1 && Math.abs(num(r511.fast)) > 1) closeReason = `Sales completeness BLOCK: web không có doanh thu 511 trong kỳ nhưng FAST = ${A.fmtNum(r511.fast)} VND. Không được override bằng approval – kiểm tra file doanh thu / Bill Date / phạm vi import.`;
       else if (tie.diffs && !tie.approved) closeReason = `Số liệu lệch FAST ở ${tie.diffs} tài khoản chưa được xác nhận (STEP 5.3 → Đối chiếu FAST → Xác nhận chênh lệch).`;
     }
   }
-  return { res, fresh, stale, dups, hg, recon, controls, closeReason, tie };
+  return { res, fresh, stale, dups, hg, recon, controls, closeReason, tie, retStale: rStale };
 }
 
 /** 00_CONTROL_CENTER rows 119..136 — STEP 5 checkpoints. */
@@ -148,8 +164,10 @@ function step5Controls(S, x) {
     add('09a', 'Dòng bán thiếu / sai ngày hoá đơn', 0, und, und ? 'BLOCK' : 'PASS', 'Không xác định được kỳ → chưa tính giá vốn. Sửa ngày ở nguồn rồi import & lưu lại (4.1)');
     if (res.mode === 'STRICT_DATE') { const ul = num(res.stats && res.stats.undatedLayers); add('09c', 'STRICT_DATE: lớp sản xuất không có ngày hoàn thành đã được dùng', 0, ul, ul ? 'REVIEW' : 'PASS', 'PC-P thiếu Date → không chứng minh được thứ tự thời gian'); }
     add('09b', 'Dòng FIFO có cảnh báo kiểm tra dữ liệu bán', 0, adv, adv ? 'REVIEW' : 'PASS', 'Thiếu khách hàng, SL×đơn giá lệch, loại OTHER… (không chặn)');
-    const rc = res.returnControl || { total: 0, processed: 0, blocked: 0, status: 'PASS' };
-    add('09r', 'STEP 5R · Sales Return đã match & reverse COGS', rc.total, rc.processed, rc.blocked ? 'BLOCK' : 'PASS', rc.total ? `Unresolved=${rc.blocked}; Return qty=${A.fmtNum(rc.qty)}; COGS reversal=${A.fmtNum(rc.cogsReversal)}` : 'Không có Sales Return');
+    const r5s = returnStepStatus(S, { res, fresh: x.fresh }), nPhys = salesReturnsInPeriod(S).length;
+    const rc = res.withReturns && res.returnControl ? res.returnControl : { total: nPhys, processed: 0, blocked: 0, qty: 0, cogsReversal: 0 };
+    add('09r', 'STEP 5R · Hàng bán bị trả lại (chạy riêng) đã match & reverse COGS', nPhys, rc.processed, r5s === 'PASS' ? 'PASS' : r5s === 'PASS WITH REVIEW' ? 'REVIEW' : r5s === 'BLOCK' ? 'BLOCK' : r5s === 'NOT RUN' ? 'NOT RUN' : 'RERUN 5R',
+      !nPhys ? 'Không có hàng trả lại vật lý trong kỳ' : r5s === 'NOT RUN' || r5s === 'RERUN REQUIRED' ? 'Màn hình 5R → RUN STEP 5R' : `Unresolved=${rc.blocked}; Return qty=${A.fmtNum(rc.qty)}; COGS reversal=${A.fmtNum(rc.cogsReversal)}`);
   }
   add('10', `Lô cuối kỳ giá vốn > NRV (giá bán − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% CPBH)`, R(16).expected, R(16).result, R(16).status, res && res.totals && res.totals.nrvProv ? `Dự phòng giảm giá đề xuất (TK 2294): ${A.fmtNum(res.totals.nrvProv)} VND – xem STEP 5.2 → Tồn cuối` : 'Review NRV (sau dự phòng)');
   if (res && res.stats && res.stats.returns) add('10b', 'Hàng bán bị trả lại nhập lại kho', 'INFO', res.stats.returns, 'INFO', `${A.fmtNum(res.totals.retQ)} sp · ${A.fmtNum(res.totals.retA)} VND giảm giá vốn (theo giá vốn hoá đơn gốc)`);
@@ -176,7 +194,7 @@ function step5Controls(S, x) {
     const f200 = num(s3.openingAmt) + num(S3.miAmt) + num(S3.soAmt) + num(s4.alloc622) + num(s4.alloc627) + fifoC + bf - num(S3.mrAmt) - fl.totals.totalCost - x.d3b.wf.finalClosing - sumOf(reg, 'closingWIP');
     add('15a', 'Cầu nối TK 154 (gồm 3B & rework)', 0, f200, Math.abs(f200) <= 1 ? 'PASS' : stale ? 'RERUN FIFO' : 'REVIEW', 'WIP đầu kỳ + B/F + MI + Stock Out + 622 + 627 + FG đi rework − MR − nhập kho − WIP cuối (sau 3B) − rework WIP cuối');
   }
-  if (res && x.tie) add('15b', 'Đối chiếu FAST 154 / 155 / 2294 / 632 / 511', 0, x.tie.diffs, x.tie.status === 'PASS' ? 'PASS' : x.tie.status === 'APPROVED' ? 'REVIEW' : x.tie.status === 'NOT ENTERED' ? 'REVIEW' : 'REVIEW', x.tie.status === 'NOT ENTERED' ? 'Chưa nhập số dư FAST' : x.tie.status === 'APPROVED' ? `Chênh lệch đã xác nhận bởi ${x.tie.approval.by}` : x.tie.diffs ? 'Lệch – cần xác nhận trước khi đóng kỳ' : 'Khớp FAST');
+  if (res && x.tie) add('15b', 'Đối chiếu FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213', 0, x.tie.diffs, x.tie.status === 'PASS' ? 'PASS' : x.tie.status === 'APPROVED' ? 'REVIEW' : x.tie.status === 'NOT ENTERED' ? 'REVIEW' : 'REVIEW', x.tie.status === 'NOT ENTERED' ? 'Chưa nhập số dư FAST' : x.tie.status === 'APPROVED' ? `Chênh lệch đã xác nhận bởi ${x.tie.approval.by}` : x.tie.diffs ? 'Lệch – cần xác nhận trước khi đóng kỳ' : 'Khớp FAST');
   add('16', 'FG History', 'PASS', hg.gate, hg.gate === 'PASS' ? 'PASS' : 'RERUN HISTORY', 'BUILD FG HISTORY sau FIFO');
   const f135 = recon.finalStatus;
   add('17', 'Cổng đóng kỳ', 'READY', res ? f135 : '', !res ? 'NOT RUN' : f135.startsWith('READY') ? (f135.includes('REVIEW') ? 'PASS WITH REVIEW' : 'PASS') : 'BLOCK', '05_RECONCILIATION dòng 49');
@@ -192,6 +210,7 @@ function step5Controls(S, x) {
       : !opSt.startsWith('VALIDATED') ? 'Validate FG đầu kỳ'
         : byNo('02').status !== 'PASS' ? 'Hoàn tất STEP 4 trước'
           : fifoNeedsRun ? 'Chạy FIFO COGS'
+            : ['NOT RUN', 'RERUN 5R'].includes(byNo('09r').status) ? 'Chạy STEP 5R (hàng bán bị trả lại) ở màn hình 5R'
             : byNo('16').status !== 'PASS' ? 'Build FG History'
               : byNo('17').status.startsWith('PASS') ? 'CLOSE MONTH'
                 : 'Xử lý cổng đóng kỳ (05_RECONCILIATION dòng 49)';
@@ -318,7 +337,8 @@ export function viewFIFO(el) {
     </div>
     ${res && D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>STEP 5 OUTDATED:</b> ${esc(D5.stale)}. Chạy lại theo thứ tự (STEP 4 nếu cần) → RUN FIFO COGS → BUILD FG HISTORY.</div>` : ''}
     ${D5.dups.pending ? `<div class="alert review">Còn <b>${D5.dups.pending}</b> dòng doanh thu nghi trùng trong kỳ chưa xác nhận – đang được tính FIFO như dòng thật (giống Excel). <a href="#sales">Xác nhận ở 4.1 → Nghi trùng</a>. Chưa xác nhận thì không đóng kỳ được.</div>` : ''}
-    ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn FIFO (632)', T.cogsA, true)}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
+    ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn bán ra (FIFO)', T.cogsA + num(T.retA), true)}${res.withReturns ? A.kpi('Giảm giá vốn hàng trả lại (5R)', -num(T.retA)) + A.kpi('Giá vốn thuần (632)', T.cogsA, true) : ''}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
+    ${res && D5.fresh === 'CURRENT' && D5.retStale ? `<div class="alert review"><b>Bước tiếp: STEP 5R.</b> Kết quả 5.2 chỉ gồm bán hàng. Kỳ có ${salesReturnsInPeriod(S).length} dòng hàng bán bị trả lại – chạy riêng ở <a href="#salesreturn">màn hình 5R</a> (${esc(D5.retStale)}).</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
     <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}</details>
     ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
@@ -333,21 +353,11 @@ export function viewFIFO(el) {
   if (tab === 'sales') {
     const cols = colsOf(F5.SALES_FIELDS, F5.SALES_HEADERS, { date: 'date', qty: 'qty', usd: 'num', vnd: 'num', fq: 'qty', rm: 'num', c622: 'num', c627: 'num', tot: 'num', unit: 'num', status: 'status', seq: 'int', dbRow: 'int' }, { name: 220, msg: 260, key: 300, cust: 180 });
     const ov = d.fifoOverrides || {};
-    const rows = res.sales.map((s) => ({ ...s, ovr: ov[s.key] || '' }));
+    const rows = res.sales.filter((s) => s.book !== 'RETURNS').map((s) => ({ ...s, ovr: ov[s.key] || '' }));
     const ci = cols.findIndex((x) => x.key === 'ovr'); cols[ci] = { ...cols[ci], editable: edit, options: ['FIFO COGS', 'NO COGS', 'REVIEW'] };
     box.innerHTML = '<p class="muted">Cột Override Treatment là ô nhập duy nhất (FIFO COGS / NO COGS / REVIEW), giữ theo Line Key khi chạy lại. Thay đổi có hiệu lực ở lần RUN FIFO COGS tiếp theo.</p><div id="t5s"></div>';
     A.mountTable(box.querySelector('#t5s'), { columns: cols, rows, filterKey: 'status', height: 520, totals: ['qty', 'usd', 'vnd', 'fq', 'rm', 'c622', 'c627', 'tot'], onExport: A.exportTable('05_SALES_COGS', cols),
       onEdit: !edit ? undefined : (row, key, val) => { const o = S.d.fifoOverrides || (S.d.fifoOverrides = {}); if (val) o[row.key] = val; else delete o[row.key]; row.ovr = val; A.audit('STEP 5 OVERRIDE', `${row.key} = ${val || '(xoá)'}`); A.markDirty('fifoOverrides', 'audit'); } });
-  } else if (tab === 'returns') {
-    const rc = res.returnControl || { rows: [], total: 0, processed: 0, blocked: 0, qty: 0, cogsReversal: 0, status: 'PASS' };
-    box.innerHTML = `<div class="kpis">${A.kpiN('Return transactions', rc.total)}${A.kpiN('Processed', rc.processed)}${A.kpiN('Blocked', rc.blocked)}${A.kpiN('Return qty', rc.qty)}${A.kpi('COGS reversal', rc.cogsReversal, true)}<div class="kpi"><span>STEP 5R status</span><b>${A.pill(rc.status)}</b></div></div>
-      <p class="muted">STEP 5R match hàng trả lại với invoice gốc, kiểm remaining returnable quantity, reverse đúng RM / 622 / 627 / COGS gốc và tạo Returned FG Layer theo ngày trả hàng. CREDIT NOTE không đi qua chức năng này.</p><div id="t5ret"></div>`;
-    if (!rc.rows.length) { box.querySelector('#t5ret').innerHTML = A.emptyNote('Kỳ này không có SALES RETURN vật lý.'); }
-    else {
-      const rt = { seq: 'int', date: 'date', returnQty: 'qty', cogsRM: 'num', cogs622: 'num', cogs627: 'num', cogsTotal: 'num', status: 'status' };
-      const cols = colsOf(F5.RETURN_FIELDS, F5.RETURN_HEADERS, rt, { returnInv: 140, customer: 180, productName: 220, originalInv: 160, layerId: 220, message: 320 });
-      A.mountTable(box.querySelector('#t5ret'), { columns: cols, rows: rc.rows, filterKey: 'status', height: 520, totals: ['returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal'], onExport: A.exportTable('05_SALES_RETURN', cols) });
-    }
   } else if (tab === 'detail') {
     const cols = colsOf(F5.DETAIL_FIELDS, F5.DETAIL_HEADERS, { date: 'date', layerQty: 'qty', qty: 'qty', rm: 'num', a622: 'num', a627: 'num', tot: 'num', unit: 'num', left: 'qty', seq: 'int', line: 'int' }, { lid: 220 });
     A.mountTable(box, { columns: cols, rows: res.detail, filterKey: 'take', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot'], onExport: A.exportTable('05_FIFO_DETAIL', cols) });
@@ -381,29 +391,104 @@ export function viewFIFO(el) {
     box.innerHTML = recTable(res.rec, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], REC_LABELS) + `<p class="muted">Run snapshot: chế độ ${esc(res.mode)} · ${res.openLayers} lớp đầu kỳ · override dùng ${res.overridesUsed} · kết quả ${esc(res.runResult)}</p>`;
   }
 }
+const RET_SALES_COLS = () => [...F4.SALES_FIELDS.map((f, i) => ({ key: f, label: F4.SALES_HEADERS[i], type: f === 'invDate' ? 'date' : ['fx', 'qty', 'unitPrice'].includes(f) ? 'qty' : ['amtUSD', 'amtVND'].includes(f) ? 'num' : 'text', width: f === 'prodName' ? 220 : f === 'customer' ? 180 : f === 'remark' ? 260 : 110 })),
+  { key: 'billDate', label: 'Bill Date', type: 'date', width: 100 }, { key: 'origInv', label: 'Original Invoice No.', width: 140 }];
+/** STEP 5R · Hàng bán bị trả lại & giảm giá – own file, own database, own run, own FAST accounts (5212 / 5213). */
 export function viewReturns(el) {
-  const S = A.S; const D5 = A.derived().d5; const res = D5 && D5.res;
+  const S = A.S; const d = S.d; const D5 = A.derived().d5; const res = D5 && D5.res;
+  const bk = books(S); const rb = F5.revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions);
   const src = salesReturnsInPeriod(S);
   const status = returnStepStatus(S, D5);
-  const rc = res && res.returnControl ? res.returnControl : { rows: [], total: 0, processed: 0, blocked: 0, qty: 0, cogsReversal: 0, status: src.length ? 'NOT RUN' : 'PASS' };
+  const st = d.returnsImport; const closed = d.closed && d.closed.period === S.period;
+  const tab = S.tab5r || (bk.returns.length || st ? 'run' : 'import');
+  const ran = res && res.withReturns;
+  const rc = ran && res.returnControl ? res.returnControl : { rows: [], total: src.length, processed: 0, blocked: 0, review: 0, qty: 0, cogsReversal: 0, status: src.length ? 'NOT RUN' : 'PASS' };
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 5R · Hàng bán bị trả lại</h1><p class="lead">Bước kiểm soát riêng cho SALES RETURN vật lý. Hệ thống match invoice gốc, giới hạn số lượng trả lũy kế, reverse đúng RM / 622 / 627 / COGS gốc và tạo Returned FG Layer theo ngày trả hàng. CREDIT NOTE không làm tăng tồn kho.</p></div>
-      <div class="result"><span>Kết quả STEP 5R</span>${A.pill(status)}<small>${src.length} giao dịch SALES RETURN trong kỳ</small></div></header>
-    <div class="row"><a class="btn ghost" href="#sales">Mở nguồn Sales Database</a><a class="btn" href="#step5">Mở STEP 5.2 · RUN FIFO COGS</a><span class="muted">STEP 5R dùng cùng chronological FIFO engine với STEP 5.2 để không làm sai thứ tự layer.</span></div>
-    <div class="kpis">${A.kpiN('Dòng trả lại (SL âm)', src.length)}${A.kpiN('Đã xử lý', rc.processed)}${A.kpiN('Chưa xử lý', rc.blocked)}${A.kpiN('Return qty', rc.qty)}${A.kpi('COGS reversal', rc.cogsReversal, true)}<div class="kpi"><span>Return control</span><b>${A.pill(rc.status)}</b></div></div>
-    ${!src.length ? A.emptyNote('Kỳ này không có SALES RETURN vật lý trong Sales Database.')
-      : !res ? '<div class="alert review"><b>Chưa chạy FIFO.</b> STEP 5R chỉ hoàn tất sau RUN FIFO COGS vì phải lấy đúng giá vốn của invoice/layer gốc.</div>'
-        : D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>STEP 5R OUTDATED.</b> ${esc(D5.stale || 'Dữ liệu đầu vào đã thay đổi')}. Chạy lại STEP 5.2.</div>`
-          : rc.blocked ? `<div class="alert block"><b>Còn ${rc.blocked} dòng trả lại chưa xử lý.</b> Chọn hoá đơn gốc hoặc nhập đơn giá vốn ở bảng "Xử lý dòng trả lại" bên dưới, rồi chạy lại STEP 5.2.</div>`
-            : rc.review ? `<div class="alert review"><b>${rc.review} dòng trả lại cần xác nhận</b> (tự khớp hoá đơn gần nhất hoặc đơn giá nhập tay) – xem bảng "Xử lý dòng trả lại".</div>`
-            : '<div class="alert pass"><b>STEP 5R PASS.</b> Toàn bộ Sales Return đã match invoice gốc và reverse COGS thành công.</div>'}
-    <div id="t5r-main"></div>
+    <header class="ph"><div><h1>STEP 5R · Hàng bán bị trả lại &amp; giảm giá</h1><p class="lead">Tách riêng khỏi doanh thu bán hàng: file riêng, dữ liệu riêng, bước chạy riêng và đối chiếu FAST riêng. <b>SALES RETURN → TK 5212</b> (có số lượng: nhập lại kho theo giá vốn hoá đơn gốc, giảm 632). <b>CREDIT NOTE → TK 5213</b> (giảm giá, không nhập kho).</p></div>
+      <div class="result"><span>Kết quả STEP 5R</span>${A.pill(status)}<small>${src.length} dòng trả lại có số lượng trong kỳ</small></div></header>
+    ${closed ? `<div class="alert pass">Kỳ ${esc(S.period)} đã đóng – chỉ xem.</div>` : ''}
+    ${bk.usingLegacy ? `<div class="alert review">Đang đọc <b>${bk.legacyCount}</b> dòng trả lại / giảm giá từ Sales Database cũ (trước v1.11). Lần Validate &amp; Save tiếp theo (ở đây hoặc 4.1) sẽ chuyển hẳn chúng sang dữ liệu trả lại riêng.</div>` : ''}
+    <div class="kpis">${A.kpi('5212 · Hàng bán bị trả lại', rb.a5212)}${A.kpi('5213 · Giảm giá hàng bán', rb.a5213)}${A.kpiN('Dòng trả lại có SL', src.length)}${A.kpiN('SL nhập lại kho', rb.physicalQty)}${A.kpi('Giảm giá vốn (632)', ran ? -rc.cogsReversal : null, true)}<div class="kpi"><span>Return control</span><b>${A.pill(ran ? rc.status : status)}</b></div></div>
+    ${tabsHTML(tab, [['run', 'Xử lý giá vốn (RUN 5R)'], ['import', 'Import & Validate'], ['db', `Dữ liệu trả lại / giảm giá (${bk.returns.length})`]], 'data-tab5r')}
+    <div id="t5r-box"></div>
   </section>`;
-  if (!res || !rc.rows.length) return;
+  el.querySelectorAll('[data-tab5r]').forEach((b) => b.addEventListener('click', () => { S.tab5r = b.dataset.tab5r; A.render(); }));
+  const box = el.querySelector('#t5r-box');
+  if (tab === 'import') {
+    box.innerHTML = `<div class="row"><label>Chế độ <select id="r-mode"><option>YTD</option><option>MONTHLY</option></select></label>
+      <label class="btn">Chọn file hàng trả lại / giảm giá…<input type="file" id="f-ret" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label>
+      <button class="btn" type="button" data-act="ret-save" ${st && st.rows.length && !String(st.status).includes('SAVED') && !closed ? '' : 'disabled'}>Validate &amp; Save</button>
+      <span class="muted">${st ? `${esc(st.fileName || '')} · ${esc(st.mode || '')} · ${A.pill(st.status)}` : 'Chưa import.'}</span></div>
+      <p class="muted">Cùng cấu trúc cột với file doanh thu (Invoice Date, Customer, Product Number, Quantity, Amount USD / VND, SI Invoice No., Transaction Type; nên có <b>Original Invoice No.</b> và Bill Date). Chỉ nhận dòng <b>SALES RETURN</b> (SL âm, hoặc chỉ có tiền) và <b>CREDIT NOTE</b>; dòng bán hàng thường bị bỏ qua, nên dùng được cả file ERP xuất chung. Validate &amp; Save thay toàn bộ dòng trả lại cũ trong khoảng ngày của file (YTD: từ 01/01 đến hết kỳ).</p><div id="t-rstg"></div>`;
+    box.querySelector('#f-ret').addEventListener('change', (e) => importReturnsFile(e.target.files[0], box.querySelector('#r-mode').value));
+    if (st && st.rows.length) {
+      const cols = [...RET_SALES_COLS(), { key: 'validStat', label: 'Validation', type: 'status', width: 100 }, { key: 'validMsg', label: 'Validation Message', width: 320 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }, { key: 'saveStat', label: 'Save', width: 80 }];
+      A.mountTable(box.querySelector('#t-rstg'), { columns: cols, rows: st.rows, filterKey: 'validStat', height: 480, totals: ['qty', 'amtUSD', 'amtVND'], onExport: A.exportTable('05R_RETURNS_IMPORT', cols) });
+    }
+    return;
+  }
+  if (tab === 'db') {
+    if (!bk.returns.length) { box.innerHTML = A.emptyNote('Chưa có dữ liệu hàng trả lại / giảm giá.'); return; }
+    const rows = bk.returns.map((r) => ({ ...r, acc: bookOf(r), kind: utxt(r.tranType) === 'CREDIT NOTE' ? 'Giảm giá' : num(r.qty) < 0 ? 'Trả hàng (có SL)' : 'Chỉ giảm tiền' }));
+    const cols = [{ key: 'acc', label: 'TK', width: 60 }, { key: 'kind', label: 'Loại', width: 130 }, ...RET_SALES_COLS(), { key: 'validResult', label: 'Validation', type: 'status', width: 100 }, { key: 'validMsg', label: 'Validation Message', width: 300 }, { key: 'txnKey', label: 'Transaction Key', width: 220 }];
+    box.innerHTML = `<p class="muted">${d.returnsDB ? `Lưu lần cuối ${A.fmtTs(d.returnsDB.savedAt)}${d.returnsDB.migratedFrom ? ' · chuyển từ Sales Database cũ' : ''}` : 'Đọc từ Sales Database cũ'} · ${bk.returns.length} dòng (mọi kỳ). Dữ liệu được mang sang kỳ sau. Dòng SALES RETURN chỉ có tiền (không SL) vẫn vào TK 5212; nếu FAST hạch toán là giảm giá thì sửa Transaction Type thành CREDIT NOTE ở file nguồn.</p><div id="t-rdb"></div>`;
+    A.mountTable(box.querySelector('#t-rdb'), { columns: cols, rows, filterKey: 'acc', height: 520, totals: ['qty', 'amtUSD', 'amtVND'], onExport: A.exportTable('05R_RETURNS_DATA', cols) });
+    return;
+  }
+  // run tab
+  const ready = res && D5.fresh === 'CURRENT';
+  box.innerHTML = `<div class="row"><button class="btn" data-act="s5r-run" type="button" ${src.length && ready && !closed ? '' : 'disabled'}>RUN STEP 5R · Hàng bán bị trả lại</button>
+      <span class="muted">${ran ? `Chạy ${A.fmtTs(res.runAt)}` : ''} Thứ tự: STEP 5.2 RUN FIFO (bán hàng) → <b>RUN STEP 5R</b> → STEP 5.3 BUILD FG HISTORY → CLOSE MONTH.</span></div>
+    ${!src.length ? `<div class="alert pass">Kỳ này không có hàng bán bị trả lại có số lượng – không có giá vốn cần xử lý.${rb.n5212 + rb.n5213 ? ` Giảm trừ chỉ có tiền: 5212 = ${A.fmtNum(rb.a5212)} · 5213 = ${A.fmtNum(rb.a5213)} VND, đối chiếu FAST ở STEP 5.3.` : ''}</div>`
+      : !res ? '<div class="alert review"><b>Chưa chạy STEP 5.2.</b> Chạy RUN FIFO COGS (bán hàng) trước – STEP 5R cần giá vốn của hoá đơn gốc.</div>'
+        : D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>STEP 5.2 OUTDATED.</b> ${esc(D5.stale || 'Dữ liệu đầu vào đã thay đổi')}. Chạy lại RUN FIFO COGS rồi RUN STEP 5R.</div>`
+          : !ran ? `<div class="alert review"><b>Chưa chạy STEP 5R</b> sau lần RUN FIFO gần nhất (${A.fmtTs(res.runAt)}). Bấm <b>RUN STEP 5R</b>.</div>`
+            : D5.retStale ? `<div class="alert review"><b>STEP 5R cần chạy lại:</b> ${esc(D5.retStale)}.</div>`
+              : rc.blocked ? `<div class="alert block"><b>Còn ${rc.blocked} dòng trả lại chưa xử lý.</b> Chọn hoá đơn gốc hoặc nhập đơn giá vốn ở bảng "Xử lý dòng trả lại" bên dưới, rồi RUN STEP 5R lại.</div>`
+                : rc.review ? `<div class="alert review"><b>${rc.review} dòng trả lại cần xác nhận</b> (tự khớp hoá đơn gần nhất hoặc đơn giá nhập tay) – xem bảng "Xử lý dòng trả lại".</div>`
+                  : '<div class="alert pass"><b>STEP 5R PASS.</b> Toàn bộ hàng trả lại đã khớp hoá đơn gốc và giảm giá vốn đúng giá gốc.</div>'}
+    <h2>Hàng trả lại có số lượng (giá vốn)</h2><div id="t5r-main"></div>
+    <h2>Giảm trừ chỉ có tiền trong kỳ (không nhập kho)</h2><div id="t5r-amt"></div>`;
+  const amtRows = returnsInPeriod(S).filter((r) => !(utxt(r.tranType) === 'SALES RETURN' && num(r.qty) < 0)).map((r) => ({ ...r, acc: bookOf(r), recog: F5.saleDate(r) }));
+  const ac = [{ key: 'acc', label: 'TK', width: 60 }, { key: 'recog', label: 'Ngày ghi nhận', type: 'date', width: 100 }, { key: 'invNo', label: 'Số chứng từ', width: 140 }, { key: 'customer', label: 'Khách hàng', width: 200 }, { key: 'tranType', label: 'Transaction Type', width: 120 }, { key: 'prodName', label: 'Diễn giải', width: 320 }, { key: 'amtUSD', label: 'USD', type: 'num', width: 110 }, { key: 'amtVND', label: 'VND', type: 'num', width: 140 }, { key: 'origInv', label: 'HĐ gốc', width: 130 }];
+  if (amtRows.length) A.mountTable(box.querySelector('#t5r-amt'), { columns: ac, rows: amtRows, filterKey: 'acc', height: Math.min(360, 30 * amtRows.length + 110), totals: ['amtUSD', 'amtVND'], onExport: A.exportTable('05R_AMOUNT_ONLY', ac) });
+  else box.querySelector('#t5r-amt').innerHTML = A.emptyNote('Không có.');
+  if (!ran || !rc.rows.length) { box.querySelector('#t5r-main').innerHTML = A.emptyNote(src.length ? 'Chưa chạy STEP 5R.' : 'Không có.'); return; }
   const rt = { seq: 'int', date: 'date', returnQty: 'qty', cogsRM: 'num', cogs622: 'num', cogs627: 'num', cogsTotal: 'num', status: 'status' };
   const cols = colsOf(F5.RETURN_FIELDS, F5.RETURN_HEADERS, rt, { returnInv: 140, customer: 180, productName: 220, originalInv: 160, layerId: 220, message: 320 });
-  A.mountTable(el.querySelector('#t5r-main'), { columns: cols, rows: rc.rows, filterKey: 'status', height: Math.min(560, 30 * rc.rows.length + 110), totals: ['returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal'], onExport: A.exportTable('05_SALES_RETURN', cols) });
+  A.mountTable(box.querySelector('#t5r-main'), { columns: cols, rows: rc.rows, filterKey: 'status', height: Math.min(560, 30 * rc.rows.length + 110), totals: ['returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal'], onExport: A.exportTable('05_SALES_RETURN', cols) });
   resolvePanel(el, S, res, rc);
+}
+async function importReturnsFile(file, mode) {
+  if (!file || !A.guardEdit() || closedGuard()) return;
+  await A.busy(`Đang đọc ${file.name}…`, async () => {
+    try {
+      const res = await A.parseFile(await file.arrayBuffer(), 'all');
+      const st = F4.importSales(res.grids, file.name, mode, A.S.period);
+      const n = F4.bookRows(st, 'RETURNS').take.length;
+      A.S.d.returnsImport = st;
+      A.audit('RETURNS IMPORT', `${file.name} · ${mode} · ${st.rows.length} dòng (trả lại / giảm giá ${n})`);
+      A.markDirty('returnsImport', 'audit');
+      A.toast(n ? `Đã import ${n} dòng trả lại / giảm giá${st.rows.length > n ? ` (bỏ qua ${st.rows.length - n} dòng bán hàng)` : ''}. Bước tiếp: Validate & Save.` : 'File không có dòng SALES RETURN / CREDIT NOTE nào.', n ? 'pass' : 'review');
+    } catch (e) { A.toast('Import hàng trả lại lỗi: ' + e.message, 'block'); }
+  });
+  A.render();
+}
+export function doReturnsSave() {
+  const S = A.S; const d = S.d;
+  if (closedGuard()) return;
+  try {
+    P2.migrateLegacyReturns(S);
+    const pv = F4.salesSavePreview(d.returnsImport, d.returnsDB, S.period, { book: 'RETURNS' });
+    if (pv.from !== null && !confirm(`Validate & Save hàng trả lại / giảm giá (${pv.mode})\n\nThay thế dòng trả lại cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng${pv.skipped ? `\nBỏ qua ${pv.skipped} dòng bán hàng (thuộc 4.1)` : ''}\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
+    const r = F4.validateSaveSales(d.returnsImport, d.returnsDB, S.period, { book: 'RETURNS' });
+    d.returnsDB = r.db; // own database: Price Master, STEP 4 and STEP 5.2 are not affected, only STEP 5R and the 5212 / 5213 tie
+    A.audit('RETURNS VALIDATE & SAVE', `${r.stats.mode} ${serialToISO(r.stats.from)}→${serialToISO(r.stats.to)}: lưu ${r.stats.saved} dòng; bỏ qua (bán hàng) ${r.stats.skipped}; PASS ${r.stats.pass}; REVIEW ${r.stats.review}; thay thế ${r.stats.replaced}`);
+    A.markDirty('returnsImport', 'returnsDB', 'audit');
+    const n = salesReturnsInPeriod(S).length;
+    A.toast(`Đã lưu ${r.stats.saved} dòng trả lại / giảm giá (REVIEW ${r.stats.review}, thay thế ${r.stats.replaced}).${n ? ` Kỳ có ${n} dòng trả lại có SL → RUN STEP 5R.` : ''}`, r.stats.review ? 'review' : 'pass');
+    S.tab5r = 'run';
+  } catch (e) { A.toast('Validate & Save hàng trả lại lỗi: ' + e.message, 'block'); }
 }
 /** STEP 5R resolution: original invoice or manual unit cost per return line (stored in returnMatches, rerun FIFO to apply). */
 function resolvePanel(el, S, res, rc) {
@@ -415,7 +500,7 @@ function resolvePanel(el, S, res, rc) {
   for (const x of res.sales) if (x.fin === 'FIFO COGS' && num(x.fq) > 0 && x.inv) { const k = utxt(x.prod); if (!inv.has(k)) inv.set(k, new Set()); inv.get(k).add(x.inv); }
   el.querySelector('.page').insertAdjacentHTML('beforeend', `<h2>Xử lý dòng trả lại</h2>
     <p class="muted">Dòng <b>BLOCK</b>: chưa tìm được hoá đơn gốc. <b>AUTO-MATCHED</b>: hệ thống tự chọn hoá đơn gần nhất của cùng khách – sản phẩm (cần xác nhận). <b>MANUAL COST</b>: dùng đơn giá vốn nhập tay.
-    Nhập <b>Hoá đơn gốc</b> (ưu tiên) hoặc <b>Đơn giá vốn/sp (VND)</b> khi hàng bán trước thời kỳ dùng web, kèm ghi chú, rồi chạy lại STEP 5.2.</p>
+    Nhập <b>Hoá đơn gốc</b> (ưu tiên) hoặc <b>Đơn giá vốn/sp (VND)</b> khi hàng bán trước thời kỳ dùng web, kèm ghi chú, rồi bấm RUN STEP 5R lại.</p>
     <div class="el-wrap"><table class="cp" id="t5r-fix"><thead><tr><th>Ngày</th><th>Hoá đơn trả</th><th>Khách hàng</th><th>Sản phẩm</th><th class="r">SL trả</th><th>Trạng thái</th><th>Hoá đơn gốc</th><th>Đơn giá vốn/sp (VND)</th><th>Ghi chú</th><th></th></tr></thead><tbody>
     ${need.map((r, i) => { const m = M[r.key] || {}; const dl = `dl5r${i}`; return `<tr data-k="${esc(r.key)}"><td>${esc(serialToISO(r.date))}</td><td>${esc(r.returnInv)}</td><td>${esc(r.customer)}</td><td>${esc(r.product)}</td><td class="r">${A.fmtNum(r.returnQty)}</td><td>${A.pill(r.status === 'PROCESSED' ? 'PASS' : r.status === 'BLOCK' ? 'BLOCK' : 'REVIEW')} <small>${esc(r.status)}</small></td>
       <td><input name="origInv" list="${dl}" value="${esc(m.origInv || (r.status === 'AUTO-MATCHED' ? r.originalInv : ''))}" ${edit ? '' : 'disabled'} style="min-width:150px"><datalist id="${dl}">${[...(inv.get(utxt(r.product)) || [])].map((x) => `<option value="${esc(x)}">`).join('')}</datalist></td>
@@ -433,7 +518,7 @@ function resolvePanel(el, S, res, rc) {
     if (!A.guardEdit()) return;
     (d.returnMatches || (d.returnMatches = {}))[key] = { origInv, unitCost, note, by: A.who(), at: nowISO() };
     A.audit('STEP 5R RESOLVE', `${key}: ${origInv ? 'HĐ gốc ' + origInv : ''}${unitCost ? ' đơn giá ' + unitCost : ''} – ${note}`);
-    A.markDirty('returnMatches', 'audit'); A.toast('Đã lưu. Chạy lại STEP 5.2 (RUN FIFO COGS) để áp dụng.', 'review'); A.render();
+    A.markDirty('returnMatches', 'audit'); A.toast('Đã lưu. Bấm RUN STEP 5R để áp dụng.', 'review'); A.render();
   }));
   el.querySelectorAll('#t5r-fix [data-5r-del]').forEach((b) => b.addEventListener('click', () => {
     if (!A.guardEdit()) return;
@@ -450,9 +535,8 @@ function recTable(rec, keys, labels) {
 
 /** Aggregated invoice+product FIFO origins from all known earlier periods – authoritative source cost for Sales Return. */
 async function priorSalesFor(S) {
-  const rows = S.d.salesDB ? S.d.salesDB.rows : [];
   const pS = S.period;
-  if (!rows.some((r) => utxt(r.tranType) === 'SALES RETURN' && num(r.qty) < 0 && F5.saleDate(r) !== null && serialToISO(F5.saleDate(r)).slice(0, 7) === pS)) return [];
+  if (!salesReturnsInPeriod(S).length) return [];
   const origins = new Map(), returned = new Map();
   const keyOf = (inv, prod) => `${utxt(inv)}|${utxt(prod)}`;
   const known = (S.periods || []).filter((p) => /^\d{4}-\d{2}$/.test(p) && p < pS).sort().reverse();
@@ -477,9 +561,15 @@ async function priorSalesFor(S) {
   }
   return [...origins.entries()].map(([key, o]) => ({ ...o, returned: returned.get(key) || 0 }));
 }
-export async function doRunFIFO() {
+/**
+ * STEP 5.2 runs the sales book only (withReturns = false). STEP 5R (doRun5R) reruns the same engine with the returns book
+ * added: returns are booked at the original invoice cost and come back as dated FG layers. MONTHLY books them after the
+ * month's FIFO; STRICT_DATE books them in date order, so goods returned earlier in the month can be resold later.
+ */
+export async function doRunFIFO(withReturns = false) {
   const S = A.S; const d = S.d;
   if (closedGuard()) return;
+  const bk = books(S);
   const D4 = P2.derive(S).d4; const fl = D4.fl;
   if (!fl) { A.toast('Chưa có kết quả STEP 4.', 'block'); return; }
   let conf = cfg(S);
@@ -489,32 +579,50 @@ export async function doRunFIFO() {
     A.audit('STEP 5 CONFIG', 'FIFO Mode = STRICT_DATE (tự chuyển: kỳ có FG rework)'); A.markDirty('s5cfg', 'audit');
     A.toast('Kỳ có FG rework → tự chuyển FIFO sang STRICT_DATE (bán hàng và rework chạy chung theo ngày).', 'review');
   }
-  const gate = F5.reworkGate(d.register, d.salesDB ? d.salesDB.rows : [], S.period, conf.mode);
+  const gate = F5.reworkGate(d.register, bk.sales, S.period, conf.mode);
   if (gate) { A.toast('FG Rework FIFO không chạy: ' + gate, 'block'); return; }
   const before = snap(S, D4);
-  const priorSales = await priorSalesFor(S);
+  const priorSales = withReturns ? await priorSalesFor(S) : [];
   try {
-    const res = F5.runFIFO({ priorSales, returnMatches: d.returnMatches || {}, sellCostRate: sellRate(S), period: S.period, opening: d.fgOpen, caRows: fl.rows, salesRows: d.salesDB ? d.salesDB.rows : [], pmRows: d.pm ? d.pm.rows : [], fx: d.gl ? d.gl.fx : 0, register: d.register, overrides: d.fifoOverrides || {}, dupDecisions: d.dupDecisions || {}, mode: conf.mode, tol: conf.tol,
+    const res = F5.runFIFO({ priorSales, returnMatches: d.returnMatches || {}, sellCostRate: sellRate(S), period: S.period, opening: d.fgOpen, caRows: fl.rows, salesRows: bk.sales, returnRows: withReturns ? bk.returns : [], pmRows: d.pm ? d.pm.rows : [], fx: d.gl ? d.gl.fx : 0, register: d.register, overrides: d.fifoOverrides || {}, dupDecisions: d.dupDecisions || {}, mode: conf.mode, tol: conf.tol,
       step4: { current: D4.freshness, overall: fl.overall, finalCost: fl.totals.totalCost, qty: d.step4.totalQty } });
     let rwMsg = '';
     if (F5.reworkCount(d.register)) {
-      F5.runReworkFIFO(res, d.register, { period: S.period, opening: d.fgOpen, salesRows: d.salesDB ? d.salesDB.rows : [], step4Carry: fl.totals.carryIn });
+      F5.runReworkFIFO(res, d.register, { period: S.period, opening: d.fgOpen, salesRows: bk.sales, step4Carry: fl.totals.carryIn });
       rwMsg = `; Rework=${A.fmtNum(res.rework.fifoCost)}`;
     }
     F5.finalizeRun(res);
     const rf = F5.buildRollforward(res, d.fgOpen, d.fgItems);
     res.rollforward = { rows: rf.rows, total: rf.total }; d.fgItems = rf.items;
     res.snap = before;
+    res.withReturns = !!withReturns;
+    if (withReturns) res.retKey = retKey(S);
     d.step5 = res;
     refreshFgRef(S);
     try { P2.runLotCheck(); } catch { /* lot check is review-only */ }
     const after = P2.derive(S).d4.fl;
     const step4Changed = after && Math.abs(after.totals.carryIn - fl.totals.carryIn) > 1;
+    if (withReturns) {
+      const rc = res.returnControl;
+      A.audit('STEP 5R - RUN SALES RETURN', `${rc.status} | Returns=${rc.total}; Processed=${rc.processed}; Unresolved=${rc.blocked}; Qty=${A.fmtNum(rc.qty)}; COGS reversal=${A.fmtNum(rc.cogsReversal)}; Net COGS=${A.fmtNum(res.totals.cogsA)}; Close=${A.fmtNum(res.totals.closeA)}`);
+      A.markDirty('step5', 'register', 'fgItems', 'fgRef', 'lotCheck', 'audit');
+      A.toast(`STEP 5R xong: ${rc.processed}/${rc.total} dòng trả lại · giảm giá vốn ${A.fmtNum(Math.abs(rc.cogsReversal))} VND${rc.blocked ? ` · còn ${rc.blocked} dòng chưa xử lý` : rc.review ? ` · ${rc.review} dòng cần xác nhận` : ''}.`, rc.blocked ? 'block' : rc.review ? 'review' : 'pass');
+      return;
+    }
     A.audit('STEP 5 - RUN FIFO COGS', `${res.runResult} | Mode=${res.mode}; Open=${A.fmtNum(res.totals.openA)}; Prod=${A.fmtNum(res.totals.prodA)}; COGS=${A.fmtNum(res.totals.cogsA)}${rwMsg}; Close=${A.fmtNum(res.totals.closeA)}; Lines=${res.stats.lines}`);
     A.markDirty('step5', 'register', 'fgItems', 'fgRef', 'lotCheck', 'audit');
     if (step4Changed) A.toast('FIFO rework đã tính, nhưng giá trị rework hoàn thành chuyển vào STEP 4 vừa thay đổi → giá thành STEP 4 đổi. Chạy RUN FIFO COGS thêm một lần nữa.', 'review');
-    else A.toast(`FIFO xong: ${res.runResult}. COGS ${A.fmtNum(res.totals.cogsA)} · FG cuối kỳ ${A.fmtNum(res.totals.closeA)} VND.`, res.runResult === 'BLOCKED' ? 'block' : 'pass');
+    else A.toast(`FIFO bán hàng xong: ${res.runResult}. COGS ${A.fmtNum(res.totals.cogsA)} · FG cuối kỳ ${A.fmtNum(res.totals.closeA)} VND.${salesReturnsInPeriod(S).length ? ` Kỳ có ${salesReturnsInPeriod(S).length} dòng hàng trả lại → bước tiếp: RUN STEP 5R ở màn hình 5R.` : ''}`, res.runResult === 'BLOCKED' ? 'block' : salesReturnsInPeriod(S).length ? 'review' : 'pass');
   } catch (e) { A.toast('STEP 5 dừng: ' + e.message, 'block'); }
+}
+export async function doRun5R() {
+  const S = A.S; const D5 = derive(S, P2.derive(S));
+  if (closedGuard()) return;
+  const n = salesReturnsInPeriod(S).length;
+  if (!n) { A.toast('Kỳ này không có hàng bán bị trả lại có số lượng – không có giá vốn cần xử lý. Giảm trừ chỉ có tiền (5212 / 5213) được đối chiếu FAST ở STEP 5.3.', 'review'); return; }
+  if (!D5.res) { A.toast('Chạy STEP 5.2 · RUN FIFO COGS (bán hàng) trước, rồi mới chạy STEP 5R.', 'block'); return; }
+  if (D5.fresh !== 'CURRENT') { A.toast(`STEP 5.2 OUTDATED: ${D5.stale}. Chạy lại RUN FIFO COGS trước.`, 'block'); return; }
+  await doRunFIFO(true);
 }
 function refreshFgRef(S) {
   const d = S.d;
@@ -593,13 +701,13 @@ function fastTab(box, D5, closed) {
   const edit = !closed && A.canEdit();
   const ft = d.fastTie && d.fastTie.period === S.period ? d.fastTie : null;
   const canApproveDiff = edit && !!ft; // owner decision #8: anyone with edit rights may confirm (note + audit kept)
-  box.innerHTML = `<p class="muted">Nhập số dư / phát sinh trên FAST (sổ cái) để đối chiếu với kết quả giá thành. Lệch > 1 VND phải được xác nhận kèm giải trình trước khi đóng kỳ; xác nhận tự hết hiệu lực nếu số liệu hai bên thay đổi.</p>
+  box.innerHTML = `<p class="muted">Nhập số dư / phát sinh trên FAST (sổ cái) để đối chiếu với kết quả giá thành. Doanh thu và giảm trừ đối chiếu riêng: <b>511</b> = phát sinh Có trước bút toán kết chuyển giảm trừ, <b>5212</b> = hàng bán bị trả lại, <b>5213</b> = giảm giá hàng bán (để trống = 0 khi web cũng bằng 0). Lệch > 1 VND phải được xác nhận kèm giải trình trước khi đóng kỳ; xác nhận tự hết hiệu lực nếu số liệu hai bên thay đổi.</p>
     <form id="f-fast" autocomplete="off"><table class="cp"><thead><tr><th>TK</th><th>Nội dung</th><th class="r">Theo giá thành (web)</th><th class="r">Số FAST</th><th class="r">Chênh lệch</th><th>Trạng thái</th></tr></thead><tbody>
     ${tie.rows.map((r) => `<tr><td><b>${r.acc}</b></td><td>${esc(r.label)}</td><td class="r">${A.fmtNum(r.engine)}</td><td class="r"><input name="${r.k}" inputmode="decimal" value="${r.fast === null ? '' : A.fmtNum(r.fast)}" ${edit ? '' : 'disabled'} aria-label="Số FAST TK ${r.acc}" style="text-align:right;max-width:180px"></td><td class="r">${r.diff === null ? '' : A.fmtNum(r.diff)}</td><td>${A.pill(r.status === 'DIFF' ? 'REVIEW' : r.status)}</td></tr>`).join('')}
     </tbody></table>${edit ? '<div class="row"><button class="btn" type="submit">Lưu số FAST</button></div>' : ''}</form>
     ${ft ? `<p class="muted">Nhập bởi ${esc(ft.by || '')} lúc ${A.fmtTs(ft.enteredAt)}.</p>` : ''}
     ${tie.diffs ? (tie.approved ? `<div class="alert info"><b>Chênh lệch đã được xác nhận</b> bởi ${esc(tie.approval.by)} lúc ${A.fmtTs(tie.approval.at)}: ${esc(tie.approval.note)}</div>`
-      : `<div class="alert review"><b>${tie.diffs} tài khoản lệch FAST.</b> Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.${canApproveDiff && tie.entered ? `<form id="f-fast-ok" class="row" style="margin-top:8px"><input name="note" placeholder="Giải trình chênh lệch (bắt buộc)" style="flex:1;min-width:240px"><button class="btn" type="submit">Xác nhận chênh lệch</button></form>` : ''}</div>`) : tie.entered ? '<div class="alert pass">Khớp FAST ở cả 5 tài khoản.</div>' : ''}`;
+      : `<div class="alert review"><b>${tie.diffs} tài khoản lệch FAST.</b> Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.${canApproveDiff && tie.entered ? `<form id="f-fast-ok" class="row" style="margin-top:8px"><input name="note" placeholder="Giải trình chênh lệch (bắt buộc)" style="flex:1;min-width:240px"><button class="btn" type="submit">Xác nhận chênh lệch</button></form>` : ''}</div>`) : tie.entered ? `<div class="alert pass">Khớp FAST ở cả ${tie.rows.length} tài khoản.</div>` : ''}`;
   const f = box.querySelector('#f-fast');
   if (f && edit) f.addEventListener('submit', (e) => {
     e.preventDefault(); if (closedGuard()) return;
@@ -627,6 +735,8 @@ export function doBuildHistory() {
   if (!res) { A.toast('Chưa chạy FIFO COGS.', 'block'); return; }
   if (recon.c17 !== 'CURRENT' || !recon.e18.startsWith('PASS')) { A.toast(`FG History KHÔNG được tạo: STEP 5 chưa CURRENT (${recon.c17} / ${recon.e18}). Chạy lại RUN FIFO COGS.`, 'block'); return; }
   if (recon.batch7 !== 'PASS') { A.toast(`FG History KHÔNG được tạo: Batch 7 = ${recon.batch7}.`, 'block'); return; }
+  const rs = returnStale(S, D5);
+  if (rs) { A.toast(`BUILD FG HISTORY bị chặn – STEP 5R: ${rs}. Mở màn hình 5R → RUN STEP 5R.`, 'block'); return; }
   if (F5.reworkCount(d.register) && (!res.rework || res.rework.gate8 !== 'PASS')) { A.toast(`BUILD FG HISTORY bị chặn: FG Rework Batch 8 = ${res.rework ? res.rework.gate8 : 'NOT RUN'}.`, 'block'); return; }
   try {
     const fl = P2.derive(S).d4.fl;

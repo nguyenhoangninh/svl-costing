@@ -19,7 +19,7 @@ const S = {
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -246,7 +246,7 @@ function guardPeriod() {
 }
 const guardMutate = () => guardEdit() && guardPeriod();
 const canEditPeriod = () => store.canEdit() && !isClosed();
-const WRITE_ACTS = new Set(['new-period', 'run-step2', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5-hist', 's5-close', 's5-reopen']);
+const WRITE_ACTS = new Set(['new-period', 'run-step2', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
 
 /** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
 function parseNum(v, label) {
@@ -333,7 +333,7 @@ const NAV = [
   { id: 'step4', no: '4.3', label: 'Phân bổ giá thành', sub: '622 / 627 theo lô', key: 's4' },
   { id: 'fgopen', no: '5.1', label: 'FG đầu kỳ', sub: 'Lớp FIFO đầu kỳ', key: 's5o' },
   { id: 'step5', no: '5.2', label: 'FIFO giá vốn', sub: 'COGS · rework 5B', key: 's5' },
-  { id: 'salesreturn', no: '5R', label: 'Sales Return', sub: 'Hàng bán bị trả lại', key: 's5r' },
+  { id: 'salesreturn', no: '5R', label: 'Hàng trả lại & giảm giá', sub: 'Sales Return 5212 · 5213', key: 's5r' },
   { id: 'close', no: '5.3', label: 'FG History & đóng kỳ', sub: 'Đóng kỳ', key: 's5c' },
 ];
 const TOOLS = [
@@ -447,7 +447,7 @@ VIEWS.cc = (el) => {
     ['4.3', 'Phân bổ giá thành', st.s4c.status, st.p2.d4 && st.p2.d4.fl ? fmtNum(st.p2.d4.fl.totals.totalCost) : '', S.d.step4 && S.d.step4.runAt, st.s4c.next, 'step4'],
     ['5.1', 'FG đầu kỳ', rs.s5o, S.d.fgOpen && S.d.fgOpen.stats ? fmtNum(S.d.fgOpen.stats.amt) : '', S.d.fgOpen && (S.d.fgOpen.validatedAt || S.d.fgOpen.loadedAt), S.d.fgOpen ? '' : 'Roll forward / import FG đầu kỳ', 'fgopen'],
     ['5.2', 'FIFO giá vốn & rework', rs.s5, st.d5 && st.d5.res ? fmtNum(st.d5.res.totals.cogsA) : '', st.d5 && st.d5.res && st.d5.res.runAt, st.s5c.next, 'step5'],
-    ['5R', 'Sales Return', rs.s5r, st.d5 && st.d5.res && st.d5.res.returnControl ? `${st.d5.res.returnControl.processed}/${st.d5.res.returnControl.total} processed` : '', st.d5 && st.d5.res && st.d5.res.runAt, rs.s5r === 'PASS' ? '' : 'Kiểm tra Original Invoice / return qty / COGS reversal', 'salesreturn'],
+    ['5R', 'Hàng trả lại & giảm giá', rs.s5r, st.d5 && st.d5.res && st.d5.res.withReturns && st.d5.res.returnControl ? `${st.d5.res.returnControl.processed}/${st.d5.res.returnControl.total} đã xử lý` : '', st.d5 && st.d5.res && st.d5.res.withReturns && st.d5.res.runAt, rs.s5r === 'PASS' ? '' : rs.s5r === 'NOT RUN' || rs.s5r === 'RERUN REQUIRED' ? 'RUN STEP 5R' : 'Kiểm tra hoá đơn gốc / SL trả / giảm giá vốn', 'salesreturn'],
     ['5.3', 'FG History & đóng kỳ', rs.s5c, st.d5 && st.d5.res ? st.d5.recon.finalStatus : '', S.d.closed && S.d.closed.period === S.period ? S.d.closed.closedAt : S.d.fgHistory && S.d.fgHistory.builtAt, S.d.closed && S.d.closed.period === S.period ? '' : st.d5 && st.d5.res ? (st.d5.closeReason || 'CLOSE MONTH') : '', 'close'],
   ];
   const next = steps.find((x) => !String(x[2]).startsWith('PASS') && x[2] !== 'CLOSED');
@@ -1129,7 +1129,9 @@ document.addEventListener('click', async (e) => {
     case 's5-roll': await P3.doRollOpen(); render(); break;
     case 's5-validate': P3.doValidateOpen(); render(); break;
     case 's5-template': await P3.doTemplate(); break;
-    case 's5-run': await busy('Đang chạy FIFO COGS…', async () => P3.doRunFIFO()); render(); break;
+    case 's5-run': await busy('Đang chạy FIFO COGS (bán hàng)…', async () => P3.doRunFIFO(false)); render(); break;
+    case 's5r-run': await busy('Đang chạy STEP 5R – hàng bán bị trả lại…', async () => P3.doRun5R()); render(); break;
+    case 'ret-save': await busy('Đang Validate & Save hàng trả lại / giảm giá…', async () => P3.doReturnsSave()); render(); break;
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
     case 's5-close': await P3.doClose(); render(); break;
     case 's5-reopen': await P3.doReopen(); render(); break;

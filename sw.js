@@ -1,7 +1,7 @@
 // SVL Costing service worker: makes the web app installable and usable offline (iOS / Android / desktop).
 // Same-origin files: network-first (always the latest deployed code when online), cache fallback when offline.
 // Versioned third-party modules (Firebase SDK, fonts): cache-first. Cloud data (Firestore / Google sign-in) is never cached.
-const VERSION = 'v1.10.2';
+const VERSION = 'v1.11.0';
 const CACHE = `svl-costing-${VERSION}`;
 const PRECACHE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
@@ -9,7 +9,7 @@ const PRECACHE = [
   './lib/xlsx.mjs', './lib/cpexcel.full.mjs',
   './src/app.js', './src/config.js', './src/store.js', './src/worker.js',
   './src/engine/controls.js', './src/engine/grid.js', './src/engine/step1.js', './src/engine/step2.js', './src/engine/step3.js',
-  './src/engine/step3b.js', './src/engine/step4.js', './src/engine/step5.js', './src/engine/return.js', './src/engine/trace.js', './src/engine/util.js',
+  './src/engine/step3b.js', './src/engine/step4.js', './src/engine/step5.js', './src/engine/return.js', './src/engine/revenue.js', './src/engine/trace.js', './src/engine/util.js',
   './src/ui/format.js', './src/ui/table.js', './src/views/phase2.js', './src/views/phase3.js', './src/views/trace.js',
 ];
 const CDN_CACHEABLE = [/^https:\/\/www\.gstatic\.com\/firebasejs\//, /^https:\/\/fonts\.(googleapis|gstatic)\.com\//];
