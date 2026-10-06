@@ -289,7 +289,6 @@ export function viewSales(el) {
     const cols = [['active', 'Active', 60], ['product', 'Product Code', 140], ['soDate', 'SO Date', 100, 'date'], ['soNo', 'SO No.', 140], ['customer', 'Customer', 140], ['qty', 'Qty', 90, 'qty'], ['price', 'Unit Price USD', 110, 'qty'], ['note', 'Note', 220], ['check', 'Price Master Check', 320]].map(([key, label, width, type]) => ({ key, label, width, type }));
     A.mountTable(box.querySelector('#t-so'), { columns: cols, rows: d.soPrice || [], filterKey: 'check', height: 480, onExport: A.exportTable('04_SO_PRICE', cols) });
   } else if (tab === 'manual') {
-    const checker = String(A.who() || '').trim().toLowerCase();
     box.innerHTML = `<p class="muted">Giá thủ công (USD) có ưu tiên cao nhất. <b>Approved By</b> được hệ thống ghi từ tài khoản đăng nhập; người sửa dòng giá không được tự phê duyệt dòng đó. Mọi chỉnh sửa làm mất hiệu lực phê duyệt cũ.</p><div id="man-approval"></div><div id="l-man"></div>`;
     const cols = [{ key: 'product', label: 'Product Code' }, { key: 'price', label: 'Price USD', num: true }, { key: 'effFrom', label: 'Effective From', date: true }, { key: 'effTo', label: 'Effective To', date: true }, { key: 'source', label: 'Source / Evidence' }, { key: 'updatedBy', label: 'Prepared / Updated By', ro: true }, { key: 'approvedBy', label: 'Approved By', ro: true }, { key: 'approvedAt', label: 'Approved At', ro: true }, { key: 'updatedAt', label: 'Updated At', ro: true }];
     editList(box.querySelector('#l-man'), { columns: cols, rows: d.manualPrice || (d.manualPrice = []), readOnly: !edit, addLabel: 'Thêm giá thủ công', newRow: () => ({ product: '', price: null, updatedBy: A.who(), approvedBy: '', approvedAt: '', approvalNote: '', updatedAt: nowISO() }),
@@ -300,14 +299,13 @@ export function viewSales(el) {
         A.markDirty('manualPrice', 'pm', 'audit');
       } });
     const rows = d.manualPrice || [], pending = rows.filter((r) => ttxt(r.product) && num(r.price) > 0 && !ttxt(r.approvedBy));
-    const own = pending.filter((r) => ttxt(r.updatedBy).toLowerCase() === checker).length;
     const ab = box.querySelector('#man-approval');
     ab.innerHTML = pending.length
-      ? `<div class="alert review"><b>${pending.length} giá thủ công chưa được duyệt.</b> ${own ? own + ' dòng do chính tài khoản này sửa – cần Admin khác duyệt.' : ''} ${edit && A.isAdmin() && !own ? '<button class="btn sm" type="button" id="approve-manual">Admin duyệt giá đang chờ</button>' : ''}</div>`
+      ? `<div class="alert review"><b>${pending.length} giá thủ công chưa được duyệt.</b> ${edit ? '<button class="btn sm" type="button" id="approve-manual">Duyệt giá đang chờ</button>' : ''}</div>`
       : '<div class="alert pass">Không có giá thủ công đang chờ duyệt.</div>';
     const ap = box.querySelector('#approve-manual');
     if (ap) ap.addEventListener('click', () => {
-      if (!A.isAdmin() || !A.canEdit()) return;
+      if (!A.canEdit()) return; // owner decision #8: anyone with edit rights approves (note + audit kept)
       const note = (prompt('Nhập lý do / bằng chứng phê duyệt Manual Price (bắt buộc):', '') || '').trim();
       if (note.length < 5) { A.toast('Cần giải trình ít nhất 5 ký tự.', 'review'); return; }
       const now = nowISO();
@@ -426,15 +424,14 @@ export function viewGL(el) {
   editList(el.querySelector('#l-dir'), { columns: cols, rows: d.directAdj || (d.directAdj = []), readOnly: !edit, addLabel: 'Thêm dòng phân bổ trực tiếp', newRow: () => ({ active: 'Y', erp: 'T', account: '622', amount: null, pc: '', prod: '', reason: '', status: '' }),
     onChange: () => {
       d.directPreparedBy = A.who(); d.directApproval = null;
-      A.audit('DIRECT ADJ EDIT', 'maker-checker approval reset'); A.markDirty('directAdj', 'directPreparedBy', 'directApproval', 'audit');
+      A.audit('DIRECT ADJ EDIT', 'approval reset'); A.markDirty('directAdj', 'directPreparedBy', 'directApproval', 'audit');
     } });
   const active = (d.directAdj || []).filter((r) => utxt(r.active) === 'Y');
   const key = directKey(d.directAdj), dap = d.directApproval, approved = !!(dap && dap.key === key);
-  const maker = ttxt(d.directPreparedBy).toLowerCase(), checker = String(A.who() || '').trim().toLowerCase();
   const db = el.querySelector('#dir-approval');
   if (!active.length) db.innerHTML = '<div class="muted">Không có phân bổ trực tiếp đang Active.</div>';
   else if (approved) db.innerHTML = `<div class="alert pass"><b>Direct 622/627 đã được duyệt</b> bởi ${esc(dap.by)} lúc ${A.fmtTs(dap.at)} · ${esc(dap.note || '')}</div>`;
-  else db.innerHTML = `<div class="alert review"><b>${active.length} dòng Direct 622/627 chưa được duyệt.</b> ${maker && maker === checker ? 'Người đang đăng nhập là người lập/sửa – cần Admin khác duyệt.' : ''} ${edit && A.isAdmin() && (!maker || maker !== checker) ? '<button class="btn sm" id="approve-direct" type="button">Admin duyệt Direct 622/627</button>' : ''}</div>`;
+  else db.innerHTML = `<div class="alert review"><b>${active.length} dòng Direct 622/627 chưa được duyệt.</b> ${edit ? '<button class="btn sm" id="approve-direct" type="button">Duyệt Direct 622/627</button>' : ''}</div>`;
   const da = el.querySelector('#approve-direct');
   if (da) da.addEventListener('click', () => {
     const note = (prompt('Nhập lý do / bằng chứng phê duyệt Direct 622/627:', '') || '').trim();
@@ -519,7 +516,7 @@ export function directApprovalBlock(S) {
   const d = S.d, active = (d.directAdj || []).filter((r) => utxt(r.active) === 'Y');
   if (!active.length) return '';
   const key = directKey(d.directAdj), ap = d.directApproval;
-  if (!ap || ap.key !== key) return `Direct 622/627 có ${active.length} dòng Active nhưng chưa có maker-checker approval hiện hành.`;
+  if (!ap || ap.key !== key) return `Direct 622/627 có ${active.length} dòng Active chưa được duyệt (màn hình 4.2 → Duyệt Direct 622/627).`;
   return '';
 }
 function gateMsg(S) {

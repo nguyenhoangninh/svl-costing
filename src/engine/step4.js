@@ -101,19 +101,27 @@ export function validateSaveSales(staging, salesDB, period) {
       if (!minInv || d < minInv) minInv = d;
       if (!maxInv || d > maxInv) maxInv = d;
       if (d > latest) latest = d;
-      if (d > periodEnd) hard.push('Recognition Date after costing period');
-      if (mode === 'MONTHLY' && d < periodStart) hard.push('MONTHLY source contains Recognition Date before costing period');
-      if (mode === 'YTD' && d < yearStart) hard.push('YTD source contains Recognition Date before current fiscal year');
+      // Not errors: the row is kept and is costed in the period of its recognition (Bill) date.
+      if (d > periodEnd) warn.push('Recognition (Bill) Date after costing period – revenue/COGS in that later period');
+      if (mode === 'MONTHLY' && d < periodStart) hard.push('MONTHLY source contains Recognition Date before costing period'); // would replace an earlier month's rows
+      if (mode === 'YTD' && d < yearStart) warn.push('Recognition Date before current fiscal year');
     }
     if (invD === null) warn.push('Invalid/blank Invoice Date');
     if (billD !== null && invD !== null && yyyymm(billD) !== yyyymm(invD)) warn.push(`Bill Date in another month than Invoice Date – revenue/COGS follows Bill Date (${serialToYMD(billD).y}-${String(serialToYMD(billD).m).padStart(2, '0')})`);
 
     const cust = ttxt(r.customer), prod = utxt(r.product), pname = ttxt(r.prodName), inv = ttxt(r.invNo), ln = ttxt(r.lineNo);
     let qty = 0, amt = 0, qtyOK = false, amtOK = false;
-    if (isNumeric(r.qty) && r.qty !== null && r.qty !== '') { qtyOK = true; qty = num(r.qty); }
-    else hard.push('Invalid/blank Quantity');
-    if (isNumeric(r.amtUSD) && r.amtUSD !== null && r.amtUSD !== '') { amtOK = true; amt = num(r.amtUSD); }
-    else hard.push('Invalid/blank Amount USD');
+    const blank = (v) => v === null || v === undefined || ttxt(v) === '';
+    // A blank quantity is a non-inventory line (amount-only revenue adjustment, debit/credit note, ERP-vs-FAST memo):
+    // never costed, kept for review and for the 511 tie. Only a non-numeric quantity / amount is a hard error.
+    if (blank(r.qty)) { qtyOK = true; qty = 0; }
+    else if (isNumeric(r.qty)) { qtyOK = true; qty = num(r.qty); }
+    else hard.push('Quantity is not a number');
+    if (blank(r.amtUSD)) { amtOK = true; amt = 0; }
+    else if (isNumeric(r.amtUSD)) { amtOK = true; amt = num(r.amtUSD); }
+    else hard.push('Amount USD is not a number');
+    const nonQty = qtyOK && qty === 0;
+    if (nonQty) warn.push(amt !== 0 || num(r.amtVND) !== 0 ? 'No quantity – amount-only revenue / adjustment line: no inventory COGS (NO COGS)' : 'No quantity and no amount – memo line, not costed');
 
     let tt = utxt(r.tranType);
     if (!tt) {
@@ -131,13 +139,14 @@ export function validateSaveSales(staging, salesDB, period) {
     if (!inv && tt !== 'NON-PRODUCT REVENUE') warn.push('Missing SI Invoice No.');
 
     if (tt === 'SALES RETURN') {
-      if (!qtyOK || qty >= 0) hard.push('SALES RETURN must have negative Quantity');
+      if (qtyOK && qty > 0) hard.push('SALES RETURN must have negative Quantity');
       if (amtOK && amt > 0) hard.push('SALES RETURN Amount USD must be zero/negative');
-      if (!ttxt(r.origInv)) warn.push('Sales Return has no Original Invoice No. – FIFO will only match when a unique prior sale can be proven');
+      if (qty < 0 && !ttxt(r.origInv)) warn.push('Sales Return has no Original Invoice No. – FIFO will only match when a unique prior sale can be proven');
+      if (nonQty) warn.push('Amount-only credit (no quantity) – revenue reduction only, no goods returned to FG');
     } else if (qtyOK && qty < 0 && tt !== 'CREDIT NOTE' && tt !== 'ADJUSTMENT') hard.push(`Negative Quantity is not allowed for ${tt || 'blank Transaction Type'}`);
 
     if (tt === 'OTHER' || tt === 'ADJUSTMENT') warn.push(`${tt} transaction requires accounting review; no automatic inventory COGS treatment`);
-    if (qtyOK && qty === 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(tt)) warn.push('Zero Quantity / service or non-quantity transaction');
+    if (qtyOK && qty === 0 && !nonQty && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(tt)) warn.push('Zero Quantity / service or non-quantity transaction');
 
     const unitP = num(r.unitPrice), fx = num(r.fx), vnd = num(r.amtVND);
     if (qtyOK && amtOK && qty !== 0 && unitP !== 0 && amt !== 0) {
@@ -260,14 +269,15 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     if (!latestMonth.has(p) || mt > latestMonth.get(p)) latestMonth.set(p, mt);
     if (!lastSale.has(p) || d > lastSale.get(p)) lastSale.set(p, d);
   }
-  // SO fallback
+  // SO fallback (Excel wording when the scope is the PC-P product list; zero-production months use the sales scope)
+  const fromPCP = ((step2 && step2.pc) || []).some((x) => ttxt(x.pcNo).toUpperCase().slice(0, 3) === 'PC-');
   const soPrice = new Map(), soDate = new Map(), soRank = new Map(), soRowOf = new Map(), soUsed = new Map();
   let invalidSODate = 0;
   const soRows = (so || []).map((r) => ({ ...r }));
   soRows.forEach((r, i) => {
     const act = utxt(r.active), prod = utxt(r.product), val = num(r.price);
     const inactive = act === 'N' || act === 'NO' || act === 'INACTIVE' || act === '0';
-    r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? 'NOT USED - PRODUCT CODE NOT IN COSTING SCOPE THIS PERIOD' : 'CANDIDATE';
+    r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? (fromPCP ? 'NOT USED - PRODUCT CODE NOT IN PC-P THIS PERIOD' : 'NOT USED - PRODUCT CODE NOT IN COSTING SCOPE THIS PERIOD') : 'CANDIDATE';
     if (inactive || !prod || val <= 0) return;
     const rawDate = ttxt(r.soDate), d = toSerial(r.soDate);
     if (rawDate && d === null) { r.check = 'BLOCK - INVALID SO DATE'; invalidSODate++; return; }

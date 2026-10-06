@@ -19,8 +19,7 @@ ok('revision blob manifest exactly equals parent', rules.includes('request.resou
 ok('revision summary exactly equals parent', rules.includes('request.resource.data.summary == getAfter(periodPath(period)).data.summary'));
 ok('revision documents immutable', /match \/revisions\/\{revision\}[\s\S]*allow update, delete: if false;/.test(rules));
 ok('audit events immutable', /match \/svl_costing_audit\/\{id\}[\s\S]*allow update, delete: if false;/.test(rules));
-ok('production owner is source-controlled', rules.includes("myEmail() in ['kamenguyen@gmail.com']"));
-ok('owner placeholder removed', !rules.includes('YOUR_EMAIL@gmail.com'));
+ok('owner email is a placeholder (public repo – real email only in the Firebase console)', rules.includes("myEmail() in ['YOUR_EMAIL@gmail.com']") && !/@gmail\.com'\]/.test(rules.replace("'YOUR_EMAIL@gmail.com'", '')));
 ok('cloudSave preserves everClosed after close/reopen', store.includes('safeSummary.everClosed = true'));
 ok('cloudDelete checks everClosed metadata', store.includes('meta.summary.everClosed'));
 ok('cloudDelete checks historical closed revision', store.includes('r.summary && r.summary.closed'));

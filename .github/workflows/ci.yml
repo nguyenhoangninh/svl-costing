@@ -27,10 +27,10 @@ jobs:
       - name: Release / PWA / security contract tests
         run: node test/release-contract.mjs
 
-  # Production deploy temporarily paused for v1.10.1 cloud/reopen + STEP 5R UI remediation.
+  # Production deploy: main only, after all checks pass, and only when repo variable PAGES_FROM_ACTIONS == 'true'.
   deploy:
     needs: checks
-    if: false
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PAGES_FROM_ACTIONS == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

@@ -76,7 +76,7 @@ function blobsOf(d) {
 }
 const allBlobs = () => blobsOf(S.d);
 let syncTimer = null;
-const CLOSED_OK = new Set(['closed', 'audit', 'rwArchive']);
+const CLOSED_OK = new Set(['closed', 'closedEver', 'audit', 'rwArchive']);
 /**
  * Persist mutated blobs of the open period. Each call captures its own dirty snapshot and saves are serialised, so a fast
  * second edit can never be cleared before it is written (F-13). Mutations of a CLOSED period are refused (F-02).
@@ -104,25 +104,38 @@ function scheduleCloud() {
   syncTimer = setTimeout(async () => { const r = await pushCloud(); if (!r.ok) toast((r.conflict ? 'Xung đột cloud: ' : 'Chưa lưu được lên cloud: ') + r.error, 'block'); }, 1500);
 }
 /** Push now (no debounce) and report whether the cloud committed it. */
-async function syncNow() { clearTimeout(syncTimer); await saveChain; return pushCloud(); }
+async function syncNow() { await saveChain; clearTimeout(syncTimer); return pushCloud(); }
+let pushChain = Promise.resolve();
+/** Cloud pushes run one at a time (a debounced push can never race a CLOSE / REOPEN push). */
+function pushCloud() { const run = pushChain.then(pushCloudOnce, pushCloudOnce); pushChain = run.catch(() => {}); return run; }
 /** Returns {ok, meta} or {ok:false, error, conflict}. Never reports success unless the cloud commit is confirmed (F-09). */
-async function pushCloud() {
+async function pushCloudOnce() {
   if (!store.cloud.user) return { ok: false, error: 'Chưa đăng nhập.' };
   if (!S.period) return { ok: false, error: 'Chưa chọn kỳ.' };
   if (!store.canEdit()) return { ok: false, error: 'Tài khoản chỉ có quyền xem.' };
   const p = S.period, data = S.d, seq = S.editSeq || 0;
   const meta0 = await store.cloudMeta(p).catch(() => null);
-  if (meta0 && meta0.summary && meta0.summary.closed && !store.isAdmin()) { S.sync = 'synced'; S.syncMsg = 'Kỳ đã đóng trên cloud – chỉ quản trị viên ghi được.'; renderSync(); return { ok: false, error: 'Kỳ đã đóng trên cloud; chỉ quản trị viên được ghi.' }; }
+  const cloudClosed = !!(meta0 && meta0.summary && meta0.summary.closed), localClosed = isClosed();
+  if (cloudClosed && !store.isAdmin()) { S.sync = 'synced'; S.syncMsg = 'Kỳ đã đóng trên cloud – chỉ quản trị viên ghi được.'; renderSync(); return { ok: false, error: 'Kỳ đã đóng trên cloud; chỉ quản trị viên được ghi.' }; }
+  if (cloudClosed && localClosed) {
+    // CLOSED → CLOSED: the cloud record is immutable (rules). Local notes stay on this device; the audit trail is in svl_costing_audit.
+    await store.localDel(lk(p, 'unsynced')); S.sync = 'synced'; S.syncMsg = 'Kỳ đã đóng – cloud giữ nguyên bản đóng kỳ.'; renderSync();
+    return { ok: true, skipped: true };
+  }
+  const reopen = cloudClosed && !localClosed;
   try {
     S.sync = 'saving'; renderSync();
     await saveChain;
     let baseRev = await store.localGet(lk(p, 'cloudRev'));
     if (baseRev === undefined || baseRev === null) baseRev = (await store.localGet(lk(p, 'cloudAt'))) || null; // legacy device state
     const blobs = blobsOf(data);
-    const meta = await store.cloudSave(p, blobs, summaryForCloud(), (m) => { S.syncMsg = m; renderSync(); }, baseRev);
+    const live = summaryForCloud();
+    // REOPEN may change only the 'closed' blob and summary.closed / everClosed / step5 (firestore.rules)
+    const summary = reopen ? { ...meta0.summary, closed: null, everClosed: true, step5: live.step5 } : live;
+    const meta = await store.cloudSave(p, blobs, summary, (m) => { S.syncMsg = m; renderSync(); }, baseRev, reopen ? { keepAllExcept: ['closed'] } : {});
     await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
-    if ((S.editSeq || 0) === seq) await store.localDel(lk(p, 'unsynced'));
-    S.sync = (S.editSeq || 0) === seq ? 'synced' : 'pending'; S.syncMsg = '';
+    if ((S.editSeq || 0) === seq && !reopen) await store.localDel(lk(p, 'unsynced'));
+    S.sync = (S.editSeq || 0) === seq && !reopen ? 'synced' : 'pending'; S.syncMsg = '';
     renderSync();
     if (S.sync === 'pending') scheduleCloud();
     return { ok: true, meta };
@@ -561,7 +574,7 @@ VIEWS.step2 = (el) => {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 2 · Phân bổ Stock Out vào lô PC</h1><p class="lead">Stock Out NVL được phân bổ vào các lô PC-P theo quy tắc khách hàng / job code / location. Stock Out thành phẩm (FG) không phải NVL — được tách sang sổ Rework (2B).</p></div>
       <div class="result"><span>Kết quả</span>${pill(st.s2c.status)}<small>${esc(st.s2c.okText)}</small></div></header>
-    <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${store.isAdmin() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
+    <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${canEditPeriod() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
     ${s2 ? `
     <div class="grid2">
       <div><h2>Đối chiếu theo hệ nguồn</h2><table class="cp"><thead><tr><th>Hệ</th><th class="r">Stock Out nguồn</th><th class="r">Đã phân bổ</th><th class="r">Chưa phân bổ</th><th class="r">Chênh lệch</th><th>Trạng thái</th></tr></thead><tbody>
@@ -1075,7 +1088,7 @@ document.addEventListener('click', async (e) => {
     case 'new-period': await newPeriod(); break;
     case 'run-step2': await busy('Đang chạy STEP 2…', async () => doStep2()); break;
     case 'approve-step2-fallback': {
-      if (!store.isAdmin()) { toast('Chỉ Quản trị viên được xác nhận phân bổ fallback trọng yếu.', 'review'); break; }
+      if (!canEditPeriod()) break; // owner decision #8: anyone with edit rights approves
       const s2 = S.d.step2; if (!s2) break;
       const amount = fallbackAlloc(s2), totalAlloc = num(s2.total && s2.total.alloc);
       const reason = (prompt(`Fallback rộng = ${fmtNum(amount)} VND (${totalAlloc ? (Math.abs(amount / totalAlloc) * 100).toFixed(1) : 0}% Stock Out đã phân bổ). Nhập lý do / bằng chứng review (bắt buộc):`, '') || '').trim();

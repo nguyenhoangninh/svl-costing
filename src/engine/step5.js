@@ -118,11 +118,12 @@ function periodText(v) {
 const openStats = (rows) => ({ layers: rows.length, qty: rows.reduce((a, r) => a + num(r.qty), 0), amt: rows.reduce((a, r) => a + num(r.tot), 0) });
 
 /** STEP5_Roll_Forward_Opening — previous closing layers become this period's opening. */
-export function openingFromClosing(prevStep5, period, overrideReason) {
+/** provAdd: {lid: VND} provision recorded on the previous period's NRV decision (negative = provision), carried into the layer. */
+export function openingFromClosing(prevStep5, period, overrideReason, provAdd = null) {
   const prevP = prevPeriod(period);
   if (!prevStep5 || prevStep5.period !== prevP) throw new Error(`Chưa có Closing FG của kỳ ${prevP} trên web.`);
   if (!String(prevStep5.runResult || '').toUpperCase().startsWith('PASS')) throw new Error(`Closing FG ${prevP} chưa đối chiếu xong (Run Result = ${prevStep5.runResult}). Sửa STEP 5 của ${prevP} trước.`);
-  const rows = prevStep5.closing.map((r) => ({ ...r, period, source: 'OPENING', status: 'NOT VALIDATED', msg: '' }));
+  const rows = prevStep5.closing.map((r) => ({ ...r, prov: num(r.prov) + num(provAdd && provAdd[r.lid]), period, source: 'OPENING', status: 'NOT VALIDATED', msg: '' }));
   return { period, status: 'LOADED - NOT VALIDATED', loadedAt: nowISO(), source: `ROLL FORWARD from 05_FG_CLOSING ${prevP}${overrideReason ? ` (override: ${overrideReason})` : ''}`, srcKind: 'ROLL FORWARD', validatedAt: '', rows, stats: openStats(rows) };
 }
 
@@ -205,7 +206,7 @@ export function runFIFO(ctx) {
     if (!s5t(r.pc) || !prod || !(qty > 0)) continue;
     const n = L.length + 1 - nO;
     const pDate = dateVal(r.date);
-    if (mode === 'STRICT_DATE' && pDate === null) throw new Error(`STRICT_DATE: lô sản xuất ${s5t(r.pc)} / ${prod} thiếu ngày hoàn thành. Không thể chứng minh layer tồn tại trước Sale/Rework.`);
+    // STRICT_DATE without a completion date: usable but flagged (checkpoint 09c) instead of stopping the run.
     const l = { lid: `PR-${period.replace('-', '')}-${s5t(r.pc)}-${pad(n, 3)}`, src: 'PRODUCTION', sp: period, pc: s5t(r.pc), dt: pDate || 0, mo: s5t(r.sub) || s5t(r.mo), prod, name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty, rm: num(r.totalRM), a622: num(r.t622), a627: num(r.t627), tot: num(r.totalCost), price: num(r.price), prov: 0, cons: '', flag: '' };
     if (/NON-POSITIVE/i.test(txt(r.statusText))) l.flag = 'STEP 4 REVIEW: no 622/627 allocated (non-positive contribution)';
     L.push(l); step4Qty += qty; step4Cost += l.tot;
@@ -235,7 +236,8 @@ export function runFIFO(ctx) {
     else if (!s.prod && s.qty !== 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(s.type)) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
     else if (s.type === 'SALES RETURN') {
       if (s.qty < 0 && returnsOn) s.def = 'RETURN'; // physical return: reverse original COGS and restore FG
-      else { s.def = 'REVIEW'; s.msg = 'SALES RETURN requires negative quantity and the return engine; '; }
+      else if (s.qty === 0) { s.def = 'NO COGS'; s.msg = 'Amount-only credit (no quantity) – revenue reduction, no goods returned; '; }
+      else { s.def = 'REVIEW'; s.msg = 'SALES RETURN with positive quantity – check the source; '; }
     }
     else if (s.type === 'CREDIT NOTE' || s.type === 'NON-PRODUCT REVENUE') { s.def = 'NO COGS'; s.msg = s.type + ' – financial/revenue transaction, no physical FG movement; '; }
     else if (s.type === 'OTHER' || s.type === 'ADJUSTMENT') { s.def = 'REVIEW'; s.msg = s.type + ' requires explicit accounting treatment; '; }
@@ -266,7 +268,6 @@ export function runFIFO(ctx) {
 
   // STEP 5R — Sales Return is a separate accounting sub-engine.
   const returns = S.filter((s) => s.fin === 'RETURN');
-  if (mode === 'MONTHLY' && returns.length) throw new Error('Có Sales Return trong kỳ. Chuyển FIFO sang STRICT_DATE để STEP 5R hoàn nhập COGS và đưa Returned FG vào đúng thứ tự thời gian.');
   const returnByProd = RET.groupReturnsByProduct(returns);
   let retQ = 0, retA = 0, retN = 0;
   const originNow = new Map(), returnedNow = new Map();
@@ -306,6 +307,19 @@ export function runFIFO(ctx) {
   }
   // STRICT_DATE (owner decision 02/10/2026): sales and FG rework issues of a product run through FIFO in one date order;
   // each event can only use layers dated on/before it. Rework takes are reserved here and booked by runReworkFIFO.
+  const RANK = { R: 0, S: 1, T: 2 };
+  const matches = Object.fromEntries(Object.entries(ctx.returnMatches || {}).map(([k, v]) => [k.toUpperCase(), v]));
+  /** Book one return (both modes); failures stay REVIEW so STEP 5R can resolve them. */
+  function bookReturn(s, candidates) {
+    const result = RET.processReturnEvent({ sale: s, candidates, returnedNow, period, sequence: retN + 1, tol: TOL_QTY, match: matches[s.key.toUpperCase()] || null });
+    if (!result.ok) { s.fin = 'RETURN'; s.status = 'REVIEW'; reviewLines++; s.msg += result.message; return null; }
+    Object.assign(s, result.salePatch, { returnLid: result.lid });
+    s.msg += result.mode === 'MANUAL' ? `Return at ${result.note}; ` : `Return at original COGS of ${result.origin.inv} (${result.origin.period || period})${result.note ? ' – ' + result.note : ''}; `;
+    if (result.mode !== 'ORIGIN') reviewLines++;
+    retN++; retQ += result.qty; retA += result.amount;
+    sorted.push(result.layer);
+    return result.layer;
+  }
   function strictProduct(prod, list) {
     const prodLayers = sorted.filter((l) => l.prod === prod);
     const ret = returnByProd.get(prod) || [];
@@ -313,7 +327,7 @@ export function runFIFO(ctx) {
       ...list.map((s) => ({ k: 'S', d: s.date, o: s.dbRow, s })),
       ...ret.map((s) => ({ k: 'T', d: s.date, o: s.dbRow, s })),
       ...(rwByProd.get(prod) || []).map((e) => ({ k: 'R', d: e.d, o: e.i, e })),
-    ].sort((a, b) => a.d - b.d || (a.k === b.k ? a.o - b.o : a.k === 'T' ? -1 : a.k === 'R' && b.k === 'S' ? -1 : 1));
+    ].sort((a, b) => a.d - b.d || (a.k === b.k ? a.o - b.o : RANK[a.k] - RANK[b.k])); // same day: rework, then sales, then returns of those sales
     let short = false;
     const currentOrigins = () => [...originNow.values()].filter((o) => o.prod === prod && o.date <= (currentEventDate || Number.MAX_SAFE_INTEGER));
     let currentEventDate = null;
@@ -322,24 +336,8 @@ export function runFIFO(ctx) {
       if (x.k === 'T') {
         const s = x.s;
         const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
-        const result = RET.processReturnEvent({
-          sale: s,
-          candidates: [...currentOrigins(), ...prior],
-          returnedNow,
-          period,
-          sequence: retN + 1,
-          tol: TOL_QTY,
-        });
-        if (!result.ok) {
-          s.fin = 'REVIEW'; s.status = 'REVIEW'; reviewLines++;
-          s.msg += result.message;
-          continue;
-        }
-        Object.assign(s, result.salePatch, { returnLid: result.lid });
-        s.msg += `Return at original COGS of ${result.origin.inv} (${result.origin.period || period}); `;
-        retN++; retQ += result.qty; retA += result.amount;
-        sorted.push(result.layer); prodLayers.push(result.layer);
-        prodLayers.sort((a, b) => a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
+        const layer = bookReturn(s, [...currentOrigins(), ...prior]);
+        if (layer) { prodLayers.push(layer); prodLayers.sort((a, b) => a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i)); }
         continue;
       }
 
@@ -367,7 +365,15 @@ export function runFIFO(ctx) {
     }
     if (short) shortProducts++;
   }
-  if (mode !== 'MONTHLY') {
+  if (mode === 'MONTHLY') {
+    // MONTHLY: returns are booked after the month's FIFO at the original invoice cost; the returned layer stays in closing FG.
+    const cur = new Map();
+    for (const x of S) if (x.fin === 'FIFO COGS' && x.fq > TOLQ && x.inv) RET.mergeOrigin(cur, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period, returned: 0 });
+    for (const s of [...returns].sort((a, b) => a.date - b.date || a.dbRow - b.dbRow)) {
+      const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === s.prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
+      bookReturn(s, [...[...cur.values()].filter((o) => o.prod === s.prod && o.date <= s.date), ...prior]);
+    }
+  } else {
     const products = new Set([...lines.keys(), ...rwByProd.keys(), ...returnByProd.keys()]);
     for (const prod of products) strictProduct(prod, lines.get(prod) || []);
     sorted.sort((a, b) => a.prod.localeCompare(b.prod) || a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
@@ -437,7 +443,7 @@ export function runFIFO(ctx) {
   const sales = S.map((s) => {
     const o = { seq: s.seq, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
-    else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv });
+    else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv, matchedOrigInv: s.matchedOrigInv, matchMode: s.matchMode, returnLid: s.returnLid });
     return o;
   });
   let sumDetA = 0;
@@ -454,7 +460,7 @@ export function runFIFO(ctx) {
   const put = (r, expected, result, diff, status, note) => { rec[r] = { expected, result, diff, status, note }; if (status === 'BLOCK' || status === 'CHECK') anyBlock = true; if (status === 'REVIEW') anyReview = true; };
   const putN = (r, e, x, t, note) => put(r, e, x, x - e, Math.abs(x - e) <= t ? 'PASS' : 'CHECK', note);
   const putC = (r, n, fail, note) => put(r, 0, n, n, n === 0 ? 'PASS' : fail, note);
-  put(4, 'VALIDATED', openStatus, '', openStatus === 'VALIDATED' ? 'PASS' : 'REVIEW', `Opening layers: ${nO}`);
+  put(4, 'VALIDATED', openStatus, '', openStatus.startsWith('VALIDATED') ? 'PASS' : 'REVIEW', `Opening layers: ${nO}${openStatus === 'VALIDATED' ? '' : ' · ' + openStatus}`);
   put(5, 'CURRENT & PASS', `${ctx.step4.current} / ${ctx.step4.overall}`, '', 'PASS', 'Gate checked before run');
   putN(6, num(ctx.step4.finalCost), T.prodA, tol, `Production layers: ${L.length - nO}`);
   putN(7, num(ctx.step4.qty), T.prodQ, TOLQ, '');
@@ -601,6 +607,9 @@ export function runReworkFIFO(res, register, ctx) {
     if (utxt(c.status) === 'REVIEW - COST > PRICE') nrv++;
     closing.push(c);
   }
+  // NRV after rework: layers that changed quantity need their provision proposal recomputed
+  for (const c of closing) if (num(c.nrvUnit) > 0 && num(c.qty) > TOL_QTY) { const net = (num(c.tot) + num(c.prov)) / num(c.qty); c.provNeed = Math.max(0, net - num(c.nrvUnit)) * num(c.qty); }
+  res.totals.nrvProv = closing.reduce((a, c) => a + num(c.provNeed), 0);
   res.closing = closing;
   res.totals.layers = closing.length; res.totals.closeQ = closing.reduce((a, c) => a + num(c.qty), 0); res.totals.closeA = closing.reduce((a, c) => a + num(c.tot), 0);
   res.rec[16] = { ...res.rec[16], result: nrv, diff: nrv - num(res.rec[16].expected), status: nrv === 0 ? 'PASS' : 'REVIEW' };
@@ -900,9 +909,15 @@ export const FAST_ACCOUNTS = [
   ['a511', '511', 'Doanh thu trong kỳ (Sales Database)'],
 ];
 /** Revenue VND of the period by recognition date (all transaction types, returns negative). */
-export function periodRevenue(salesRows, period) {
+export function periodRevenue(salesRows, period, dupDecisions = null) {
   const { start, end } = periodBounds(period); let s = 0;
-  for (const r of salesRows || []) { const d = saleDate(r); if (d !== null && d >= start && d <= end) s += num(r.amtVND); }
+  const ex = new Set(Object.entries(dupDecisions || {}).filter(([, v]) => v === 'EXCLUDE').map(([k]) => k.toUpperCase()));
+  const keyCount = new Map();
+  for (const r of salesRows || []) {
+    const d = saleDate(r); if (d === null || d < start || d > end) continue;
+    if (ex.size && ex.has(lineKey(r, d, keyCount).toUpperCase())) continue; // confirmed duplicate – not revenue
+    s += num(r.amtVND);
+  }
   return s;
 }
 /**
@@ -911,7 +926,8 @@ export function periodRevenue(salesRows, period) {
  */
 export function fastTie(engine, tie) {
   const rows = FAST_ACCOUNTS.map(([k, acc, label]) => {
-    const e = num(engine[k]); const f = tie && tie.fast && tie.fast[k] !== undefined && tie.fast[k] !== null && tie.fast[k] !== '' ? num(tie.fast[k]) : null;
+    const e = num(engine[k]); let f = tie && tie.fast && tie.fast[k] !== undefined && tie.fast[k] !== null && tie.fast[k] !== '' ? num(tie.fast[k]) : null;
+    if (f === null && k === 'a2294' && Math.abs(e) <= 1 && tie && tie.fast && Object.keys(tie.fast).length) f = 0; // no NRV entry this month → 2294 movement 0 needs no typing
     const diff = f === null ? null : e - f;
     return { k, acc, label, engine: e, fast: f, diff, status: f === null ? 'NOT ENTERED' : Math.abs(diff) <= 1 ? 'PASS' : 'DIFF' };
   });

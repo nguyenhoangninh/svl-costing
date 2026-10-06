@@ -51,7 +51,7 @@ export function checker() {
     checks++;
     const numeric = typeof want === 'number' || typeof got === 'number';
     const ok = numeric ? close(got, want, tol) && !(typeof want === 'number' && typeof got === 'string' && got.trim() !== '' && isNaN(+got)) : txt(got).trim() === txt(want).trim();
-    if (!ok) { fails++; if (fails <= 60) console.log(`  ✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); }
+    if (!ok) { fails++; if (fails <= (+process.env.MAXFAIL || 60)) console.log(`  ✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); }
     return ok;
   }
   return { expect, done: () => { console.log(`\n${checks - fails}/${checks} checks passed${fails ? `, ${fails} FAILED` : ''}`); return fails; } };

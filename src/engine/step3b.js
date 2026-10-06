@@ -205,7 +205,7 @@ export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AM
       for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, v[4], totA, v[4] / totA, 'Actual PC-M amount ratio', 'USAGE');
     } else if (totQ > 0) {
       nUse++;
-      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, 'Actual PC-M quantity ratio (explicit legacy basis)', 'USAGE');
+      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, 'Actual PC-M quantity ratio', 'USAGE');
     } else {
       nNo++;
       const tot = pcpTot[erp] || 0;

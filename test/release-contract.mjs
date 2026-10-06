@@ -12,10 +12,10 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.10.1', v === '1.10.1');
+ok('package version = 1.10.2', v === '1.10.2');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
-ok('README release header matches package version', readme.includes(`v${v} Cloud + STEP 5R UI hotfix`));
+ok('README release header matches package version', readme.includes(`v${v} `));
 ok('STEP 5R module is precached', sw.includes("'./src/engine/return.js'"));
 ok('STEP 5R is documented in scope', readme.includes('| STEP 5R |'));
 ok('STEP 5R is a visible process navigation item', app.includes("{ id: 'salesreturn', no: '5R'"));
@@ -25,8 +25,7 @@ ok('phone auth layout is responsive', html.includes('@media (max-width: 699px)')
 ok('CSP is present', html.includes('Content-Security-Policy'));
 ok('CSP blocks object content', html.includes("object-src 'none'"));
 ok('referrer policy is present', html.includes('strict-origin-when-cross-origin'));
-ok('production Firestore owner is source-controlled', rules.includes("kamenguyen@gmail.com"));
-ok('placeholder owner is absent', !rules.includes('YOUR_EMAIL@gmail.com'));
+ok('no personal email committed in firestore.rules', rules.includes('YOUR_EMAIL@gmail.com') && !/[a-z0-9._-]+@gmail\.com/i.test(rules.replace(/YOUR_EMAIL@gmail\.com/g, '')));
 ok('npm test includes retention contracts', String(pkg.scripts && pkg.scripts.test).includes('rules-contract.mjs'));
 
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);

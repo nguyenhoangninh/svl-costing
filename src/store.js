@@ -59,6 +59,7 @@ const V = '10.12.2';
 let fb = null; // {app, auth, fs, mod}
 export const cloud = { enabled: !SANDBOX && !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey), user: null, ready: false, offline: false, error: '', role: '', isOwner: false };
 
+let keepError = ''; // survives the auth callback that a signOut triggers
 export async function initCloud(onUser) {
   if (!cloud.enabled) return;
   try {
@@ -70,16 +71,20 @@ export async function initCloud(onUser) {
     const app = appM.initializeApp(FIREBASE_CONFIG, 'svl-costing');
     fb = { app, auth: authM.getAuth(app), fs: fsM.getFirestore(app), A: authM, F: fsM };
     cloud.ready = true;
-    authM.getRedirectResult(fb.auth).catch((e) => { cloud.error = 'Đăng nhập lỗi: ' + (e.code || e.message); });
+    authM.getRedirectResult(fb.auth).catch((e) => { keepError = 'Đăng nhập lỗi: ' + (e.code || e.message); cloud.error = keepError; });
     authM.onAuthStateChanged(fb.auth, async (u) => {
-      cloud.role = ''; cloud.isOwner = false; cloud.error = '';
+      cloud.role = ''; cloud.isOwner = false; cloud.error = keepError; keepError = '';
       if (u && !allowed(u.email)) { cloud.error = `Tài khoản ${u.email} không có quyền truy cập.`; await authM.signOut(fb.auth); return; }
       if (u) {
         try { await loadRole(u); } catch (e) {
-          cloud.error = e && e.code === 'permission-denied'
-            ? `Tài khoản ${u.email} chưa được cấp quyền dùng dữ liệu giá thành. Nhờ quản trị viên thêm email này trong Cài đặt → Người dùng & phân quyền.`
-            : `Không đọc được quyền truy cập (${e && e.code || e}). Kiểm tra kết nối mạng hoặc Firestore đã được tạo chưa.`;
-          await authM.signOut(fb.auth); onUser(null); return;
+          if (e && e.code === 'permission-denied') {
+            keepError = `Tài khoản ${u.email} chưa được cấp quyền dùng dữ liệu giá thành. Nhờ quản trị viên thêm email này trong Cài đặt → Người dùng & phân quyền.`;
+            await authM.signOut(fb.auth); onUser(null); return;
+          }
+          // network / offline: stay signed in with the last known role, read-only until the role can be confirmed
+          const cached = (() => { try { return localStorage.getItem('svl.role.' + String(u.email).toLowerCase()); } catch { return null; } })();
+          cloud.role = 'viewer'; cloud.roleOffline = cached || '';
+          cloud.error = `Không kiểm tra được quyền (${e && e.code || e}) – đang chỉ xem dữ liệu trên máy. Kết nối lại rồi tải lại trang để chỉnh sửa.`;
         }
       }
       cloud.user = u || null;
@@ -116,6 +121,7 @@ async function loadRole(u) {
   // A successful read without a membership entry is only possible for an owner listed in the rules.
   cloud.isOwner = !r;
   cloud.role = r || 'admin';
+  try { localStorage.setItem('svl.role.' + norm(u.email), cloud.role); } catch { /* private mode */ }
 }
 /** With Firebase configured, editing requires a signed-in admin/editor (no anonymous local edits of production data). */
 export const canEdit = () => (cloud.enabled ? !!cloud.user && (cloud.role === 'admin' || cloud.role === 'editor') : true);
@@ -154,7 +160,8 @@ export class ConflictError extends Error {
  * baseRev = cloud revision this device last loaded/saved (null = never synced). The commit is a Firestore transaction that
  * only succeeds while the cloud revision is still baseRev; otherwise ConflictError and nothing becomes visible.
  */
-export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
+/** opts.keepAllExcept: reuse the cloud manifest for every blob except the listed ones (REOPEN may change only 'closed'). */
+export async function cloudSave(period, blobs, summary, onProgress, baseRev, opts = {}) {
   if (!cloud.user) throw new Error('Chưa đăng nhập.');
   const F = fb.F;
   const snap = await F.getDoc(pdoc(period));
@@ -165,7 +172,9 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev) {
   if (!baseOK) throw new ConflictError(cur);
   const old = cur ? cur.blobs || {} : {};
   const manifest = {}; const written = [];
-  const names = Object.keys(blobs); let i = 0;
+  const keepOnly = Array.isArray(opts.keepAllExcept) ? new Set(opts.keepAllExcept) : null;
+  if (keepOnly) for (const [name, m] of Object.entries(old)) if (!keepOnly.has(name)) manifest[name] = m;
+  const names = Object.keys(blobs).filter((n) => !keepOnly || keepOnly.has(n)); let i = 0;
   for (const name of names) {
     i++;
     const json = JSON.stringify(blobs[name]);

@@ -117,7 +117,7 @@ import { fp as fpStr } from '../src/engine/util.js';
   const dState = { d: { directAdj: dA, directApproval: { key: directKey(dA), by: 'checker' } } };
   eq('F-02 current direct approval passes', directApprovalBlock(dState), '');
   dState.d.directAdj = dB;
-  eq('F-02 direct approval lapses when allocation changes', directApprovalBlock(dState).includes('chưa có maker-checker approval'), true);
+  eq('F-02 direct approval lapses when allocation changes', directApprovalBlock(dState).includes('chưa được duyệt'), true);
   eq('F-02 posted 3B key: amount moved → changes', postedKey(new Map([['O|PC-1|A', { amt: 10 }], ['O|PC-2|B', { amt: 0 }]])) !== postedKey(new Map([['O|PC-1|A', { amt: 0 }], ['O|PC-2|B', { amt: 10 }]])), true);
   // F-03: same total, cost moved between lots → STEP 5 key changes
   const L = (a, b) => ({ rows: [{ erp: 'O', pc: 'PC-1', prod: 'A', qty: 1, totalRM: a, t622: 0, t627: 0, totalCost: a }, { erp: 'O', pc: 'PC-2', prod: 'B', qty: 1, totalRM: b, t622: 0, t627: 0, totalCost: b }] });
@@ -131,9 +131,8 @@ import { fp as fpStr } from '../src/engine/util.js';
   let billErr = '';
   try { validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 7), 'UB', 'A', 1, 10), billDate: '31/02/2026' }] }, { rows: [] }, P2); } catch (e) { billErr = e.message; }
   eq('F-05 supplied invalid Bill Date never falls back', billErr.includes('BLOCK'), true);
-  let futureBillErr = '';
-  try { validateSaveSales({ mode: 'YTD', rows: [{ ...row(ser(2026, 8, 7), 'UF', 'A', 1, 10), billDate: ser(2026, 9, 1) }] }, { rows: [] }, P2); } catch (e) { futureBillErr = e.message; }
-  eq('F-05 future Bill Date blocked from current period Sales DB', futureBillErr.includes('BLOCK'), true);
+  const futureBill = validateSaveSales({ mode: 'YTD', rows: [{ ...row(ser(2026, 8, 7), 'UF', 'A', 1, 10), billDate: ser(2026, 9, 1) }] }, { rows: [] }, P2);
+  eq('F-05 future Bill Date kept (REVIEW) and not costed this period', [futureBill.db.rows[0].validResult, F5.runFIFO({ ...ctx({}), salesRows: futureBill.db.rows }).sales.some((x) => x.inv === 'UF')], ['REVIEW', false]);
   eq('F-05 STEP5 canonical date never falls back from invalid supplied Bill Date', F5.saleDate({ invDate: ser(2026, 8, 7), billDate: '31/02/2026' }), null);
   // F-23: validation REVIEW of a costed line is counted
   const rv = validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 8), 'V1', 'A', 1, 10), customer: '' }] }, { rows: [] }, P2);
@@ -201,8 +200,8 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('#1 STRICT: gate allows rework', F5.reworkGate(reg2, [], P2, 'STRICT_DATE'), '');
   let monthlyRwErr = ''; try { F5.runFIFO({ ...base, mode: 'MONTHLY', register: reg2 }); } catch (e) { monthlyRwErr = e.message; }
   eq('#1 MONTHLY active rework is blocked by engine', monthlyRwErr.includes('STRICT_DATE'), true);
-  let undatedProdErr = ''; try { F5.runFIFO({ ...base, caRows: [{ ...ca1[0], date: null }], mode: 'STRICT_DATE', register: { rows: [] } }); } catch (e) { undatedProdErr = e.message; }
-  eq('#1 STRICT production without completion date is blocked', undatedProdErr.includes('thiếu ngày hoàn thành'), true);
+  const undatedRun = F5.runFIFO({ ...base, caRows: [{ ...ca1[0], date: null }], mode: 'STRICT_DATE', register: { rows: [] }, salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 6), 'U9', 'A', 1, 10)] }, { rows: [] }, P2).db.rows });
+  eq('#1 STRICT production without completion date runs, flagged (09c)', undatedRun.stats.undatedLayers, 1);
   // sale on 10/08 then rework 15/08 with only the opening layer of 10 units: sale first, rework gets the rest in date order
   const reg3 = { rows: [{ ...reg.rows[0], issueQty: 3, issueDate: ser(2026, 8, 15) }] };
   const sl = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 10), 'S1', 'A', 8, 80)] }, { rows: [] }, P2).db.rows;
@@ -216,8 +215,18 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('#5 Price Master uses bill-date recognition month', pmBill.rows.find((x) => x.product === 'A').finalPrice, 10);
   // #6 return at the original sale's COGS (opening layer 100/unit), with Original Invoice No.
   const rt = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'X1', 'A', 3, 30), { ...row(ser(2026, 8, 20), 'CN1', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'X1' }] }, { rows: [] }, P2).db.rows;
-  let mret = ''; try { F5.runFIFO({ ...ctx({}), salesRows: rt }); } catch (e) { mret = e.message; }
-  eq('#6 MONTHLY return requires STRICT_DATE', mret.includes('STRICT_DATE'), true);
+  const mret = F5.runFIFO({ ...ctx({}), salesRows: rt });
+  eq('#6 MONTHLY return booked at original cost', [mret.sales.find((x) => x.inv === 'CN1').status, Math.round(mret.sales.find((x) => x.inv === 'CN1').tot), mret.rec[8].status, mret.rec[9].status], ['RETURNED', -100, 'PASS', 'PASS']);
+  const amtOnly = F5.runFIFO({ ...ctx({}), salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN0', 'A', 1, -10), qty: null, tranType: 'SALES RETURN' }] }, { rows: [] }, P2).db.rows });
+  eq('#6 amount-only credit → NO COGS, not a return', [amtOnly.sales[0].fin, amtOnly.returnControl.total, amtOnly.returnControl.status], ['NO COGS', 0, 'PASS']);
+  const noInv = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 4), 'Y1', 'A', 2, 20), row(ser(2026, 8, 6), 'Y2', 'A', 2, 20), { ...row(ser(2026, 8, 20), 'CN5', 'A', -1, -10), tranType: 'SALES RETURN' }] }, { rows: [] }, P2).db.rows;
+  const rAuto = F5.runFIFO({ ...ctx({}), salesRows: noInv });
+  eq('#6 no original invoice → latest invoice, AUTO (review, not block)', [rAuto.sales.find((x) => x.inv === 'CN5').matchedOrigInv, rAuto.returnControl.status], ['Y2', 'REVIEW']);
+  const cn5 = rAuto.sales.find((x) => x.inv === 'CN5').key;
+  const rMan = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { unitCost: 150, note: 'pre-web sale' } } });
+  eq('#6 manual unit cost resolution', [rMan.sales.find((x) => x.inv === 'CN5').matchMode, Math.round(rMan.sales.find((x) => x.inv === 'CN5').tot), rMan.rec[9].status], ['MANUAL', -150, 'PASS']);
+  const rPick = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { origInv: 'Y1', note: 'credit note ref Y1' } } });
+  eq('#6 chosen original invoice', [rPick.sales.find((x) => x.inv === 'CN5').matchedOrigInv, rPick.returnControl.status], ['Y1', 'PASS']);
   const rr = F5.runFIFO({ ...ctx({}), salesRows: rt, mode: 'STRICT_DATE' });
   const ln = rr.sales.find((x) => x.inv === 'CN1');
   eq('#6 return restored at original cost', [ln.fin, ln.status, Math.round(ln.tot)], ['RETURN', 'RETURNED', -100]);
@@ -243,7 +252,7 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const mr = F5.runFIFO({ ...ctx({}), salesRows: multi, mode: 'STRICT_DATE' });
   eq('#6 multi-line original invoice aggregates returnable qty', [mr.sales.find((x) => x.inv === 'ML-CN').status, Math.round(mr.totals.cogsQ)], ['RETURNED', 1]);
   const rn = F5.runFIFO({ ...ctx({}), mode: 'STRICT_DATE', salesRows: validateSaveSales({ mode: 'MONTHLY', rows: [{ ...row(ser(2026, 8, 20), 'CN2', 'A', -1, -10), tranType: 'SALES RETURN', origInv: 'NOPE' }] }, { rows: [] }, P2).db.rows });
-  eq('#6 original not found → REVIEW', rn.sales[0].fin, 'REVIEW');
+  eq('#6 original not found → unresolved (BLOCK in STEP 5R)', [rn.sales[0].status, rn.returnControl.status], ['REVIEW', 'BLOCK']);
   // return becomes an inventory layer at its return date and can feed a later sale in STRICT_DATE
   const rtFlow = validateSaveSales({ mode: 'MONTHLY', rows: [
     row(ser(2026, 8, 5), 'R-ORIG', 'A', 10, 100),
@@ -261,7 +270,7 @@ import { rebuildEngine } from '../src/engine/step3b.js';
     { ...row(ser(2026, 8, 11), 'R2-CN2', 'A', -2, -20), tranType: 'SALES RETURN', origInv: 'R2-ORIG' },
   ] }, { rows: [] }, P2).db.rows;
   const rOver = F5.runFIFO({ ...ctx({}), salesRows: rtOver, mode: 'STRICT_DATE' });
-  eq('#6 cumulative return above sold qty → REVIEW', rOver.sales.find((x) => x.inv === 'R2-CN2').fin, 'REVIEW');
+  eq('#6 cumulative return above sold qty → unresolved', rOver.sales.find((x) => x.inv === 'R2-CN2').status, 'REVIEW');
   // #8 zero-production month: STEP 4 can be zero and STEP 5 sells from Opening FG only
   const zS2 = { status: 'PASS', period: P2, pc: [], total: { alloc: 0 } };
   const zS3 = { period: P2, summary: { outAmt: 0, mrAmt: 0 }, checks: { soVsStep2: { status: 'PASS' }, pcmVsPcp: { status: 'PASS' }, exceptions: { value: 0 } } };
@@ -297,6 +306,12 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   eq('#7 recorded NRV bridges both 2294 and 632', [ebNrv.a2294, ebNrv.a632], [40, 340]);
 }
 
+// ---- v1.10.2: ERP access-right notice line is not a dated transaction
+{
+  const { outOfPeriodRows: oor } = await import('../src/engine/controls.js');
+  const dsN = { 'MI-M-O': { header: ['MI No.', 'Date', 'Material Code', 'Current Issue Qty', 'Total Cost'], rows: [['MI-1', ser(2026, 8, 3), 'M', 1, 5], ['Notice : This report has been affected by item type/Sub-ledger/document group access right.', null, null, null, null]] } };
+  eq('ERP notice footer ignored by date control', oor(dsN, '2026-08').length, 0);
+}
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
 import fs from 'node:fs';
 import path from 'node:path';

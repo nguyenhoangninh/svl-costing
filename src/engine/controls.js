@@ -38,7 +38,8 @@ export function outOfPeriodRows(datasets, period) {
       const tx = (r) => {
         const keys = kc.map((i) => ttxt(r[i])).filter(Boolean);
         if (!keys.length) return false; // footer/subtotal rows with an amount but no business key are not transactions
-        if (keys.some((v) => /^(TOTAL|NOTICE)$/i.test(v) || /^TOTAL\b/i.test(v))) return false;
+        if (keys.some((v) => /^(TOTAL|NOTICE)\b/i.test(v) || /access right/i.test(v))) return false; // ERP footer / access-right notice line
+        if (qc.length && ac >= 0 && !qc.some((i) => isNumeric(r[i]) && num(r[i]) !== 0) && !(isNumeric(r[ac]) && num(r[ac]) !== 0)) return false; // no quantity and no amount
         return true;
       };
       for (const r of ds.rows) {

@@ -46,10 +46,15 @@ await page.goto(base + '#step5'); await page.click('[data-act=s5-run]'); await p
 await page.goto(base + '#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-hist]'); await page.waitForTimeout(1200);
 // FAST tie: before entry the close is blocked; enter the web figures but 632 off by 1.000 → approve with a note
+console.log('close before NRV:', ((await txt('main')).match(/Chưa đóng được:.{0,120}/) || [''])[0]);
+if (await page.locator('#f-nrv-decision').count()) {
+  await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
+  await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: chưa trích lập kỳ này'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(500);
+}
 console.log('close before FAST:', ((await txt('main')).match(/Chưa đóng được:.{0,120}/) || [''])[0]);
 await page.click('[data-tabh="fast"]'); await page.waitForSelector('#f-fast');
-const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => tr.children[2].textContent.replace(/\./g, '').replace(',', '.')));
-for (const [i, k] of ['a154', 'a155', 'a632', 'a511'].entries()) await page.fill(`#f-fast input[name=${k}]`, k === 'a632' ? String(Math.round(+engVals[i]) - 1000) : String(Math.round(+engVals[i])));
+const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => [tr.querySelector('input').name, tr.children[2].textContent.replace(/\./g, '').replace(',', '.').replace(/[–-]$/, '0')]));
+for (const [k, v] of engVals) await page.fill(`#f-fast input[name=${k}]`, k === 'a632' ? String(Math.round(+v || 0) - 1000) : String(Math.round(+v || 0)));
 await page.click('#f-fast button[type=submit]'); await page.waitForTimeout(400);
 console.log('FAST after entry:', ((await txt('main')).match(/\d+ tài khoản lệch FAST/) || ['(khớp)'])[0]);
 await page.fill('#f-fast-ok input[name=note]', 'Kiểm thử: chênh làm tròn bút toán 632'); await page.click('#f-fast-ok button'); await page.waitForTimeout(400);
@@ -57,7 +62,9 @@ console.log('FAST approved:', ((await txt('main')).match(/Chênh lệch đã đ�
 await page.goto(base + '#cc'); await page.waitForTimeout(400);
 for (const k of ['Cầu nối TK 154', 'Cầu nối TK 155', 'thiếu / sai ngày', 'cảnh báo kiểm tra dữ liệu bán', 'Hệ S: xuất', 'dự phòng rộng', 'Giá bán cần xác nhận', 'ERP map: vật tư đổi']) console.log('CP', k, '|', ((await txt('main')).match(new RegExp(k + '.{0,90}')) || ['(không thấy)'])[0]);
 await page.goto(base + '#close'); await page.waitForSelector('.result');
+console.log('close reason before click:', ((await txt('main')).match(/Chưa đóng được:.{0,200}/) || ['(none)'])[0]);
 await page.click('[data-act=s5-close]'); await page.waitForTimeout(1200);
+console.log('toast after close:', (await page.textContent('#toasts')).slice(-300));
 console.log('after close:', await txt('.result'));
 await shot('35-closed.png');
 // F-02: closed period is read-only everywhere

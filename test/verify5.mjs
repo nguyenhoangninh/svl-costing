@@ -57,7 +57,9 @@ for (let r = 5; r < sG.length; r++) { const x = sG[r] || []; if (ttxt(x[22]) && 
 const recG = G('05_RECONCILIATION');
 const res = F5.runFIFO({ period: PERIOD, opening, caRows: fl0.rows, salesRows: salesDB.rows, pmRows: pm.rows, fx: gl.fx, overrides, mode: cell(recG, 'L3'), tol: cell(recG, 'L4'),
   step4: { current: 'CURRENT', overall: fl0.overall, finalCost: fl0.totals.totalCost, qty: s4.recon.rows[1].result } });
-expect('gate', F5.reworkGate(register, salesDB.rows, PERIOD, res.mode), '');
+// Policy since v1.9 (owner decision #1, 02/10/2026): active FG rework must run STRICT_DATE; the workbook ran MONTHLY.
+expect('gate MONTHLY blocked by policy', F5.reworkGate(register, salesDB.rows, PERIOD, 'MONTHLY').startsWith('BLOCK - STRICT DATE REQUIRED'), true);
+expect('gate STRICT_DATE ok', F5.reworkGate(register, salesDB.rows, PERIOD, 'STRICT_DATE'), '');
 const carryBefore = F5.carryTotal(register);
 F5.runReworkFIFO(res, register, { period: PERIOD, opening, salesRows: salesDB.rows, step4Carry: fl0.totals.carryIn });
 // ledger
