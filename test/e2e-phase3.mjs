@@ -90,6 +90,8 @@ await page.goto(base + '#close'); await page.waitForSelector('.kpis');
 console.log('SEP hist:', await txt('.kpis'));
 await page.goto(base + '#cc'); await page.waitForTimeout(400);
 console.log('SEP cc:', (await txt('main')).slice(0, 300));
+await page.goto(base + '#fgprod'); await page.waitForSelector('.result');
+console.log('SEP 4.4 (rolled from AUG close):', await txt('.result'), '|', ((await txt('main')).match(/Số đầu kỳ: .{0,120}/) || ['(no opening)'])[0]);
 await page.emulateMedia({ colorScheme: 'dark' }); await page.goto(base + '#step5'); await page.waitForTimeout(400); await shot('37-dark.png');
 await page.setViewportSize({ width: 390, height: 844 }); await page.goto(base + '#fgopen'); await page.waitForTimeout(400); await shot('38-mobile.png');
 console.log('errors:', errors.join('\n') || 'none');

@@ -4,6 +4,7 @@ import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.
 import { buildFingerprint } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
 import { splitBooks, bookOf } from '../src/engine/revenue.js';
+import * as FP from '../src/engine/fgprod.js';
 
 let n = 0, fail = 0;
 const eq = (label, got, want) => { n++; const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) { fail++; console.log(`✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); } };
@@ -347,6 +348,36 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const { outOfPeriodRows: oor } = await import('../src/engine/controls.js');
   const dsN = { 'MI-M-O': { header: ['MI No.', 'Date', 'Material Code', 'Current Issue Qty', 'Total Cost'], rows: [['MI-1', ser(2026, 8, 3), 'M', 1, 5], ['Notice : This report has been affected by item type/Sub-ledger/document group access right.', null, null, null, null]] } };
   eq('ERP notice footer ignored by date control', oor(dsN, '2026-08').length, 0);
+}
+// ---- STEP 4.4 YTD finished-goods production table
+{
+  const fl = { rows: [
+    { erp: 'O', pc: 'PC-1', date: ser(2026, 8, 3), mo: 'MO1', sub: '', prod: 'a', name: 'A', fam: 'F', loc: 'L', unit: 'PC', qty: 10, baseRM: 600, wipAdj: 40, carryIn: 0, totalRM: 640, t622: 200, t627: 160, totalCost: 1000 },
+    { erp: 'O', pc: 'PC-2', date: ser(2026, 8, 9), mo: 'MO2', sub: '', prod: 'B', name: 'B', fam: 'F', loc: 'L', unit: 'PC', qty: 5, baseRM: 300, wipAdj: 0, carryIn: 50, totalRM: 350, t622: 100, t627: 50, totalCost: 500 },
+  ] };
+  const cur = FP.rowsFromFinalLayer(fl, '2026-08');
+  eq('4.4 rows from STEP 4.3 final layer', cur.map((r) => [r.period, r.prod, r.qty, r.totalRM, r.c622, r.c627, r.total, r.unitCost]), [['2026-08', 'A', 10, 640, 200, 160, 1000, 100], ['2026-08', 'B', 5, 350, 100, 50, 500, 100]]);
+  // upload file for the earlier months (template layout, header on row 4)
+  const tpl = FP.templateAOA([], '2026-08');
+  const grid = [...tpl, ['2026-06', 'O', 'PC-J', '', '', 'A', 'A', '', '', 'PC', 4, 300, 60, 40, 400, ''], ['07/2026', '', '', '', '', 'A', '', '', '', '', 6, '', '', '', 660, 'tổng tháng'], ['2025-12', '', '', '', '', 'A', '', '', '', '', 1, '', '', '', 10, ''], ['2026-08', '', '', '', '', 'A', '', '', '', '', 1, '', '', '', 10, '']];
+  const op = FP.importOpening({ S: grid }, 'op.xlsx', '2026-08');
+  eq('4.4 upload: parsed periods / checks', op.rows.map((r) => [r.period, r.check]), [['2026-06', 'PASS'], ['2026-07', 'PASS'], ['2025-12', 'BLOCK'], ['2026-08', 'BLOCK']]);
+  eq('4.4 upload with errors is BLOCKED', [op.status, op.stats.block], ['BLOCKED', 2]);
+  const ok = FP.importOpening({ S: grid.slice(0, 6) }, 'op.xlsx', '2026-08');
+  eq('4.4 upload valid', [ok.status, ok.stats.rows, ok.stats.total, ok.through], ['VALIDATED', 2, 1060, '2026-07']);
+  const fpAug = { opening: ok, current: { period: '2026-08', rows: cur } };
+  const sm = FP.summarize(FP.ytdRows(fpAug, '2026-08'), '2026-08');
+  eq('4.4 YTD by product', sm.prods.map((p) => [p.prod, p.curQty, p.ytdQty, p.ytdTotal]), [['A', 10, 20, 2060], ['B', 5, 5, 500]]);
+  eq('4.4 by month with running total', sm.months.map((m) => [m.period, m.qty, m.total, m.cumTotal]), [['2026-06', 4, 400, 400], ['2026-07', 6, 660, 1060], ['2026-08', 15, 1500, 2560]]);
+  eq('4.4 blocked upload is not counted', FP.ytdRows({ opening: op, current: fpAug.current }, '2026-08').length, 2);
+  const sep = FP.rollOpening(fpAug, '2026-08', '2026-09');
+  eq('4.4 roll forward = opening + posted month', [sep.kind, sep.stats.rows, sep.stats.total, sep.through, sep.stats.months], ['ROLL', 4, 2560, '2026-08', ['2026-06', '2026-07', '2026-08']]);
+  eq('4.4 January starts a new year', [FP.rollOpening(fpAug, '2026-12', '2027-01').kind, FP.rollOpening(fpAug, '2026-12', '2027-01').rows.length], ['NEW YEAR', 0]);
+  let miss = ''; try { FP.rollOpening({ opening: ok }, '2026-08', '2026-09'); } catch (e) { miss = e.message; }
+  eq('4.4 roll needs the previous month posted', miss.includes('chưa chuyển kết quả STEP 4.3'), true);
+  const back = FP.importOpening({ S: FP.templateAOA(FP.ytdRows(fpAug, '2026-08'), '2026-09') }, 'next.xlsx', '2026-09');
+  eq('4.4 "file đầu kỳ cho kỳ sau" round-trips', [back.status, back.stats.rows, back.stats.total], ['VALIDATED', 4, 2560]);
+  eq('4.4 period parser', ['2026-7', '7/2026', 202607, '2026/07'].map(FP.parsePeriod), ['2026-07', '2026-07', '2026-07', '2026-07']);
 }
 // ---- PWA: every module the app can load is precached by the service worker (offline start)
 import fs from 'node:fs';

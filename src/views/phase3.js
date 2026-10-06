@@ -2,6 +2,7 @@
 import * as F5 from '../engine/step5.js';
 import * as F4 from '../engine/step4.js';
 import * as P2 from './phase2.js';
+import * as FGP from './fgprod.js';
 import { splitBooks, bookOf } from '../engine/revenue.js';
 import { num, ttxt, utxt, txt, nowISO, prevPeriod, serialToISO, fpRows } from '../engine/util.js';
 
@@ -13,7 +14,7 @@ const colsOf = (fields, headers, types = {}, widths = {}) => fields.map((f, i) =
 
 export const PHASE3_BLOBS = ['dupDecisions', 'fgOpen', 'step5', 'fgHistory', 'fifoOverrides', 's5cfg', 'fgItems', 'closed', 'closedEver', 'rwArchive', 'fastTie', 'nrvDecision', 'returnMatches'];
 export const PHASE3_SHEETS = ['05_FG_OPENING', '05_SALES_COGS', '05_SALES_RETURN', '05_RECONCILIATION', '05_FG_HISTORY', '05_FG_ROLLFORWARD', '05_COGS_SUMMARY', '05_FG_REWORK_FIFO'];
-export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist']);
+export const CLOSED_BLOCK = new Set(['run-step2', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', '3b-sync', '3b-build', '3b-apply', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist']);
 
 // ======================= derived =======================
 /** Sales book (TK 511) and returns book (TK 5212 / 5213) of the period's data – owner decision 06/10/2026. */
@@ -780,6 +781,7 @@ export async function doClose() {
   for (const r of (D5.controls && D5.controls.rows) || []) if (String(r.status || '').startsWith('REVIEW')) exceptions.push({ control: 'CC-' + r.no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.actual ?? r.result ?? '', diff: r.diff ?? '', note: r.rule || '' });
   if (D5.tie && D5.tie.diffs) exceptions.push({ control: 'FAST', label: 'FAST reconciliation', status: D5.tie.status, result: D5.tie.rows.filter((r) => r.status === 'DIFF').map((r) => `${r.acc}:${r.diff}`).join('; '), note: D5.tie.approval ? D5.tie.approval.note : '' });
   if (d.nrvDecision) exceptions.push({ control: 'NRV', label: 'NRV decision', status: d.nrvDecision.status, result: d.nrvDecision.amount, note: d.nrvDecision.note || '', ref: d.nrvDecision.ref || '' });
+  FGP.postCurrent(S, { silent: true }); // STEP 4.4: the closed month's production is in the YTD table rolled into next month
   d.closedEver = true;
   d.closed = { period: S.period, closedAt: nowISO(), closedBy: A.who(), status: recon.finalStatus, closeGate: recon.closeGate, runAt: d.step5.runAt, note: `FG History PASS; Close Gate=${recon.closeGate}; Batch7=PASS`, exceptions };
   d.rwArchive = F5.archiveReworkWIP(d.register, S.period);

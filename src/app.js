@@ -11,15 +11,16 @@ import { APP_VERSION } from './config.js';
 import * as P2 from './views/phase2.js';
 import * as P3 from './views/phase3.js';
 import * as TRV from './views/trace.js';
+import * as FGP from './views/fgprod.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS];
+const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -246,7 +247,7 @@ function guardPeriod() {
 }
 const guardMutate = () => guardEdit() && guardPeriod();
 const canEditPeriod = () => store.canEdit() && !isClosed();
-const WRITE_ACTS = new Set(['new-period', 'run-step2', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
+const WRITE_ACTS = new Set(['new-period', 'run-step2', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
 
 /** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
 function parseNum(v, label) {
@@ -331,6 +332,7 @@ const NAV = [
   { id: 'sales', no: '4.1', label: 'Doanh thu & giá', sub: 'Sales · Price Master', key: 'pm' },
   { id: 'gl', no: '4.2', label: 'FX / GL 622-627', sub: 'Tỷ giá · chi phí', key: 'gl' },
   { id: 'step4', no: '4.3', label: 'Phân bổ giá thành', sub: '622 / 627 theo lô', key: 's4' },
+  { id: 'fgprod', no: '4.4', label: 'Thành phẩm SX lũy kế', sub: 'YTD · đầu kỳ · roll', key: 'fgp' },
   { id: 'fgopen', no: '5.1', label: 'FG đầu kỳ', sub: 'Lớp FIFO đầu kỳ', key: 's5o' },
   { id: 'step5', no: '5.2', label: 'FIFO giá vốn', sub: 'COGS · rework 5B', key: 's5' },
   { id: 'salesreturn', no: '5R', label: 'Hàng trả lại & giảm giá', sub: 'Sales Return 5212 · 5213', key: 's5r' },
@@ -352,6 +354,7 @@ function railStatus(st) {
     s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5r: 'NOT RUN', s5c: 'NOT RUN' }),
     pm: !S.d.pm ? 'NOT RUN' : S.d.pm.status !== 'CURRENT' ? S.d.pm.status : S.d.pm.rows.some((r) => r.status === 'MISSING PRICE') ? 'BLOCK' : 'PASS',
     gl: S.d.gl && S.d.gl.period === S.period && num(S.d.gl.fx) > 0 ? 'PASS' : 'NOT RUN',
+    fgp: FGP.status(S, st.p2.d4),
   };
 }
 
@@ -427,6 +430,7 @@ VIEWS.p3b = (el) => P2.view3b(el);
 VIEWS.sales = (el) => P2.viewSales(el);
 VIEWS.gl = (el) => P2.viewGL(el);
 VIEWS.step4 = (el) => P2.view4(el);
+VIEWS.fgprod = (el) => FGP.view(el);
 VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.salesreturn = (el) => P3.viewReturns(el);
@@ -445,6 +449,7 @@ VIEWS.cc = (el) => {
     ['4.1', 'Doanh thu & Price Master', rs.pm, S.d.pm ? `${S.d.pm.rows.length} sản phẩm` : '', S.d.pm && S.d.pm.updatedAt, S.d.pm ? '' : 'Import doanh thu → Validate & Save → Update Price Master', 'sales'],
     ['4.2', 'FX / GL 622-627', rs.gl, S.d.gl && S.d.gl.period === S.period ? `FX ${fmtNum(num(S.d.gl.fx), 2)}` : '', S.d.gl && S.d.gl.updatedAt, rs.gl === 'PASS' ? '' : 'Nhập tỷ giá, GL 622, GL 627 của kỳ', 'gl'],
     ['4.3', 'Phân bổ giá thành', st.s4c.status, st.p2.d4 && st.p2.d4.fl ? fmtNum(st.p2.d4.fl.totals.totalCost) : '', S.d.step4 && S.d.step4.runAt, st.s4c.next, 'step4'],
+    (() => { const c = FGP.ccInfo(S, st.p2.d4); return ['4.4', 'Thành phẩm SX lũy kế', c.status, c.text, c.at, c.next, 'fgprod']; })(),
     ['5.1', 'FG đầu kỳ', rs.s5o, S.d.fgOpen && S.d.fgOpen.stats ? fmtNum(S.d.fgOpen.stats.amt) : '', S.d.fgOpen && (S.d.fgOpen.validatedAt || S.d.fgOpen.loadedAt), S.d.fgOpen ? '' : 'Roll forward / import FG đầu kỳ', 'fgopen'],
     ['5.2', 'FIFO giá vốn & rework', rs.s5, st.d5 && st.d5.res ? fmtNum(st.d5.res.totals.cogsA) : '', st.d5 && st.d5.res && st.d5.res.runAt, st.s5c.next, 'step5'],
     ['5R', 'Hàng trả lại & giảm giá', rs.s5r, st.d5 && st.d5.res && st.d5.res.withReturns && st.d5.res.returnControl ? `${st.d5.res.returnControl.processed}/${st.d5.res.returnControl.total} đã xử lý` : '', st.d5 && st.d5.res && st.d5.res.withReturns && st.d5.res.runAt, rs.s5r === 'PASS' ? '' : rs.s5r === 'NOT RUN' || rs.s5r === 'RERUN REQUIRED' ? 'RUN STEP 5R' : 'Kiểm tra hoá đơn gốc / SL trả / giảm giá vốn', 'salesreturn'],
@@ -1061,7 +1066,7 @@ async function newPeriod() {
     else toast(`Chưa chuyển Opening WIP / Rework B/F từ kỳ ${adjP} (chưa đóng). Dùng “Roll forward” ở STEP 3 sau khi đóng kỳ ${adjP}.`, 'review');
   }
   if (prevD) {
-    const cf = { ...P2.carryForward(prevD, p), ...P3.carryForward(prevD, p) }; const took = [];
+    const cf = { ...P2.carryForward(prevD, p), ...P3.carryForward(prevD, p), ...FGP.carryForward(prevD, p) }; const took = [];
     for (const [k, val] of Object.entries(cf)) { const cur = S.d[k]; if (cur === null || cur === undefined || (Array.isArray(cur) && !cur.length)) { S.d[k] = val; took.push(k); } }
     if (took.length) { audit('CARRY FORWARD', `${S.period} ← ${took.join(', ')}`); markDirty(...took, 'audit'); }
   }
@@ -1125,11 +1130,16 @@ document.addEventListener('click', async (e) => {
     case '3b-all': P2.do3bAll(a.dataset.dec); render(); break;
     case 'sales-save': await busy('Đang Validate & Save doanh thu…', async () => P2.doSalesSave()); render(); break;
     case 'pm-update': await busy('Đang cập nhật Price Master…', async () => P2.doPMUpdate()); render(); break;
-    case 'run-step4': await busy('Đang chạy STEP 4…', async () => P2.doStep4()); render(); break;
+    case 'run-step4': await busy('Đang chạy STEP 4…', async () => { P2.doStep4(); FGP.postCurrent(S, { silent: true }); }); render(); break;
+    case 'fgp-post': FGP.postCurrent(S); render(); break;
+    case 'fgp-roll': await FGP.doRoll(); render(); break;
+    case 'fgp-tpl': await FGP.doTemplate(false); break;
+    case 'fgp-next': await FGP.doTemplate(true); break;
+    case 'fgp-export': await FGP.doExport(); break;
     case 's5-roll': await P3.doRollOpen(); render(); break;
     case 's5-validate': P3.doValidateOpen(); render(); break;
     case 's5-template': await P3.doTemplate(); break;
-    case 's5-run': await busy('Đang chạy FIFO COGS (bán hàng)…', async () => P3.doRunFIFO(false)); render(); break;
+    case 's5-run': await busy('Đang chạy FIFO COGS (bán hàng)…', async () => { await P3.doRunFIFO(false); FGP.postCurrent(S, { silent: true }); }); render(); break;
     case 's5r-run': await busy('Đang chạy STEP 5R – hàng bán bị trả lại…', async () => P3.doRun5R()); render(); break;
     case 'ret-save': await busy('Đang Validate & Save hàng trả lại / giảm giá…', async () => P3.doReturnsSave()); render(); break;
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
@@ -1235,6 +1245,7 @@ window.addEventListener('offline', () => { renderSync(); toast('Mất kết nố
 
 P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
 TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
+FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
 // ======================= boot =======================

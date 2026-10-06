@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.12.0 (06/10/2026) – STEP 4.4 Thành phẩm sản xuất lũy kế:** bảng tổng hợp thành phẩm nhập kho từ đầu năm đến kỳ hiện tại (theo sản phẩm, theo tháng, chi tiết lô). Kỳ này tự lấy từ STEP 4.3 sau phân bổ giá thành (sau RUN STEP 4 / RUN FIFO / CLOSE MONTH, hoặc bấm "Cập nhật từ STEP 4.3"). Các tháng trước: **Roll forward** từ kỳ trước (tự động khi tạo kỳ mới sau khi kỳ trước đã đóng; tháng 1 bắt đầu năm mới) hoặc **Upload file đầu kỳ** theo template (Kỳ, Product Code, Complete Qty, Tổng giá thành hoặc RM / 622 / 627). "Tải file đầu kỳ cho kỳ sau" xuất toàn bộ lũy kế đến kỳ này đúng định dạng upload.
+
 > **v1.11.0 (06/10/2026) – tách Doanh thu và Hàng bán bị trả lại:**
 > - **File & dữ liệu riêng:** 4.1 chỉ nhận doanh thu bán hàng (TK 511); hàng bán bị trả lại (SALES RETURN → TK 5212) và giảm giá / credit note (CREDIT NOTE → TK 5213) import, Validate & Save ở **màn hình 5R** vào Returns Database riêng. Dùng chung được một file ERP: mỗi màn hình bỏ qua (SKIPPED) dòng không thuộc sổ của mình. Dữ liệu cũ (trả lại nằm trong Sales DB) vẫn được đọc và tự chuyển sang 5R ở lần lưu tiếp theo.
 > - **Chạy riêng:** STEP 5.2 RUN FIFO chỉ tính giá vốn bán hàng; **RUN STEP 5R** chạy riêng sau đó (nhập lại kho theo giá vốn hoá đơn gốc, giảm 632). Đổi dữ liệu trả lại / cách xử lý chỉ làm STEP 5R cần chạy lại, không đụng Price Master / STEP 4 / 5.2. BUILD FG HISTORY và CLOSE MONTH chờ STEP 5R xong.

@@ -1,0 +1,48 @@
+// Browser check for STEP 4.4 YTD finished-goods production: post from STEP 4.3, upload opening, export, next-month file.
+// node test/e2e-fgprod.mjs <base-url> <costing.xlsm> <outDir>
+import { chromium } from 'playwright';
+import path from 'node:path';
+import XLSX from 'xlsx';
+const [, , base0, wbPath, outDir] = process.argv;
+const base = base0 + '?sandbox=1';
+const opFile = path.join(outDir, 'fgprod_opening_2026-08.xlsx');
+const wb = XLSX.utils.book_new();
+const rows = [['SVL_FG_PRODUCTION_YTD', 'v1'], ['Dùng cho kỳ', '2026-08'], ['note'],
+  ['Kỳ (YYYY-MM)', 'ERP', 'PC No.', 'PC Date', 'MO No.', 'Product Code', 'Product Name', 'Costing Family', 'Location', 'Unit', 'Complete Qty', 'RM (VND)', '622 (VND)', '627 (VND)', 'Tổng giá thành (VND)', 'Ghi chú']];
+for (let m = 1; m <= 7; m++) rows.push([`2026-0${m}`, 'O', '', '', '', 'OLI-4810VU', '20 INCH LARGER M-TOTE', '', '', 'PC', 1000 * m, 300000 * m, 100000 * m, 100000 * m, 500000 * m, 'Excel tháng ' + m]);
+XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'FG_PRODUCTION');
+XLSX.writeFile(wb, opFile);
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('ERR_TUNNEL')) errors.push('console: ' + m.text()); });
+page.on('dialog', async (d) => { await d.accept(d.type() === 'prompt' ? 'test' : undefined); });
+const txt = async (sel) => (await page.textContent(sel)).replace(/\s+/g, ' ');
+await page.goto(base + '#settings');
+await page.waitForSelector('#f-xlsm', { state: 'attached' });
+await page.setInputFiles('#f-xlsm', wbPath);
+await page.waitForSelector('#mig table', { timeout: 240000 });
+await page.goto(base + '#fgprod'); await page.waitForSelector('.result');
+console.log('4.4 before:', await txt('.result'), '|', ((await txt('main')).match(/Kết quả STEP 4.3 kỳ.{0,60}|Chưa có kết quả STEP 4.3.{0,40}/) || ['?'])[0]);
+await page.click('[data-act=fgp-post]'); await page.waitForTimeout(500);
+console.log('4.4 posted:', await txt('.result'), '|', await txt('.kpis'));
+console.log('4.4 opening alert:', ((await txt('main')).match(/Chưa có số các tháng trước.{0,40}/) || ['(none)'])[0]);
+await page.setInputFiles('#f-fgp', opFile); await page.waitForTimeout(800);
+console.log('4.4 upload toast:', (await page.textContent('#toasts')).slice(-140));
+console.log('4.4 after upload:', await txt('.result'), '|', await txt('.kpis'));
+await page.click('[data-tabfp="month"]'); await page.waitForTimeout(300);
+console.log('4.4 months:', ((await txt('#tfp')).match(/2026-0\d/g) || []).join(','));
+await page.screenshot({ path: path.join(outDir, '60-fgprod-month.png') });
+await page.click('[data-tabfp="sum"]'); await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(outDir, '61-fgprod-sum.png') });
+const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=fgp-next]')]);
+const f = path.join(outDir, dl.suggestedFilename()); await dl.saveAs(f);
+const back = XLSX.utils.sheet_to_json(XLSX.readFile(f).Sheets.FG_PRODUCTION, { header: 1 });
+console.log('next-month file:', dl.suggestedFilename(), 'rows', back.length - 4, 'months', [...new Set(back.slice(4).map((r) => r[0]))].join(','));
+const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=fgp-export]')]);
+console.log('export:', dl2.suggestedFilename());
+await page.goto(base + '#cc'); await page.waitForTimeout(300);
+console.log('CC 4.4 row:', ((await txt('main')).match(/4\.4Thành phẩm SX lũy kế.{0,60}/) || ['?'])[0]);
+console.log('errors:', errors.length ? errors.join(' | ') : 'none');
+await browser.close();
