@@ -85,6 +85,9 @@ const CLOSED_OK = new Set(['closed', 'closedEver', 'audit', 'rwArchive']);
  */
 function markDirty(...blobs) {
   const p = S.period; if (!p) return;
+  // ERP datasets touched by import / delete are queued in S.dirty as 'ds:<key>' – persist (or delete) them in the same save,
+  // otherwise a deleted report would come back from this device's storage on the next reload.
+  if (S.dirty && S.dirty.size) { blobs = [...blobs, ...S.dirty]; S.dirty = new Set(); }
   if (isClosed() && blobs.some((b) => !CLOSED_OK.has(b))) {
     toast(`Kỳ ${p} đã đóng – thay đổi KHÔNG được lưu. Quản trị viên mở lại kỳ ở màn hình 5.3 nếu cần sửa.`, 'block');
     openPeriod(p); return;
@@ -531,7 +534,7 @@ VIEWS.step1 = (el) => {
     ${st.s1.checklist.map((x) => `<tr><td><span class="erp erp-${x.erp}">${x.erp}</span></td><td>${esc(x.report)}</td><td>${pill(x.status)}${x.error ? `<div class="err">${esc(x.error)}</div>` : ''}</td><td class="r">${fmtNum(x.dataRows)}</td><td>${esc(x.fileName)}</td><td>${fmtTs(x.importedAt)}</td><td>${S.d.datasets[x.key] ? `<a href="#data" data-act="view-ds" data-k="${esc(x.key)}">Xem</a>` : ''}</td></tr>`).join('')}
     </tbody></table>
     <div class="row end"><span class="muted">Dòng báo "access right" từ ERP: ${c.accessLimited}</span>
-      <button class="btn danger ghost" data-act="reset-erp" type="button">Xoá dữ liệu ERP…</button></div>
+      <button class="btn danger ghost" data-act="reset-erp" type="button" ${isClosed() ? 'disabled title="Kỳ đã đóng – mở lại kỳ (5.3) nếu cần xoá"' : ''}>Xoá dữ liệu ERP…</button></div>
   </section>`;
   const handle = (files) => importERP([...files]);
   $('#f-files').addEventListener('change', (e) => handle(e.target.files));
@@ -1119,11 +1122,20 @@ document.addEventListener('click', async (e) => {
     case 'template-wip':
       exportBook('SVL_WIP_Opening_Template.xlsx', [{ name: 'WIP_OPENING', aoa: [['WIP OPENING BALANCE CONTROL'], ['Opening Period', S.period], [], [], ['Material Code', 'Material Name', 'Unit', 'Opening Qty', 'Opening Amount', 'Source', 'Note']] }]); break;
     case 'reset-erp': {
-      const sc = (prompt('Xoá dữ liệu ERP đã import (giữ kỳ báo cáo). Nhập ALL, T, S hoặc O:', '') || '').trim().toUpperCase();
-      if (!['ALL', 'T', 'S', 'O'].includes(sc)) break;
-      let n = 0;
-      for (const k of Object.keys({ ...S.d.datasets, ...S.d.importLog })) if (sc === 'ALL' || k.endsWith('-' + sc)) { delete S.d.datasets[k]; delete S.d.importLog[k]; S.dirty.add('ds:' + k); n++; }
-      audit('RESET ERP DATA - ' + sc, `Đã xoá ${n} báo cáo`); markDirty('importLog', 'audit'); render(); break;
+      const has = (sc) => Object.keys({ ...S.d.datasets, ...S.d.importLog }).filter((k) => sc === 'ALL' || k.endsWith('-' + sc));
+      const sc = (prompt(`Xoá dữ liệu ERP đã import của kỳ ${S.period}.\n\nBước 1/2 – nhập PHẠM VI cần xoá:\n  ALL = cả 3 hệ (${has('ALL').length} báo cáo)\n  T = hệ T (${has('T').length})   S = hệ S (${has('S').length})   O = hệ O (${has('O').length})`, 'ALL') || '').trim().toUpperCase();
+      if (!sc) break;
+      if (!['ALL', 'T', 'S', 'O'].includes(sc)) { toast(`Phạm vi “${sc}” không hợp lệ – chỉ nhập ALL, T, S hoặc O (lý do nhập ở bước 2).`, 'review'); break; }
+      const keys = has(sc);
+      if (!keys.length) { toast(`Không có báo cáo ERP nào của phạm vi ${sc} để xoá.`, 'review'); break; }
+      const reason = (prompt(`Bước 2/2 – nhập LÝ DO xoá ${keys.length} báo cáo (${sc}) của kỳ ${S.period}:`, '') || '').trim();
+      if (!reason) break;
+      if (reason.length < 3) { toast('Lý do quá ngắn (ít nhất 3 ký tự).', 'review'); break; }
+      for (const k of keys) { delete S.d.datasets[k]; delete S.d.importLog[k]; S.dirty.add('ds:' + k); }
+      audit('RESET ERP DATA - ' + sc, `Đã xoá ${keys.length} báo cáo: ${keys.join(', ')} · Lý do: ${reason}`);
+      markDirty('importLog', 'audit');
+      toast(`Đã xoá ${keys.length} báo cáo ERP (${sc}) của kỳ ${S.period}. Import lại file ERP rồi chạy lại STEP 2 → 3 → 3B → 4.`, 'pass');
+      render(); break;
     }
     case 'view-ds': S.dsView = a.dataset.k; if (S.view !== 'data') location.hash = 'data'; else render(); break;
     case 'goto-period': await openPeriod(a.dataset.p); break;
@@ -1154,15 +1166,18 @@ document.addEventListener('click', async (e) => {
     case 's5-reopen': await P3.doReopen(); render(); break;
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
-      if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN.`, 'block'); break; }
+      if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN. Không cần xoá để làm kỳ sau: tạo kỳ mới (+ Kỳ) và nạp số đầu kỳ từ file.`, 'block'); break; }
       if (isClosed()) { toast(`Kỳ ${S.period} đang CLOSED và không được xoá.`, 'block'); break; }
       if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ OPEN này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
-        for (const k of await store.localKeys()) if (String(k).startsWith(`p/${S.period}/`)) await store.localDel(k);
-        await store.localSet('periods', ((await store.localGet('periods')) || []).filter((p) => p !== S.period));
-        audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${S.period}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
-        if (store.cloud.user) { try { await store.cloudDelete(S.period); } catch (err) { toast('Không xoá được trên cloud: ' + err.message, 'block'); break; } }
-        toast(`Đã xoá kỳ ${S.period}.`, 'pass');
-        await refreshPeriods(); S.period = S.periods[0] || ''; if (S.period) await openPeriod(S.period); else render();
+        const delP = S.period;
+        clearTimeout(syncTimer); await saveChain; await pushChain; // no queued save may recreate the period after deletion
+        // cloud first: if the cloud refuses, nothing is removed on this device either
+        if (store.cloud.user) { try { await store.cloudDelete(delP); } catch (err) { toast('Không xoá được trên cloud (dữ liệu trên máy giữ nguyên): ' + err.message, 'block'); break; } }
+        audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${delP}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
+        for (const k of await store.localKeys()) if (String(k).startsWith(`p/${delP}/`)) await store.localDel(k);
+        await store.localSet('periods', ((await store.localGet('periods')) || []).filter((x) => x !== delP));
+        toast(`Đã xoá kỳ ${delP}.`, 'pass');
+        await refreshPeriods(); S.period = S.periods.filter((x) => x !== delP)[0] || ''; if (S.period) await openPeriod(S.period); else render();
       }
       break;
     default: break;
