@@ -206,11 +206,23 @@ async function loadPeriodData(p) {
   }
   return d;
 }
+const hiddenList = () => (store.cloud.enabled ? store.cloud.hiddenPeriods || [] : (() => { try { return JSON.parse(localStorage.getItem('svl.hiddenPeriods') || '[]'); } catch { return []; } })());
 async function refreshPeriods() {
   const local = (await store.localGet('periods')) || [];
   let cloudP = [];
-  try { cloudP = (await store.cloudPeriods()).map((x) => x.period); } catch { /* offline */ }
-  S.periods = [...new Set([...local, ...cloudP, S.period].filter(isPeriod))].sort().reverse();
+  try { cloudP = await store.cloudPeriods(); } catch { /* offline */ }
+  S.periodInfo = Object.fromEntries(cloudP.map((x) => [x.period, { closed: !!(x.summary && x.summary.closed), everClosed: !!(x.summary && (x.summary.everClosed || x.summary.closed)), updatedAt: x.updatedAt, updatedBy: x.updatedBy, cloud: true }]));
+  S.allPeriods = [...new Set([...local, ...cloudP.map((x) => x.period), S.period].filter(isPeriod))].sort().reverse();
+  for (const p of local) { // status from this device too (works offline / without cloud)
+    if (!isPeriod(p)) continue;
+    const c = await store.localGet(lk(p, 'closed')).catch(() => null), ce = await store.localGet(lk(p, 'closedEver')).catch(() => null);
+    const i = S.periodInfo[p] || (S.periodInfo[p] = {});
+    if (c && c.period === p) { i.closed = true; i.everClosed = true; }
+    if (ce) i.everClosed = true;
+  }
+  const hid = new Set(hiddenList());
+  // hidden periods stay out of the period pickers (the one being worked on is always listed)
+  S.periods = S.allPeriods.filter((p) => !hid.has(p) || p === S.period);
 }
 
 function audit(action, detail) {
@@ -868,6 +880,20 @@ VIEWS.audit = (el) => {
 };
 
 // ---------- settings / migration ----------
+/** Period list with status and per-period actions (open / delete / hide). */
+function periodTable() {
+  const hid = new Set(hiddenList()); const admin = store.isAdmin(); const show = !!S.showHidden;
+  const rows = (S.allPeriods || S.periods).filter((p) => show || !hid.has(p) || p === S.period);
+  const st = (p) => { const i = (S.periodInfo || {})[p] || {}; const local = p === S.period ? S.d : null; const closed = i.closed || !!(local && local.closed && local.closed.period === p); const ever = i.everClosed || closed || !!(local && local.closedEver); return { closed, ever }; };
+  return `<table class="cp"><thead><tr><th>Kỳ</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map((p) => { const x = st(p); const h = hid.has(p);
+    return `<tr><td><a href="#cc" data-act="goto-period" data-p="${p}"><b>${p}</b></a>${p === S.period ? ' <span class="muted">(đang mở)</span>' : ''}${h ? ' <span class="muted">(đã ẩn)</span>' : ''}</td>
+      <td>${x.closed ? pill('CLOSED') : x.ever ? `${pill('REVIEW')} <small>đã từng đóng – đang mở lại</small>` : pill('OPEN')}</td>
+      <td class="r">${admin && !x.ever ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá kỳ…</button>` : ''}
+        ${admin && x.ever && !h ? `<button class="btn ghost sm" data-act="hide-period" data-p="${p}" type="button" title="Kỳ đã từng đóng không xoá được (hồ sơ lưu trữ) – chỉ ẩn khỏi danh sách">Ẩn kỳ…</button>` : ''}
+        ${admin && h ? `<button class="btn ghost sm" data-act="unhide-period" data-p="${p}" type="button">Hiện lại</button>` : ''}</td></tr>`; }).join('')}</tbody></table>
+    ${hid.size ? `<p class="muted"><label><input type="checkbox" id="show-hidden" ${show ? 'checked' : ''}> Hiện cả ${hid.size} kỳ đã ẩn</label></p>` : ''}
+    <p class="muted">Kỳ <b>chưa từng đóng</b>: Xoá kỳ (xoá hẳn trên máy này và cloud). Kỳ <b>đã từng đóng</b> là hồ sơ kế toán – không xoá được, chỉ <b>Ẩn kỳ</b> khỏi danh sách (dữ liệu và lịch sử vẫn giữ trên cloud, hiện lại được).</p>`;
+}
 VIEWS.settings = (el) => {
   const c = store.cloud;
   el.innerHTML = `<section class="page"><header class="ph"><div><h1>Kỳ, cloud &amp; chuyển đổi</h1></div></header>
@@ -879,9 +905,8 @@ VIEWS.settings = (el) => {
         <div id="mig"></div></div>
       <div class="card"><h2>Đồng bộ cloud</h2>
         ${!c.enabled ? '<p>Chưa cấu hình Firebase — dữ liệu chỉ nằm trong trình duyệt này.</p>' : c.user ? `<p>Đăng nhập: <b>${esc(c.user.email)}</b> · vai trò <b>${esc(store.ROLES[c.role] || '')}</b>${c.isOwner ? ' (chủ sở hữu)' : ''}. ${store.canEdit() ? 'Mọi thay đổi được tự động lưu lên Firestore (đã nén).' : 'Bạn chỉ xem được dữ liệu, không lưu thay đổi lên cloud.'}</p><div class="row"><button class="btn ghost" data-act="push-cloud" type="button">Lưu kỳ này lên cloud ngay</button><button class="btn ghost" data-act="pull-cloud" type="button">Tải lại kỳ này từ cloud</button></div>` : `<p>Đăng nhập Google để lưu và mở dữ liệu trên mọi máy. ${c.error ? `<span class="err">${esc(c.error)}</span>` : ''}</p>`}
-        <h2>Kỳ hiện có</h2><ul class="plist">${S.periods.map((p) => `<li><a href="#cc" data-act="goto-period" data-p="${p}">${p}</a>${p === S.period ? ' (đang mở)' : ''}</li>`).join('')}</ul>
+        <h2>Kỳ hiện có</h2>${periodTable()}
         <div class="row"><button class="btn ghost" data-act="new-period" type="button">Tạo kỳ mới…</button><button class="btn ghost" data-act="export-all" type="button">Xuất kết quả kỳ ra Excel</button>
-        ${S.period && store.isAdmin() && !S.d.closedEver ? `<button class="btn danger ghost" data-act="delete-period" type="button">Xoá kỳ ${esc(S.period)}…</button>` : S.period && S.d.closedEver ? '<span class="muted">Kỳ đã từng CLOSED → hồ sơ lưu trữ, không hard-delete.</span>' : ''}
         <button class="btn ghost" data-act="clear-local" type="button">Xoá dữ liệu trên máy này…</button></div></div>
     </div>
     ${store.isAdmin() ? `<div class="card" id="users"><h2>Người dùng &amp; phân quyền</h2><p class="muted">Đang tải danh sách…</p></div>` : ''}
@@ -1164,15 +1189,29 @@ document.addEventListener('click', async (e) => {
     case 's5-hist': await busy('Đang tạo FG History…', async () => P3.doBuildHistory()); render(); break;
     case 's5-close': await P3.doClose(); render(); break;
     case 's5-reopen': await P3.doReopen(); render(); break;
+    case 'hide-period': case 'unhide-period': {
+      if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được ẩn / hiện kỳ.', 'review'); break; }
+      const hp = a.dataset.p; const hide = act === 'hide-period';
+      if (hide && !confirm(`Ẩn kỳ ${hp} khỏi danh sách kỳ?\n\nKỳ đã từng đóng là hồ sơ kế toán nên không xoá được; ẩn chỉ làm kỳ không còn hiện trong danh sách chọn kỳ. Dữ liệu và lịch sử trên cloud vẫn giữ nguyên, hiện lại được ở màn hình này.`)) break;
+      const next = hide ? [...hiddenList(), hp] : hiddenList().filter((x) => x !== hp);
+      try {
+        if (store.cloud.enabled) await store.saveHiddenPeriods(next); else localStorage.setItem('svl.hiddenPeriods', JSON.stringify([...new Set(next)]));
+        audit(hide ? 'HIDE PERIOD' : 'UNHIDE PERIOD', hp);
+        toast(hide ? `Đã ẩn kỳ ${hp}.` : `Kỳ ${hp} hiện lại trong danh sách.`, 'pass');
+      } catch (err) { toast('Không lưu được: ' + err.message, 'block'); break; }
+      if (hide && hp === S.period) { await refreshPeriods(); const other = S.periods.find((x) => x !== hp); if (other) { await openPeriod(other); location.hash = 'settings'; break; } }
+      await refreshPeriods(); render(); break;
+    }
     case 'delete-period':
       if (store.cloud.enabled && !store.isAdmin()) { toast('Chỉ quản trị viên được xoá kỳ.', 'review'); break; }
-      if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN. Không cần xoá để làm kỳ sau: tạo kỳ mới (+ Kỳ) và nạp số đầu kỳ từ file.`, 'block'); break; }
+      if (a.dataset.p && a.dataset.p !== S.period) { await openPeriod(a.dataset.p); location.hash = 'settings'; }
+      if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN. Dùng “Ẩn kỳ” để bỏ khỏi danh sách.`, 'block'); break; }
       if (isClosed()) { toast(`Kỳ ${S.period} đang CLOSED và không được xoá.`, 'block'); break; }
       if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ OPEN này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
         const delP = S.period;
         clearTimeout(syncTimer); await saveChain; await pushChain; // no queued save may recreate the period after deletion
         // cloud first: if the cloud refuses, nothing is removed on this device either
-        if (store.cloud.user) { try { await store.cloudDelete(delP); } catch (err) { toast('Không xoá được trên cloud (dữ liệu trên máy giữ nguyên): ' + err.message, 'block'); break; } }
+        if (store.cloud.user) { try { await store.cloudDelete(delP); } catch (err) { toast('Không xoá được trên cloud (dữ liệu trên máy giữ nguyên): ' + err.message + (/CLOSED/.test(err.message) ? ' → dùng “Ẩn kỳ”.' : ''), 'block'); await refreshPeriods(); render(); break; } }
         audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${delP}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${delP}/`)) await store.localDel(k);
         await store.localSet('periods', ((await store.localGet('periods')) || []).filter((x) => x !== delP));
@@ -1184,6 +1223,7 @@ document.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('change', async (e) => {
+  if (e.target.id === 'show-hidden') { S.showHidden = e.target.checked; render(); return; }
   if (e.target.id === 'period-sel' || e.target.id === 'hdr-period') await openPeriod(e.target.value);
 });
 document.addEventListener('submit', async (e) => {

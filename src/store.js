@@ -117,6 +117,7 @@ const norm = (e) => String(e || '').trim().toLowerCase();
 async function loadRole(u) {
   const snap = await fb.F.getDoc(adoc()); // throws permission-denied when the user is not allowed
   const members = snap.exists() ? snap.data().members || {} : {};
+  cloud.hiddenPeriods = snap.exists() && Array.isArray(snap.data().hiddenPeriods) ? snap.data().hiddenPeriods : [];
   const r = members[norm(u.email)];
   // A successful read without a membership entry is only possible for an owner listed in the rules.
   cloud.isOwner = !r;
@@ -136,7 +137,20 @@ export async function getAccess() {
 export async function saveAccess(members) {
   const clean = {};
   for (const [e, r] of Object.entries(members)) if (norm(e) && ROLES[r]) clean[norm(e)] = r;
-  await fb.F.setDoc(adoc(), { members: clean, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email });
+  const cur = await getAccess();
+  await fb.F.setDoc(adoc(), { members: clean, hiddenPeriods: Array.isArray(cur.hiddenPeriods) ? cur.hiddenPeriods : [], updatedAt: new Date().toISOString(), updatedBy: cloud.user.email });
+  return clean;
+}
+/**
+ * Hidden periods (admin): a period that was ever CLOSED cannot be hard-deleted (accounting retention + firestore.rules),
+ * but it can be hidden from the period list. Data and revision history stay on the cloud; it can be shown again any time.
+ */
+export async function saveHiddenPeriods(list) {
+  if (!isAdmin()) throw new Error('Chỉ quản trị viên được ẩn / hiện kỳ.');
+  const cur = await getAccess();
+  const clean = [...new Set((list || []).filter((p) => /^\d{4}-\d{2}$/.test(p)))].sort();
+  await fb.F.setDoc(adoc(), { members: cur.members || {}, hiddenPeriods: clean, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email });
+  cloud.hiddenPeriods = clean;
   return clean;
 }
 
