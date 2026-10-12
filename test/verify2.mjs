@@ -70,8 +70,11 @@ expect('balance pass count', balancePassCount(ctrl, base.s3), 73, 0);
 // WIP final layer
 const wG = G('03_WIP_ALLOCATION');
 const wf = wipFinal(base.s3, ctrl, b.erpMap);
+// v1.14.16: FG codes that only appear in FG (rework) Stock Out are no longer WIP rows; align the Excel rows by item code.
+const xlByCode = new Map(); for (let r = 11; r < wG.length && wG[r] && wG[r][0] !== null; r++) xlByCode.set(String(wG[r][0]).toUpperCase(), r);
+expect('wipF: every web row exists in Excel', wf.rows.every((m) => xlByCode.has(String(m.code).toUpperCase())), true);
 wf.rows.forEach((m, i) => {
-  const x = wG[11 + i];
+  const x = wG[xlByCode.get(String(m.code).toUpperCase())] || [];
   for (const [f, c, tol] of [['erp', 22], ['adjQty', 25, 1e-6], ['adjAmt', 26, 0.01], ['finalQty', 27, 1e-6], ['finalAmt', 28, 0.001], ['postedPC', 29, 0.01], ['method', 30], ['status', 31]]) expect(`wipF r${12 + i} ${f}`, m[f] ?? '', x[c] ?? '', tol ?? 0);
 });
 expect('wip AB6 final', wf.finalClosing, cell(wG, 'AB6'), 0.05); expect('wip AF6', wf.bridgeStatus, cell(wG, 'AF6')); expect('wip AF5', wf.gateW4, cell(wG, 'AF5'));

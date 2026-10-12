@@ -205,7 +205,7 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     const m = getM(code, txt(r.name), txt(r.unit));
     m.opQty += num(r.qty); m.opAmt += num(r.amt);
   }
-  let mrZeroLines = 0, mrZeroCost = 0;
+  let mrZeroLines = 0, mrZeroCost = 0, fgSkipped = 0;
   for (const [key, type, codeN, nameN, unitN, qtyN, amtN] of MOVES) {
     const ds = datasets[key];
     if (!ds) throw new Error(`Thiếu dữ liệu ${key}.`);
@@ -217,6 +217,9 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     for (let i = 0; i < end; i++) {
       const r = ds.rows[i];
       const code = txt(r[cC]).trim(); if (!code) continue;
+      // FG Stock Out (finished goods issued to rework, handled in 2B / 5B) is not a material movement: its quantity and
+      // amount are already excluded, and the FG code itself must not be listed as a WIP material (Excel listed it as a 0 row).
+      if (type === 'SO' && mask[erp] && mask[erp].set.has(i)) { fgSkipped++; continue; }
       const m = getM(code, cN >= 0 ? txt(r[cN]) : '', cU >= 0 ? txt(r[cU]) : '');
       let qv = r[cQ], av = r[cA];
       if (type === 'SO') { qv = soCell(mask, erp, i, cQ, qv); av = soCell(mask, erp, i, cA, av); }
@@ -263,5 +266,5 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     exceptions: { value: S.exceptions, status: S.exceptions === 0 ? 'PASS' : 'CHECK' },
     mrQty: { lines: mrZeroLines, cost: mrZeroCost, status: mrZeroLines === 0 ? 'PASS' : 'REVIEW' },
   };
-  return { period, runAt: nowISO(), openingSource: opening.source || '', openingStatus: opening.status, openingAmt: opening.stats ? opening.stats.totalAmt : 0, rows, summary: S, checks, step2RunAt: step2.runAt };
+  return { period, runAt: nowISO(), fgStockOutLinesExcluded: fgSkipped, openingSource: opening.source || '', openingStatus: opening.status, openingAmt: opening.stats ? opening.stats.totalAmt : 0, rows, summary: S, checks, step2RunAt: step2.runAt };
 }

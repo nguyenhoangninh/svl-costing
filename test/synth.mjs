@@ -108,6 +108,9 @@ const M = run('MONTHLY'), St = run('STRICT_DATE');
 
 // ---------- invariants
 let fails = 0; const ok = (label, cond, info = '') => { if (!cond) { fails++; console.log(`✗ ${label} ${info}`); } };
+// v1.14.16: the FG rework Stock Out (SPX-100, Item Type FG) is not a WIP material row
+ok('STEP 3A lists no FG-only Stock Out code', !s3.rows.some((r) => r.code === 'SPX-100'), s3.rows.map((r) => r.code).join(','));
+ok('STEP 3A counts the excluded FG Stock Out line', s3.fgStockOutLinesExcluded === 1, String(s3.fgStockOutLinesExcluded));
 // ---------- broad fallbacks (O other / S other / safety) split by PC RM cost, not equally
 {
   const fb = s2.detail.filter((d) => ['FALLBACK RM COST', 'FALLBACK EQUAL'].includes(d[16]));

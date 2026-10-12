@@ -104,10 +104,16 @@ expect('opening amt', opening.stats.totalAmt, cell(wo, 'H3'), 0.05); expect('ope
 expect('opening missUnit', opening.stats.missingUnit, cell(wo, 'H4'), 0);
 const s3 = runStep3(datasets, opening, s2, PERIOD, '');
 const w = G('03_WIP_ALLOCATION');
-let nW = 0; for (let r = 11; r < w.length && w[r] && w[r][0] !== null; r++) nW++;
-expect('wip rows', s3.rows.length, nW, 0);
+// v1.14.16: the web no longer lists FG codes that appear only in FG (rework) Stock Out; Excel lists them as all-zero rows.
+const xlW = []; for (let r = 11; r < w.length && w[r] && w[r][0] !== null; r++) xlW.push({ r, x: w[r] });
+const webCodes = new Set(s3.rows.map((m) => String(m.code).toUpperCase()));
+const dropped = xlW.filter((o) => !webCodes.has(String(o.x[0]).toUpperCase()));
+expect('wip: rows dropped vs Excel are FG-only zero rows', dropped.every((o) => o.x.slice(3, 21).every((v) => !v)), true);
+expect('wip: FG-only zero rows dropped (Aug fixture)', dropped.length > 0, true);
+const keptW = xlW.filter((o) => webCodes.has(String(o.x[0]).toUpperCase()));
+expect('wip rows', s3.rows.length, keptW.length, 0);
 const keys = ['code', 'name', 'unit', 'opQty', 'opAmt', 'miQty', 'miAmt', 'soQty', 'soAmt', 'inQty', 'inAmt', 'pcQty', 'pcAmt', 'mrQty', 'mrAmt', 'soOutQty', 'soOutAmt', 'outQty', 'outAmt', 'closingQty', 'closingAmt', 'status'];
-s3.rows.forEach((m, i) => { const x = w[11 + i]; keys.forEach((k, c) => expect(`wip r${12 + i} ${k}`, m[k] ?? '', x[c] ?? '', c >= 3 && c <= 20 ? 0.001 : 0)); });
+s3.rows.forEach((m, i) => { const { r, x } = keptW[i]; keys.forEach((k, c) => expect(`wip r${r + 1} ${k}`, m[k] ?? '', x[c] ?? '', c >= 3 && c <= 20 ? 0.001 : 0)); });
 expect('wip A5 opening', s3.summary.opening, cell(w, 'A5'), 0.05); expect('wip E5 in', s3.summary.inAmt, cell(w, 'E5'), 0.05);
 expect('wip I5 out', s3.summary.outAmt, cell(w, 'I5'), 0.05); expect('wip O5 closing', s3.summary.closingAmt, cell(w, 'O5'), 0.05);
 expect('wip S5 new', s3.summary.newMat, cell(w, 'S5'), 0); expect('wip U5 exc', s3.summary.exceptions, cell(w, 'U5'), 0);
