@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.6 (12/10/2026):** STEP 2 · bảng "Đối chiếu theo hệ nguồn" tách cột "Đã phân bổ" theo hệ của lô PC nhận (T / S / O) cho từng hệ nguồn.
+
 > **v1.14.5 (12/10/2026):** STEP 2 có nút **Xuất Excel tổng hợp phân bổ** cho kỳ đang mở: đối chiếu Stock Out (tổng / FG loại ra / NVL), theo hệ nguồn, theo quy tắc (R1–R6, phần dự phòng), hệ nguồn → hệ PC nhận, ảnh hưởng lên RM lô, 15 lô nhận nhiều nhất; sheet logic, theo nhóm nguồn, theo lô PC và chi tiết.
 
 > **v1.14.4 (09/10/2026):** Cài đặt → "Kỳ hiện có" thành bảng có trạng thái từng kỳ (OPEN / CLOSED / đã từng đóng) và nút ngay trên dòng: **Xoá kỳ** cho kỳ chưa từng đóng (không cần mở kỳ đó trước), **Ẩn kỳ / Hiện lại** cho kỳ đã từng đóng (hồ sơ kế toán không xoá được; danh sách ẩn lưu trong svl_costing_config/access, dữ liệu và lịch sử vẫn giữ).
