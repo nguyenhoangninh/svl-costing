@@ -539,5 +539,25 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('3B QTY basis still builds (legacy exception chosen on purpose)', rebuildEngine(inp, s2, dsx, P2, 'QTY').rows.length > 0, true);
 }
 
+// ---- v1.14.18 PC-M gate at IMPORT: negative / zero-cost issue lines block the file (STEP 1), footers are ignored
+{
+  const HP = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const gridOf = (body) => [['PC-M report'], HP, ...body];
+  const thrown = (fn) => { try { fn(); return null; } catch (e) { return e.message; } };
+  const clean = gridOf([['PC-1', 'A', 'A', 'M1', 2, 10], ['PC-1', 'A', 'A', 'M2', 0, 0], [null, null, null, null, 999, 999]]);
+  eq('PC-M gate: clean file (incl. zero-qty zero-cost and footer total) imports', buildDataset(clean, 'PC-M-O-202609.xlsx', P2).status, 'IMPORTED');
+  const neg = thrown(() => buildDataset(gridOf([['PC-1', 'A', 'A', 'MNEG', 2, -10], ['PC-1', 'A', 'A', 'M1', 2, 10]]), 'PC-M-O-202609.xlsx', P2));
+  eq('PC-M gate: negative Total Cost blocks the file', !!neg && /CHẶN/.test(neg) && /ÂM/.test(neg) && neg.includes('MNEG'), true);
+  const negQ = thrown(() => buildDataset(gridOf([['PC-1', 'A', 'A', 'MQ', -1, 10]]), 'PC-M-T-202609.xlsx', P2));
+  eq('PC-M gate: negative Quantity blocks the file', !!negQ && negQ.includes('MQ'), true);
+  const zds = buildDataset(gridOf([['PC-1', 'A', 'A', 'Z1', 1.145, 0], ['PC-2', 'B', 'B', 'Z1', 2, 0], ['PC-1', 'A', 'A', 'OK', 80, 40]]), 'PC-M-T-202609.xlsx', P2);
+  eq('PC-M gate: qty ≠ 0 with zero cost is a WARNING, file still imports', [zds.status, zds.warnings.zeroCostLines, zds.warnings.zeroCostMaterials], ['IMPORTED', 2, ['Z1']]);
+  eq('PC-M gate: clean file carries no warning', buildDataset(clean, 'PC-M-O-202609.xlsx', P2).warnings, undefined);
+  const txt = thrown(() => buildDataset(gridOf([['PC-1', 'A', 'A', 'T1', '34,6', 10]]), 'PC-M-O-202609.xlsx', P2));
+  eq('PC-M gate: text quantity blocks the file', !!txt && /không phải số/.test(txt), true);
+  const pcpNeg = [['PC No.', 'Product Code', 'Current Complete Qty', 'Total Cost'], ['PC-1', 'A', 5, -100]];
+  eq('PC-M gate: other reports (PC-P) are not gated by this rule', buildDataset(pcpNeg, 'PC-P-O-202609.xlsx', P2).status, 'IMPORTED');
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

@@ -563,7 +563,7 @@ async function importERP(files) {
   if (plan.error) { planEl.innerHTML = `<div class="alert block"><b>Import bị chặn.</b> ${esc(plan.error)}</div>`; return; }
   if (plan.noToken && plan.noToken.length) toast(`${plan.noToken.length} file không có kỳ (YYMM) trong tên: ${plan.noToken.slice(0, 3).join(', ')}${plan.noToken.length > 3 ? '…' : ''}. Hệ thống sẽ kiểm tra ngày từng dòng sau khi import.`, 'review');
   const items = Object.entries(plan.slots);
-  let ok = 0, errs = [], nNew = 0, nRep = 0;
+  let ok = 0, errs = [], nNew = 0, nRep = 0; const warns = [];
   await busy('Đang đọc file ERP…', async () => {
     let i = 0;
     for (const [k, f] of items) {
@@ -577,6 +577,11 @@ async function importERP(files) {
         ok++; prior ? nRep++ : nNew++;
         S.dirty.add('ds:' + k);
         audit(`${prior ? 'REPLACE' : 'NEW'} ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${ds.status} · ${ds.dataRows} dòng`);
+        if (ds.warnings) {
+          const w = ds.warnings, shown = w.zeroCostMaterials.slice(0, 40).join(', ') + (w.zeroCostMaterials.length > 40 ? `… (+${w.zeroCostMaterials.length - 40} mã)` : '');
+          warns.push(`${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 (${w.zeroCostMaterials.length} vật tư: ${shown}). STEP 3B (basis AMOUNT) sẽ chặn các vật tư có tổng = 0.`);
+          audit(`WARN ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${w.zeroCostLines} dòng Total Cost = 0 · ${w.zeroCostMaterials.length} vật tư`);
+        }
       } catch (e) {
         const c = k.split('-'); delete S.d.datasets[k]; S.dirty.add('ds:' + k);
         S.d.importLog[k] = { status: 'ERROR', error: e.message, fileName: f.name, importedAt: nowISO(), dataRows: 0 };
@@ -590,7 +595,8 @@ async function importERP(files) {
   const msg = [`Đã import ${ok}/${items.length} báo cáo (mới ${nNew}, thay thế ${nRep}).`];
   if (plan.dups.length) msg.push('Trùng: ' + plan.dups.join('; '));
   if (plan.skipped.length) msg.push('Bỏ qua: ' + plan.skipped.join('; '));
-  $('#plan').innerHTML = `<div class="alert ${errs.length ? 'block' : 'pass'}">${msg.map(esc).join('<br>')}${errs.length ? '<br><b>Lỗi:</b><br>' + errs.map(esc).join('<br>') : ''}${ok ? '<br>Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.' : ''}</div>`;
+  if (warns.length) msg.push('Cảnh báo (đã import):', ...warns);
+  $('#plan').innerHTML = `<div class="alert ${errs.length ? 'block' : 'pass'}">${msg.map(esc).join('<br>')}${errs.length ? '<br><b>Lỗi — file bị chặn, chưa import:</b><br>' + errs.map(esc).join('<br>') : ''}${ok ? '<br>Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.' : ''}</div>`;
 }
 
 // ---------- STEP 2 ----------
