@@ -100,16 +100,21 @@ function matches(targetERP, field, key, p) {
 export const STEP2_RULES = [
   [1, 'T', 'Customer = DOONA', 'T', 'PC-P-T Product Code SP*', 'Total Cost', '', 'Allocate'],
   [2, 'T', 'Customer = COMMON', 'T', 'All PC-P-T', 'Total Cost', '', 'Allocate'],
-  [3, 'O', 'JOB CODE exact match', 'O', 'PC-P-O Location exact', 'Total Cost', '', 'Allocate'],
-  [4, 'O', 'No exact: MK / VE / Other', 'O', 'MK* / VE* / ALL O', 'Total Cost', '', 'Fallback by rule'],
-  [5, 'S', 'DS*/DN* | VE* | MK*', 'T / O', 'T SP* | O VE* | O MK*', 'Total Cost', '', 'Allocate'],
-  [6, 'S', 'Other / Blank', 'T + O', 'All PC-P', 'Equal', '', 'Fallback Equal'],
+  [3, 'O', 'JOB CODE DN* / DS*', 'T', 'PC-P-T Product Code SP*', 'Total Cost', '', 'Allocate'],
+  [4, 'O', 'JOB CODE MK* (kèm SVL-MK)', 'O', 'PC-P-O Location MK*', 'Total Cost', '', 'Allocate'],
+  [5, 'O', 'JOB CODE VE*', 'O', 'PC-P-O Location VE*', 'Total Cost', '', 'Allocate'],
+  [6, 'O', 'Còn lại', 'O', 'All PC-P-O', 'Equal', '', 'Fallback Equal'],
+  [7, 'S', 'DS*/DN* | VE* | MK*', 'T / O', 'T SP* | O VE* | O MK*', 'Total Cost', '', 'Allocate'],
+  [8, 'S', 'Other / Blank', 'T + O', 'All PC-P', 'Equal', '', 'Fallback Equal'],
 ];
 
 export const STEP2_DETAIL_HEADERS = ['Source ERP', 'Source Key', 'Source Key Type', 'Source Rows', 'Source Stock Out', 'Family', 'Target ERP', 'Target Match', 'PC No.', 'MO No.', 'Product Code', 'Product Name', 'PC Location', 'PC RM Cost', 'Allocation %', 'Allocated Stock Out', 'Status', 'Note'];
 
 /** Main STEP 2 engine (RM / non-FG Stock Out only). */
-export function runStep2(datasets, period) {
+export function runStep2(datasets, period, opts = {}) {
+  // oRule 'FAMILY' (default): O job codes route by family (DN/DS → T SP*, MK* → O MK*, VE* → O VE*, còn lại → đều mọi O).
+  // oRule 'WORKBOOK': legacy Excel v30.9 behaviour (exact JOB CODE = location first), kept for golden parity tests.
+  const oRule = opts.oRule || 'FAMILY';
   for (const erp of ['O', 'T']) if (!datasets[`PC-P-${erp}`]) throw new Error(`Thiếu PC-P-${erp}. Hãy import dữ liệu ERP trước.`);
   for (const erp of ['O', 'T', 'S']) if (!datasets[`STOCK OUT-${erp}`]) throw new Error(`Thiếu STOCK OUT-${erp}. Hãy import dữ liệu ERP trước.`);
   const mask = fgMask(datasets, period);
@@ -158,13 +163,19 @@ export function runStep2(datasets, period) {
         if (uk === 'DOONA') { field = 'PRODUCT PREFIX'; tKey = 'SP'; note = 'DOONA -> T SP*.'; }
         else if (uk === 'COMMON') { field = 'ALL T'; tKey = 'ALL'; note = 'COMMON -> all PC-P-T.'; }
         else { status = 'CHECK CUSTOMER'; note = 'Unknown T Customer.'; }
-      } else if (srcERP === 'O') {
+      } else if (srcERP === 'O' && oRule === 'WORKBOOK') {
         targetERP = 'O';
         const exact = uk.length > 0 && pool.some((p) => p.erp === 'O' && p.loc.trim().toUpperCase() === uk);
         if (exact) { field = 'LOCATION EXACT'; tKey = g.key; note = 'O exact Job Code.'; }
         else if (uk.slice(0, 2) === 'MK' || uk === 'SVL-MK') { field = 'LOCATION PREFIX'; tKey = 'MK'; note = 'O fallback MK*.'; }
         else if (uk.slice(0, 2) === 'VE') { field = 'LOCATION PREFIX'; tKey = 'VE'; note = 'O fallback VE*.'; }
         else { field = 'ALL O'; tKey = 'ALL'; note = 'O fallback ALL.'; }
+      } else if (srcERP === 'O') {
+        const p2 = uk.slice(0, 2);
+        if (p2 === 'DN' || p2 === 'DS') { targetERP = 'T'; field = 'PRODUCT PREFIX'; tKey = 'SP'; note = 'O DS/DN -> T SP*.'; }
+        else if (p2 === 'MK' || uk === 'SVL-MK') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'MK'; note = 'O MK* -> O MK*.'; }
+        else if (p2 === 'VE') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'VE'; note = 'O VE* -> O VE*.'; }
+        else { targetERP = 'O'; field = 'ALL O'; tKey = 'ALL'; forceEqual = true; note = 'O other -> equal all O.'; }
       } else {
         if (g.fam === 'DOONA') { targetERP = 'T'; field = 'PRODUCT PREFIX'; tKey = 'SP'; note = 'S DS/DN -> T SP*.'; }
         else if (g.fam === 'VETO') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'VE'; note = 'S VE -> O VE*.'; }

@@ -48,7 +48,7 @@ expect('step1 overall', s1.overall, 'COMPLETE');
 
 // ---------------- STEP 2 ----------------
 console.log('STEP 2 — stock out allocation');
-const s2 = runStep2(datasets, PERIOD);
+const s2 = runStep2(datasets, PERIOD, { oRule: 'WORKBOOK' });
 const sa = G('03_STOCK_OUT_ALLOCATION');
 ['T', 'S', 'O'].forEach((e, i) => {
   const row = s2.summary[i]; const r = 5 + i;

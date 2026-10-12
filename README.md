@@ -1,5 +1,6 @@
 # SVL Costing Web
 
+> **v1.14.8 (12/10/2026):** STEP 2 · Stock Out hệ O theo JOB CODE: DN*/DS* → PC hệ T mã SP*; MK* (kèm SVL-MK) → PC hệ O location MK*; VE* → PC hệ O location VE*; còn lại → chia đều mọi PC hệ O. Bỏ khớp đúng job code = location (giữ lại qua tuỳ chọn oRule 'WORKBOOK' cho test parity Excel).
 > **v1.14.7 (12/10/2026):** STEP 2 · dàn trang lại: bảng "Đối chiếu theo hệ nguồn" chiếm toàn bộ chiều rộng, tiêu đề và số không xuống dòng; bảng "Phân loại Stock Out" xếp bên dưới.
 > **v1.14.6 (12/10/2026):** STEP 2 · bảng "Đối chiếu theo hệ nguồn" tách cột "Đã phân bổ" theo hệ của lô PC nhận (T / S / O) cho từng hệ nguồn.
 

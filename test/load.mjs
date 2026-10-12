@@ -31,7 +31,7 @@ export function loadDatasets(fixDir) {
 }
 
 export function runBase({ G, cell }, datasets) {
-  const s2 = runStep2(datasets, PERIOD);
+  const s2 = runStep2(datasets, PERIOD, { oRule: 'WORKBOOK' });
   const ri = G('03_FG_REWORK_INPUT');
   const oldRows = [];
   for (let r = 8; r < ri.length && ri[r] && ri[r][2]; r++) oldRows.push(Object.fromEntries(RW_FIELDS.map((f, i) => [f, ri[r][i]])));
