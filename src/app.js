@@ -14,6 +14,7 @@ import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
 import { step2ReportSheets } from './engine/step2report.js';
+import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
 // ======================= state =======================
@@ -1230,7 +1231,10 @@ document.addEventListener('click', async (e) => {
       const s2 = S.d.step2; if (!s2) { toast('Chưa chạy STEP 2.', 'review'); break; }
       const cls = step2Classification(S.d.datasets, S.period, s2, S.d.register);
       const { sheets } = step2ReportSheets(s2, cls, S.period, APP_VERSION);
-      await exportBook(`SVL_STEP2_PhanBo_StockOut_${S.period}.xlsx`, sheets); break;
+      try {
+        await exportStyledBook(`SVL_STEP2_PhanBo_StockOut_${S.period}.xlsx`, sheets, { title: `Tổng hợp phân bổ Stock Out · kỳ ${S.period}`, subject: 'STEP 2 – Phân bổ Stock Out vào lô PC', company: 'SVL – Starry Vietnam Co., Ltd.' });
+      } catch (err) { toast(`Không xuất được Excel: ${err.message}`, 'block'); }
+      break;
     }
     case 'view-ds': S.dsView = a.dataset.k; if (S.view !== 'data') location.hash = 'data'; else render(); break;
     case 'goto-period': await openPeriod(a.dataset.p); break;
