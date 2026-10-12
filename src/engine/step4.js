@@ -2,7 +2,7 @@
 // 3B final layer + FG rework carry-in, lot unit-cost check.
 // Port of modSTEP4 (STEP4_Import_Sales_Revenue, STEP4_Validate_Save_Sales, STEP4_Update_Price_Master,
 // STEP4_Run_Cost_Allocation[_Gated]), V3_RefreshPCAndStep4, RW_SyncCompletedToStep4, SVL_LotCostCheck_Build.
-import { txt, ttxt, utxt, num, isNumeric, isPeriod, serialToYMD, nowISO, cellDateSerial, recognitionDate as recognitionDateShared } from './util.js';
+import { txt, ttxt, utxt, num, isNumeric, parseLocaleNum, isPeriod, serialToYMD, nowISO, cellDateSerial, recognitionDate as recognitionDateShared } from './util.js';
 import { isReturnRow } from './revenue.js';
 
 const EPOCH = Date.UTC(1899, 11, 30);
@@ -188,6 +188,8 @@ export function validateSaveSales(staging, salesDB, period, opts = {}) {
     r.validMsg = [...hard.map((x) => 'BLOCK: ' + x), ...warn].join('; ') + (hard.length || warn.length ? ';' : '');
     if (hard.length) block++; else if (warn.length) review++; else pass++;
   }
+  const ytdGap = ytdStartGap(mode, book, minInv, period);
+  if (ytdGap) { staging.status = 'BLOCKED - YTD FILE DOES NOT START IN JANUARY'; throw new Error(ytdGap); }
   if (block) {
     staging.status = 'BLOCKED - FIX SALES DATA';
     throw new Error(`${book === 'RETURNS' ? 'Returns' : 'Sales'} validation có ${block} dòng BLOCK. Sửa Recognition/Bill Date, Transaction Type, Product/Quantity rồi Validate & Save lại.`);
@@ -227,6 +229,18 @@ export function salesCoverage(mode, minInv, maxInv, period) {
   if (mode === 'MONTHLY') return { from: ser(a.y, a.m - 1, 1), to: ser(b.y, b.m, 0) };
   return { from: ser(a.y, 0, 1), to: periodEndSerial(period) };
 }
+/**
+ * YTD replaces the Sales DB from 1 January to the period end. A sales file whose first recognition date is after January
+ * of that year would silently delete every earlier month, so it is refused (use MONTHLY, or a full-year file).
+ * Sales book only: a genuine YTD returns file can legitimately start after January.
+ */
+export function ytdStartGap(mode, book, minInv, period) {
+  if (mode !== 'YTD' || book !== 'SALES' || !minInv) return '';
+  const a = serialToYMD(minInv);
+  if (a.y !== +period.slice(0, 4) || a.m === 1) return '';
+  const mm = String(a.m).padStart(2, '0');
+  return `Chế độ YTD sẽ XOÁ toàn bộ doanh thu từ 01/01/${a.y} đến cuối kỳ ${period} rồi thay bằng file này, nhưng file chỉ bắt đầu từ ${String(a.d).padStart(2, '0')}/${mm}/${a.y}. Các tháng 01–${String(a.m - 1).padStart(2, '0')}/${a.y} sẽ bị mất. Không lưu. Với file theo tháng: chọn Chế độ = MONTHLY rồi chọn lại file; hoặc dùng file doanh thu đủ từ tháng 01.`;
+}
 /** What Validate & Save would do, for the confirmation dialog. */
 export function salesSavePreview(staging, salesDB, period, opts = {}) {
   const mode = staging.mode === 'MONTHLY' ? 'MONTHLY' : 'YTD';
@@ -237,7 +251,7 @@ export function salesSavePreview(staging, salesDB, period, opts = {}) {
   if (opts.book) for (const r of skip) { const d = recognitionDate(r); if (d === null || d < lo) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
   const cov = salesCoverage(mode, minInv, maxInv, period);
   const replaced = cov ? ((salesDB && salesDB.rows) || []).filter((r) => { const d = recognitionDate(r); return d !== null && d >= cov.from && d <= cov.to; }).length : 0;
-  return { mode, from: cov ? cov.from : null, to: cov ? cov.to : null, replaced, inserted: take.length, skipped: skip.length, kept: ((salesDB && salesDB.rows) || []).length - replaced };
+  return { mode, from: cov ? cov.from : null, to: cov ? cov.to : null, replaced, inserted: take.length, skipped: skip.length, kept: ((salesDB && salesDB.rows) || []).length - replaced, block: ytdStartGap(mode, opts.book || '', minInv, period) };
 }
 
 // ======================= PRICE MASTER =======================
@@ -301,9 +315,10 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   let invalidSODate = 0;
   const soRows = (so || []).map((r) => ({ ...r }));
   soRows.forEach((r, i) => {
-    const act = utxt(r.active), prod = utxt(r.product), val = num(r.price);
+    const act = utxt(r.active), prod = utxt(r.product), pv = parseLocaleNum(r.price), val = pv ?? 0;
     const inactive = act === 'N' || act === 'NO' || act === 'INACTIVE' || act === '0';
-    r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? (fromPCP ? 'NOT USED - PRODUCT CODE NOT IN PC-P THIS PERIOD' : 'NOT USED - PRODUCT CODE NOT IN COSTING SCOPE THIS PERIOD') : 'CANDIDATE';
+    const badText = pv === null && ttxt(r.price) !== '';
+    r.check = !prod ? '' : inactive ? 'SKIPPED - INACTIVE (Active = N)' : badText ? 'SKIPPED - UNIT PRICE USD IS NOT A NUMBER' : val <= 0 ? 'SKIPPED - NO UNIT PRICE USD' : !req.has(prod) ? (fromPCP ? 'NOT USED - PRODUCT CODE NOT IN PC-P THIS PERIOD' : 'NOT USED - PRODUCT CODE NOT IN COSTING SCOPE THIS PERIOD') : 'CANDIDATE';
     if (inactive || !prod || val <= 0) return;
     const rawDate = ttxt(r.soDate), d = toSerial(r.soDate);
     if (rawDate && d === null) { r.check = 'BLOCK - INVALID SO DATE'; invalidSODate++; return; }
@@ -342,7 +357,7 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else if (ytdP > 0) { sel = ytdP; src = 'YTD ACTUAL'; ref = lastSale.get(p) ?? null; }
     else if (soP > 0) {
       sel = soP; const rk = soRank.get(p); src = rk === 3 ? 'SALES ORDER' : rk === 2 ? 'SALES ORDER (NO DATE)' : 'SALES ORDER (AFTER PERIOD)';
-      ref = soDate.get(p) ?? null; if (mp <= 0) soUsed.set(p, src);
+      ref = soDate.get(p) ?? null;
     }
     const row = { product: p, refPrice: sel, refSource: src, refDetail: ref, manPrice: null, manSource: null, finalPrice: null, finalSource: null, status: '' };
     if (manDateBad) {
@@ -355,6 +370,8 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
     else if (sel > 0 && src !== 'SALES ORDER (AFTER PERIOD)') { row.finalPrice = sel; row.finalSource = src; row.status = 'OK'; }
     else if (sel > 0 && src === 'SALES ORDER (AFTER PERIOD)') { row.status = 'BLOCK - SO AFTER PERIOD'; afterSO++; }
     else { row.status = 'MISSING PRICE'; missing++; missingList.push(p); }
+    // SO check label follows the final row status: only an OK row whose final source is the SO really uses it.
+    if (src.startsWith('SALES ORDER')) soUsed.set(p, row.status === 'OK' && row.finalSource === src ? 'USED' : row.status);
     const age = ref !== null && ref !== undefined ? monthsBetween(ref, pEnd) : 0;
     let review;
     if (row.status === 'MISSING PRICE') review = 'MISSING';
@@ -372,8 +389,12 @@ export function updatePriceMaster({ salesDB, so, manual, step2, period }) {
   soRows.forEach((r, i) => {
     if (r.check !== 'CANDIDATE') return;
     const p = utxt(r.product);
-    if (soRowOf.get(p) === i) r.check = soUsed.has(p) ? `USED - FINAL PRICE (${soUsed.get(p)})` : 'NOT USED - ACTUAL SALES / MANUAL PRICE HAS PRIORITY';
-    else r.check = 'NOT USED - SUPERSEDED BY ANOTHER SO ROW';
+    if (soRowOf.get(p) !== i) { r.check = 'NOT USED - SUPERSEDED BY ANOTHER SO ROW'; return; }
+    const u = soUsed.get(p), rk = soRank.get(p);
+    const srcSO = rk === 3 ? 'SALES ORDER' : rk === 2 ? 'SALES ORDER (NO DATE)' : 'SALES ORDER (AFTER PERIOD)';
+    if (u === 'USED') r.check = `USED - FINAL PRICE (${srcSO})`;
+    else if (u) r.check = u === 'BLOCK - SO AFTER PERIOD' ? 'BLOCK - SO AFTER PERIOD (NOT USED AS PRICE)' : `NOT USED - PRICE MASTER ROW ${u}`;
+    else r.check = 'NOT USED - ACTUAL SALES / MANUAL PRICE HAS PRIORITY';
   });
   return {
     pm: { rows, audit, dbSavedAt: salesDB.savedAt, updatedAt: nowISO(), sourceThrough: pEnd, status: missing || overlap || afterSO || unapprovedManual || invalidManualDate || invalidSODate ? 'BLOCKED - PRICE POLICY' : 'CURRENT', period },

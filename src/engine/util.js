@@ -43,6 +43,29 @@ export function num(v) {
   return parseFloat(s);
 }
 
+/**
+ * Price typed as text in either convention: "34,6" / "1.234,5" (Vietnamese) or "34.6" / "1,234.5" (English).
+ * Numbers are returned unchanged. When both separators appear, the last one is the decimal mark; a single comma is a
+ * decimal mark unless it is followed by exactly three digits in thousands groups ("1,234" = 1234, as Excel en-US).
+ * Returns null when the text is not a number (e.g. "USD 265"), so the caller can report it instead of using 0.
+ */
+export function parseLocaleNum(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  let s = String(v).trim().replace(/[\s ]/g, '');
+  if (s === '') return null;
+  let neg = false;
+  if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1); }
+  if (!/^[-+]?[\d.,]+$/.test(s) || !/\d/.test(s)) return null;
+  const lc = s.lastIndexOf(','), ld = s.lastIndexOf('.');
+  if (lc >= 0 && ld >= 0) s = lc > ld ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  else if (lc >= 0) s = /^[-+]?\d{1,3}(,\d{3})+$/.test(s) ? s.replace(/,/g, '') : (s.split(',').length === 2 ? s.replace(',', '.') : null);
+  else if ((s.match(/\./g) || []).length > 1) s = /^[-+]?\d{1,3}(\.\d{3})+$/.test(s) ? s.replace(/\./g, '') : null;
+  if (s === null || !/^[-+]?(\d+\.?\d*|\.\d+)$/.test(s)) return null;
+  const n = parseFloat(s);
+  return neg ? -n : n;
+}
+
 /** VBA HKey: header normalisation used for every header lookup. */
 export function hkey(s) {
   let t = txt(s).trim().toUpperCase();

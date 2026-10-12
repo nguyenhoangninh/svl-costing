@@ -384,6 +384,7 @@ export function doSalesSave() {
   try {
     const moved = migrateLegacyReturns(S);
     const pv = F.salesSavePreview(S.d.salesImport, S.d.salesDB, S.period, { book: 'SALES' });
+    if (pv.block) { S.d.salesImport.status = 'BLOCKED - YTD FILE DOES NOT START IN JANUARY'; A.audit('SALES SAVE BLOCKED', pv.block); A.markDirty('salesImport', 'audit'); A.toast(pv.block, 'block'); A.render(); return; }
     if (pv.from !== null && !confirm(`Validate & Save doanh thu bán hàng (${pv.mode})\n\nThay thế toàn bộ dòng cũ từ ${serialToISO(pv.from)} đến ${serialToISO(pv.to)}: ${pv.replaced} dòng\nThêm mới từ file: ${pv.inserted} dòng${pv.skipped ? `\nBỏ qua ${pv.skipped} dòng SALES RETURN / CREDIT NOTE (import ở màn hình 5R)` : ''}\nGiữ nguyên ngoài khoảng: ${pv.kept} dòng\n\nTiếp tục?`)) return;
     const r = F.validateSaveSales(S.d.salesImport, S.d.salesDB, S.period, { book: 'SALES' });
     S.d.salesDB = r.db; if (S.d.pm) S.d.pm.status = 'OUTDATED';
@@ -633,7 +634,7 @@ export function migratePhase2(g, S, period) {
   // Price Master + Step 4
   let msg4 = '';
   try {
-    if (d.salesDB && d.step2) { const r = F.updatePriceMaster({ salesDB: d.salesDB, so: d.soPrice, manual: d.manualPrice, step2: d.step2, period }); d.pm = r.pm; d.soPrice = r.so; }
+    if (d.salesDB && d.step2) { const r = F.updatePriceMaster({ salesDB: priceRows(d), so: d.soPrice, manual: d.manualPrice, step2: d.step2, period }); d.pm = r.pm; d.soPrice = r.so; }
     const gm = gateMsg(S);
     if (gm) msg4 = gm; else doStep4Silent(S);
   } catch (e) { msg4 = e.message; }

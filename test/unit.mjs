@@ -465,5 +465,43 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('pcb: refuses when a PC exists on one side only', threw, true);
 }
 
+// ---- v1.14.15 Sales YTD guard, SO price text, SO check labels, Price Master never touches sales
+{
+  const { parseLocaleNum } = await import('../src/engine/util.js');
+  const S4 = await import('../src/engine/step4.js');
+  for (const [v, want] of [[34.6, 34.6], ['34,6', 34.6], ['1.234,5', 1234.5], ['1,234.5', 1234.5], ['0,5', 0.5], ['8,8334', 8.8334], ['1,234', 1234], ['USD 265', null], ['', null]]) eq(`parseLocaleNum ${JSON.stringify(v)}`, parseLocaleNum(v), want);
+  const P9 = '2026-09';
+  const sr = (d, inv, prod, qty, usd) => ({ invDate: d, customer: 'C', product: prod, prodName: 'N', fx: 26000, qty, unitPrice: usd / qty, amtUSD: usd, amtVND: usd * 26000, invNo: inv, lineNo: '', tranType: 'NORMAL SALE' });
+  const jan = S4.validateSaveSales({ mode: 'YTD', rows: [sr(ser(2026, 1, 10), 'J1', 'OLD', 10, 100), sr(ser(2026, 8, 10), 'A1', 'A', 10, 200)] }, { rows: [] }, '2026-08', { book: 'SALES' }).db;
+  const sepOnly = () => ({ mode: 'YTD', rows: [sr(ser(2026, 9, 22), 'S1', 'A', 5, 105)] });
+  let err = ''; try { S4.validateSaveSales(sepOnly(), jan, P9, { book: 'SALES' }); } catch (e) { err = e.message; }
+  eq('YTD sales file starting in September is refused', /XOÁ/.test(err) && /MONTHLY/.test(err), true);
+  eq('YTD guard shows in the save preview (before the confirm dialog)', !!S4.salesSavePreview(sepOnly(), jan, P9, { book: 'SALES' }).block, true);
+  eq('YTD guard: earlier months are untouched', jan.rows.length, 2);
+  const mo = S4.validateSaveSales({ ...sepOnly(), mode: 'MONTHLY' }, jan, P9, { book: 'SALES' }).db;
+  eq('MONTHLY September keeps January–August', mo.rows.map((r) => r.invNo).sort(), ['A1', 'J1', 'S1']);
+  const full = S4.validateSaveSales({ mode: 'YTD', rows: [sr(ser(2026, 1, 10), 'J1', 'OLD', 10, 100), sr(ser(2026, 9, 22), 'S1', 'A', 5, 105)] }, jan, P9, { book: 'SALES' }).db;
+  eq('YTD file from January still replaces the whole year', full.rows.map((r) => r.invNo).sort(), ['J1', 'S1']);
+  eq('YTD guard does not apply to the returns book', S4.ytdStartGap('YTD', 'RETURNS', ser(2026, 6, 1), P9), '');
+  const step2 = { pc: ['A', 'NEW', 'LATE', 'TXT', 'OLD'].map((p, i) => ({ erp: 'O', pcNo: 'PC-2609-' + i, prod: p, rowIdx: i })) };
+  const so = [
+    { active: 'Y', product: 'NEW', soDate: ser(2026, 9, 3), price: '34,6' },
+    { active: 'Y', product: 'LATE', soDate: ser(2026, 10, 3), price: 50 },
+    { active: 'Y', product: 'TXT', soDate: null, price: 'USD 12' },
+    { active: 'Y', product: 'A', soDate: ser(2026, 9, 1), price: 99 },
+  ];
+  const before = JSON.stringify(mo);
+  const r = S4.updatePriceMaster({ salesDB: mo, so, manual: [], step2, period: P9 });
+  eq('Price Master does not modify the Sales Database', JSON.stringify(mo), before);
+  const pm = Object.fromEntries(r.pm.rows.map((x) => [x.product, x]));
+  const chk = Object.fromEntries(r.so.map((x) => [x.product, x.check]));
+  eq('SO price typed "34,6" is 34.6', [pm.NEW.finalPrice, pm.NEW.finalSource], [34.6, 'SALES ORDER']);
+  eq('SO used → check says USED', chk.NEW, 'USED - FINAL PRICE (SALES ORDER)');
+  eq('SO after period → PM BLOCK and check is not "USED"', [pm.LATE.status, chk.LATE], ['BLOCK - SO AFTER PERIOD', 'BLOCK - SO AFTER PERIOD (NOT USED AS PRICE)']);
+  eq('SO price text that is not a number is reported', [chk.TXT, pm.TXT.status], ['SKIPPED - UNIT PRICE USD IS NOT A NUMBER', 'MISSING PRICE']);
+  eq('actual sales keep priority over SO', [pm.A.finalSource, chk.A], ['CURRENT MONTH ACTUAL', 'NOT USED - ACTUAL SALES / MANUAL PRICE HAS PRIORITY']);
+  eq('January actual still prices OLD after a MONTHLY September save', pm.OLD.finalSource, 'LATEST ACTUAL 202601');
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
