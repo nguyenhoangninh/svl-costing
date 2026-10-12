@@ -149,7 +149,7 @@ export function view3b(el) {
         A.audit('3B INPUT EDIT', `${row.key} · ${key} = ${val}`); A.markDirty('wipadj', 'audit');
       } });
   } else if (tab === 'control') {
-    if (!w.control) { box.innerHTML = A.emptyNote('Chưa BUILD. Bấm “1 · BUILD / REFRESH”.'); return; }
+    if (!w.control) { box.innerHTML = A.emptyNote(c.noNegative ? 'Kỳ này STEP 3A không có vật tư WIP âm (CHECK NEGATIVE) – không cần BUILD / APPLY. Chuyển sang STEP 4.' : 'Chưa BUILD. Bấm “1 · BUILD / REFRESH”.'); return; }
     const cols = [{ key: 'code', label: 'Material Code', width: 120 }, { key: 'desc', label: 'Material Description', width: 240 }, { key: 'erp', label: 'ERP', width: 50 }, { key: 'basisQty', label: 'Adj Basis Qty', type: 'qty', width: 110 }, { key: 'basisAmt', label: 'Adj Basis Amount', type: 'num', width: 130 },
       { key: 'method', label: 'Method', width: 120 }, { key: 'nDetail', label: 'Detail', type: 'int', width: 60 }, { key: 'share', label: 'Share', type: 'pct', width: 100 }, { key: 'apc', label: 'PC Alloc Amount', type: 'num', width: 130 }, { key: 'adir', label: '632 Route Amount', type: 'num', width: 120 },
       { key: 'status', label: 'Control Status', type: 'status', width: 150 }, { key: 'decision', label: 'Reviewer Decision', width: 120, editable: true, options: ['APPROVE', 'HOLD', 'REVIEW'] }, { key: 'note', label: 'Reviewer Note', width: 200, editable: true },
@@ -193,7 +193,7 @@ export function do3bSync() {
 }
 export function do3bBuild() {
   const S = A.S; const w = S.d.wipadj || (S.d.wipadj = { input: [] });
-  if (!(w.input || []).length) { const chk = B.inputSyncCheck([], S.d.step3); if (!chk.neg.length) { A.toast('Không có vật tư CHECK NEGATIVE – kỳ này không cần điều chỉnh WIP.', 'pass'); return; } w.input = B.writeInput([], S.d.step3, false); A.toast(`INPUT trống – đã tự điền ${w.input.length} vật tư WIP âm.`, 'info'); }
+  if (!(w.input || []).length) { const chk = B.inputSyncCheck([], S.d.step3); if (!chk.neg.length) { A.toast('STEP 3A không có vật tư WIP âm (CHECK NEGATIVE) – kỳ này không cần BUILD / APPLY STEP 3B. Chuyển sang STEP 4.', 'pass'); return; } w.input = B.writeInput([], S.d.step3, false); A.toast(`INPUT trống – đã tự điền ${w.input.length} vật tư WIP âm.`, 'info'); }
   w.basis = B.basisOf(w);
   const r = B.runBuild({ erpMap: S.d.erpMap, input: w.input, control: w.control, reg632: w.reg632, basis: w.basis }, { step3: S.d.step3, step2: S.d.step2, datasets: S.d.datasets, period: S.period });
   S.d.erpMap = r.erpMap; Object.assign(w, { engine: r.engine, detail: r.detail, control: r.control, reg632: r.reg632 });
@@ -514,7 +514,7 @@ export function view4(el) {
 export function threeBBlock(S, d3b, { forClose = false } = {}) {
   const d = S.d; if (!d.step3) return '';
   const w = d.wipadj || {};
-  const neg = d.step3.rows.filter((m) => num(m.closingQty) < -0.000001).length;
+  const neg = B.negativeMaterials(d.step3).length; // same definition as SYNC / BUILD (Status = CHECK NEGATIVE)
   const inN = (w.input || []).filter((r) => ttxt(r.code)).length;
   if (neg && !inN) return `${neg} vật tư WIP âm chưa đưa vào STEP 3B – SYNC → BUILD → duyệt (APPROVE / HOLD) → APPLY.`;
   if (!inN) return '';

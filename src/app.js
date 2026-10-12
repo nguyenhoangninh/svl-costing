@@ -1239,8 +1239,8 @@ document.addEventListener('click', async (e) => {
     case 'pull-cloud': await openPeriod(S.period, { preferCloud: true }); break;
     case 'export-all': await exportAll(); break;
     case '3b-sync': P2.do3bSync(); render(); break;
-    case '3b-build': await busy('Đang BUILD STEP 3B…', async () => P2.do3bBuild()); render(); break;
-    case '3b-apply': await busy('Đang APPLY STEP 3B…', async () => P2.do3bApply()); render(); break;
+    case '3b-build': try { await busy('Đang BUILD STEP 3B…', async () => P2.do3bBuild()); } catch (err) { toast('STEP 3B BUILD dừng: ' + (err && err.message || err), 'block'); console.error(err); } render(); break;
+    case '3b-apply': try { await busy('Đang APPLY STEP 3B…', async () => P2.do3bApply()); } catch (err) { toast('STEP 3B APPLY dừng: ' + (err && err.message || err), 'block'); console.error(err); } render(); break;
     case '3b-all': P2.do3bAll(a.dataset.dec); render(); break;
     case 'sales-save': await busy('Đang Validate & Save doanh thu…', async () => P2.doSalesSave()); render(); break;
     case 'pm-update': await busy('Đang cập nhật Price Master…', async () => P2.doPMUpdate()); render(); break;
@@ -1291,6 +1291,12 @@ document.addEventListener('click', async (e) => {
       break;
     default: break;
   }
+});
+// Safety net: an error thrown by an app action must never disappear silently (the screen would just not change).
+window.addEventListener('unhandledrejection', (ev) => {
+  const err = ev.reason; const stack = String((err && err.stack) || '');
+  if (!stack.includes('/src/')) return; // network / Firebase noise is reported by its own handlers
+  setBusy(''); toast('Thao tác dừng do lỗi: ' + ((err && err.message) || err), 'block'); console.error(err);
 });
 document.addEventListener('change', async (e) => {
   if (e.target.id === 'show-hidden') { S.showHidden = e.target.checked; render(); return; }

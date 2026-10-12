@@ -154,6 +154,17 @@ export function step3bControls(x) {
   const { period, input, inputD, engine, engDyn, detail, control, reg632, wf, balancePass, step3, step4Posted } = x;
   const TOLA = 1;
   const inN = (input || []).filter((r) => ttxt(r.code)).length;
+  // No CHECK NEGATIVE material in STEP 3A and nothing in INPUT: STEP 3B has nothing to adjust (no BUILD / APPLY needed).
+  const negN = step3 ? step3.rows.filter((r) => r.status === 'CHECK NEGATIVE').length : 0;
+  if (step3 && step3.period === period && negN === 0 && inN === 0) {
+    const rows0 = [
+      cp('01', 'Kỳ STEP 3A = kỳ báo cáo', period, step3.period, '', 'PASS', '03_WIP_ALLOCATION'),
+      cp('02', 'Vật tư WIP âm (CHECK NEGATIVE) ở STEP 3A', 0, 0, 0, 'PASS', 'Không có vật tư âm – kỳ này không cần điều chỉnh WIP (không BUILD / APPLY)'),
+      cp('03', 'WIP cuối = Closing ERP (không điều chỉnh)', wf ? wf.erpClosing : '', wf ? wf.finalClosing : '', wf ? wf.bridge : '', wf && wf.bridgeStatus === 'PASS' ? 'PASS' : 'CHECK', 'Final Closing WIP'),
+    ];
+    const o0 = overall(rows0, '', '');
+    return { rows: rows0, okText: o0.okText, status: o0.status, next: 'Không có WIP âm – không cần STEP 3B. Chạy STEP 4', approve: 0, holdRev: 0, noNegative: true };
+  }
   const blocksIn = (inputD || []).filter((r) => String(r.check).startsWith('BLOCK')).length;
   const rowsC = control ? control.rows : [];
   const passC = rowsC.filter((r) => r.status === 'PASS').length;

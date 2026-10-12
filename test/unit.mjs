@@ -503,5 +503,24 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('January actual still prices OLD after a MONTHLY September save', pm.OLD.finalSource, 'LATEST ACTUAL 202601');
 }
 
+// ---- v1.14.17 STEP 3B when STEP 3A has no negative WIP; one definition of "negative WIP" for BUILD and the STEP 4 gate
+{
+  const { step3bControls } = await import('../src/engine/controls.js');
+  const { threeBBlock } = await import('../src/views/phase2.js');
+  const P9 = '2026-09';
+  const mk = (rows) => ({ period: P9, runAt: '2026-10-12T16:25:00Z', rows });
+  const okRow = { code: 'RM1', closingQty: 5, closingAmt: 100, status: 'OK' };
+  const tiny = { code: 'RM2', closingQty: -0.00005, closingAmt: 0, status: 'OK' }; // rounding residue: not CHECK NEGATIVE
+  const negRow = { code: 'RM3', closingQty: -3, closingAmt: -50, status: 'CHECK NEGATIVE' };
+  const wf = { erpClosing: 100, finalClosing: 100, bridge: 0, bridgeStatus: 'PASS', approvedAdj: 0, negFinal: 0 };
+  const c0 = step3bControls({ period: P9, input: [], step3: mk([okRow, tiny]), wf, control: null });
+  eq('3B: no CHECK NEGATIVE + empty INPUT → PASS without BUILD', [c0.status, c0.noNegative, c0.rows.some((r) => r.status === 'NOT RUN')], ['PASS', true, false]);
+  const c1 = step3bControls({ period: P9, input: [], step3: mk([okRow, negRow]), wf, control: null });
+  eq('3B: real negative WIP still requires BUILD', c1.status, 'RERUN REQUIRED');
+  const S = (rows, input = []) => ({ d: { step3: mk(rows), wipadj: { input } } });
+  eq('STEP 4 gate: rounding residue is not negative WIP (same rule as BUILD)', threeBBlock(S([okRow, tiny]), null), '');
+  eq('STEP 4 gate: real negative WIP blocks until taken into 3B', /1 vật tư WIP âm/.test(threeBBlock(S([okRow, negRow]), null)), true);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
