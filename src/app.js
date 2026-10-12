@@ -13,7 +13,7 @@ import * as P3 from './views/phase3.js';
 import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
-import { step2ReportSheets } from './engine/step2report.js';
+import { step2ReportSheets, ruleSummary, ruleOf } from './engine/step2report.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
@@ -563,7 +563,7 @@ async function importERP(files) {
   if (plan.error) { planEl.innerHTML = `<div class="alert block"><b>Import bị chặn.</b> ${esc(plan.error)}</div>`; return; }
   if (plan.noToken && plan.noToken.length) toast(`${plan.noToken.length} file không có kỳ (YYMM) trong tên: ${plan.noToken.slice(0, 3).join(', ')}${plan.noToken.length > 3 ? '…' : ''}. Hệ thống sẽ kiểm tra ngày từng dòng sau khi import.`, 'review');
   const items = Object.entries(plan.slots);
-  let ok = 0, errs = [], nNew = 0, nRep = 0;
+  let ok = 0, errs = [], nNew = 0, nRep = 0; const warns = [];
   await busy('Đang đọc file ERP…', async () => {
     let i = 0;
     for (const [k, f] of items) {
@@ -577,6 +577,11 @@ async function importERP(files) {
         ok++; prior ? nRep++ : nNew++;
         S.dirty.add('ds:' + k);
         audit(`${prior ? 'REPLACE' : 'NEW'} ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${ds.status} · ${ds.dataRows} dòng`);
+        if (ds.warnings) {
+          const w = ds.warnings, shown = w.zeroCostMaterials.slice(0, 40).join(', ') + (w.zeroCostMaterials.length > 40 ? `… (+${w.zeroCostMaterials.length - 40} mã)` : '');
+          warns.push(`${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 (${w.zeroCostMaterials.length} vật tư: ${shown}). STEP 3B (basis AMOUNT) sẽ chặn các vật tư có tổng = 0.`);
+          audit(`WARN ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${w.zeroCostLines} dòng Total Cost = 0 · ${w.zeroCostMaterials.length} vật tư`);
+        }
       } catch (e) {
         const c = k.split('-'); delete S.d.datasets[k]; S.dirty.add('ds:' + k);
         S.d.importLog[k] = { status: 'ERROR', error: e.message, fileName: f.name, importedAt: nowISO(), dataRows: 0 };
@@ -590,7 +595,8 @@ async function importERP(files) {
   const msg = [`Đã import ${ok}/${items.length} báo cáo (mới ${nNew}, thay thế ${nRep}).`];
   if (plan.dups.length) msg.push('Trùng: ' + plan.dups.join('; '));
   if (plan.skipped.length) msg.push('Bỏ qua: ' + plan.skipped.join('; '));
-  $('#plan').innerHTML = `<div class="alert ${errs.length ? 'block' : 'pass'}">${msg.map(esc).join('<br>')}${errs.length ? '<br><b>Lỗi:</b><br>' + errs.map(esc).join('<br>') : ''}${ok ? '<br>Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.' : ''}</div>`;
+  if (warns.length) msg.push('Cảnh báo (đã import):', ...warns);
+  $('#plan').innerHTML = `<div class="alert ${errs.length ? 'block' : 'pass'}">${msg.map(esc).join('<br>')}${errs.length ? '<br><b>Lỗi — file bị chặn, chưa import:</b><br>' + errs.map(esc).join('<br>') : ''}${ok ? '<br>Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.' : ''}</div>`;
 }
 
 // ---------- STEP 2 ----------
@@ -623,12 +629,28 @@ VIEWS.step2 = (el) => {
     <h2>Checkpoint</h2>${cpTable(st.s2c.rows)}
     <details><summary>Quy tắc phân bổ</summary><table class="cp"><thead><tr><th>Ưu tiên</th><th>Nguồn</th><th>Điều kiện nguồn</th><th>Đích</th><th>Nhóm lô đích</th><th>Tiêu thức</th><th>Xử lý</th></tr></thead><tbody>
       ${STEP2_RULES.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td><td>${esc(r[5])}</td><td>${esc(r[7])}</td></tr>`).join('')}</tbody></table></details>
-    <h2>Chi tiết phân bổ</h2><div id="t-detail"></div>
+    <h2>Số tiền theo rule</h2><p class="muted">Số tiền đổ vào lô PC theo từng quy tắc. Dự phòng = R4c (O còn lại → mọi lô O) và R6 (S khác → chia T+O), được tính vào ngưỡng 5%.</p><div id="t-rule"></div>
+    <h2>Chi tiết phân bổ</h2><p class="muted"><label>Lọc theo rule: <select id="s2-rule"><option value="">Tất cả rule</option>${ruleSummary(s2).map((r) => `<option value="${esc(r.code)}">${esc(r.code)} · ${esc(r.label)}</option>`).join('')}</select></label></p><div id="t-detail"></div>
     <h2>Kết quả theo lô PC-P (T và O)</h2><div id="t-pc"></div>` : emptyNote('Chưa có kết quả. Cần đủ PC-P-T, PC-P-O và STOCK OUT T/S/O rồi bấm Chạy STEP 2.')}
   </section>`;
   if (s2) {
     const dc = STEP2_DETAIL_HEADERS.map((h, i) => ({ key: i, label: h, type: [4, 13, 15].includes(i) ? 'num' : i === 14 ? 'pct' : i === 3 ? 'int' : i === 16 ? 'status' : 'text', width: [11].includes(i) ? 260 : [17].includes(i) ? 180 : [4, 13, 15].includes(i) ? 140 : 110 }));
-    mountTable($('#t-detail'), { columns: dc, rows: s2.detail, filterKey: 16, totals: [15], height: 460, onExport: exportTable('03_STOCK_OUT_ALLOCATION', dc) });
+    const rs = ruleSummary(s2);
+    mountTable($('#t-rule'), { columns: [
+      { key: 0, label: 'Rule', width: 70 }, { key: 1, label: 'Mô tả', width: 380 }, { key: 2, label: 'Loại', width: 110 },
+      { key: 3, label: 'Nhóm nguồn', type: 'int', width: 110 }, { key: 4, label: 'Số dòng PC', type: 'int', width: 110 },
+      { key: 5, label: 'Stock Out nguồn', type: 'num', width: 150 }, { key: 6, label: 'Đã phân bổ vào lô', type: 'num', width: 160 }, { key: 7, label: '% tổng phân bổ', type: 'pct', width: 130 },
+    ], rows: rs.map((r) => [r.code, r.label, r.kind, r.groups, r.lines, r.src, r.alloc, r.share]), height: 280,
+      onExport: exportTable('02_STEP2_SO_TIEN_THEO_RULE', [{ key: 0, label: 'Rule', width: 70 }, { key: 1, label: 'Mô tả', width: 380 }, { key: 2, label: 'Loại', width: 110 }, { key: 3, label: 'Nhóm nguồn', width: 110 }, { key: 4, label: 'Số dòng PC', width: 110 }, { key: 5, label: 'Stock Out nguồn', width: 150 }, { key: 6, label: 'Đã phân bổ vào lô', width: 160 }, { key: 7, label: '% tổng phân bổ', width: 130 }]) });
+    // Detail table: column 18 = rule code (derived from the note), filtered by the rule selector
+    const dcRule = [...dc, { key: 18, label: 'Rule', width: 80 }];
+    const mountDetail = () => {
+      const code = ($('#s2-rule') || {}).value || '';
+      const rows = s2.detail.map((r) => [...r, ruleOf(r[17]).code]).filter((r) => !code || r[18] === code);
+      mountTable($('#t-detail'), { columns: dcRule, rows, filterKey: 16, totals: [15], height: 460, onExport: exportTable('03_STOCK_OUT_ALLOCATION', dcRule) });
+    };
+    mountDetail();
+    $('#s2-rule').addEventListener('change', mountDetail);
     const pc = [
       { key: 'erp', label: 'Hệ', width: 50 }, { key: 'pcNo', label: 'PC No.', width: 120 }, { key: 'mo', label: 'MO No.', width: 120 }, { key: 'prod', label: 'Product Code', width: 150 },
       { key: 'name', label: 'Product Name', width: 260 }, { key: 'loc', label: 'Location', width: 100 }, { key: 'qty', label: 'SL hoàn thành', type: 'qty', width: 100 },

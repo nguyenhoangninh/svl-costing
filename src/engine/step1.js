@@ -118,11 +118,49 @@ export function buildDataset(grid, fileName, period) {
     if (withNumbers) throw new Error(`${report}-${erp}: tên file ghi NO DATA nhưng có ${withNumbers} dòng có số liệu. Đổi tên file (bỏ NO DATA) hoặc xuất lại báo cáo.`);
     rows.length = 0; dataRows = 0;
   }
+  const issues = report === 'PC-M' && rows.length ? pcmIssueGate(header, rows, headerRow, erp) : null;
   return {
     key: dsKey(erp, report), erp, report, period,
     fileName: fileBaseName(fileName), importedAt: nowISO(),
     headerRow, status: dataRows === 0 ? 'NO DATA' : 'IMPORTED', dataRows, header, rows,
+    ...(issues && issues.zeroLines ? { warnings: { zeroCostLines: issues.zeroLines, zeroCostMaterials: issues.zeroMats } } : {}),
   };
+}
+
+/**
+ * v1.14.18 — PC-M quality gate at IMPORT.
+ * BLOCK (file not imported): a negative Quantity or Total Cost, or a text value in either column.
+ * WARN (file imported, list returned): Quantity ≠ 0 with Total Cost = 0. Such lines exist in ERP exports of earlier
+ * months too, so they are reported, not refused; STEP 3B (basis AMOUNT) still blocks any material whose total ≤ 0.
+ * Footer / total rows (no Material Code) are ignored.
+ * @returns {zeroLines, zeroMats} for the warning (empty when clean)
+ */
+export function pcmIssueGate(header, rows, headerRow, erp) {
+  const cQty = headerCol(header, 'Quantity'), cAmt = headerCol(header, 'Total Cost');
+  const cMat = headerCol(header, 'Material Code'), cPC = headerCol(header, 'PC No.');
+  if (cQty < 0 || cAmt < 0 || cMat < 0) return; // header errors are reported by requiredHeaders()
+  const isBlank = (v) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+  const neg = [], zero = [], text = [];
+  rows.forEach((r, i) => {
+    const mat = r[cMat];
+    if (isBlank(mat)) return;
+    const q = r[cQty], a = r[cAmt];
+    const line = { row: headerRow + i + 1, pc: ttxt(r[cPC]), mat: ttxt(mat), q, a };
+    if (!isBlank(q) && typeof q !== 'number') { text.push(line); return; }
+    if (!isBlank(a) && typeof a !== 'number') { text.push(line); return; }
+    const qn = isBlank(q) ? 0 : q, an = isBlank(a) ? 0 : a;
+    if (qn < 0 || an < 0) neg.push(line);
+    else if (qn !== 0 && an === 0) zero.push(line);
+  });
+  const mats = (ls) => [...new Set(ls.map((l) => l.mat))];
+  if (neg.length || text.length) {
+    const codes = (ls) => mats(ls).join(', ');
+    const parts = [];
+    if (neg.length) parts.push(`${neg.length} dòng ÂM (dòng Excel ${neg.slice(0, 5).map((l) => l.row).join(', ')}${neg.length > 5 ? '…' : ''}; vật tư ${codes(neg)})`);
+    if (text.length) parts.push(`${text.length} dòng Quantity/Total Cost là chữ, không phải số (dòng Excel ${text.slice(0, 5).map((l) => l.row).join(', ')})`);
+    throw new Error(`PC-M-${erp}: file bị CHẶN, chưa import. ${parts.join('. ')}. Sửa trên ERP rồi xuất lại PC-M.`);
+  }
+  return { zeroLines: zero.length, zeroMats: mats(zero) };
 }
 
 /**

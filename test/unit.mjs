@@ -522,5 +522,97 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('STEP 4 gate: real negative WIP blocks until taken into 3B', /1 vật tư WIP âm/.test(threeBBlock(S([okRow, negRow]), null)), true);
 }
 
+// ---- v1.14.18 STEP 3B ACTUAL_USAGE AMOUNT: every material with PC-M Total Cost ≤ 0 is reported in one error (no stop at the first)
+{
+  const H = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const s2 = { period: P2, pc: [{ erp: 'T', pcNo: 'PC-1', prod: 'A', name: 'A', rmIncl: 100, rowIdx: 1 }, { erp: 'T', pcNo: 'PC-2', prod: 'B', name: 'B', rmIncl: 100, rowIdx: 2 }] };
+  const dsx = { 'PC-M-T': { header: H, rows: [
+    ['PC-1', 'A', 'A', 'Z1', 1.145, 0], ['PC-2', 'B', 'B', 'Z1', 2, 0],   // Z1: quantity but zero cost → blocked
+    ['PC-1', 'A', 'A', 'OK', 80, 40], ['PC-2', 'B', 'B', 'OK', 20, 60],  // OK: amount basis fine
+    ['PC-1', 'A', 'A', 'Z2', 3, 0],                                       // Z2: zero cost → blocked
+  ] } };
+  const inp = [{ key: 'Z1', erp: 'T', desc: 'z1' }, { key: 'OK', erp: 'T', desc: 'ok' }, { key: 'Z2', erp: 'T', desc: 'z2' }];
+  let err = null; try { rebuildEngine(inp, s2, dsx, P2, 'AMOUNT'); } catch (e) { err = e; }
+  eq('3B AMOUNT: blocked list has all bad materials, not only the first', err && err.blocked.map((b) => b.key), ['Z1', 'Z2']);
+  eq('3B AMOUNT: message names every blocked material', !!err && /Z1[\s\S]*Z2/.test(err.message) && !/OK \(/.test(err.message), true);
+  eq('3B AMOUNT: message does not silently fall back to QTY', !!err && /Không tự fallback sang QTY/.test(err.message), true);
+  eq('3B QTY basis still builds (legacy exception chosen on purpose)', rebuildEngine(inp, s2, dsx, P2, 'QTY').rows.length > 0, true);
+}
+
+// ---- v1.14.18 PC-M gate at IMPORT: negative / zero-cost issue lines block the file (STEP 1), footers are ignored
+{
+  const HP = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const gridOf = (body) => [['PC-M report'], HP, ...body];
+  const thrown = (fn) => { try { fn(); return null; } catch (e) { return e.message; } };
+  const clean = gridOf([['PC-1', 'A', 'A', 'M1', 2, 10], ['PC-1', 'A', 'A', 'M2', 0, 0], [null, null, null, null, 999, 999]]);
+  eq('PC-M gate: clean file (incl. zero-qty zero-cost and footer total) imports', buildDataset(clean, 'PC-M-O-202609.xlsx', P2).status, 'IMPORTED');
+  const neg = thrown(() => buildDataset(gridOf([['PC-1', 'A', 'A', 'MNEG', 2, -10], ['PC-1', 'A', 'A', 'M1', 2, 10]]), 'PC-M-O-202609.xlsx', P2));
+  eq('PC-M gate: negative Total Cost blocks the file', !!neg && /CHẶN/.test(neg) && /ÂM/.test(neg) && neg.includes('MNEG'), true);
+  const negQ = thrown(() => buildDataset(gridOf([['PC-1', 'A', 'A', 'MQ', -1, 10]]), 'PC-M-T-202609.xlsx', P2));
+  eq('PC-M gate: negative Quantity blocks the file', !!negQ && negQ.includes('MQ'), true);
+  const zds = buildDataset(gridOf([['PC-1', 'A', 'A', 'Z1', 1.145, 0], ['PC-2', 'B', 'B', 'Z1', 2, 0], ['PC-1', 'A', 'A', 'OK', 80, 40]]), 'PC-M-T-202609.xlsx', P2);
+  eq('PC-M gate: qty ≠ 0 with zero cost is a WARNING, file still imports', [zds.status, zds.warnings.zeroCostLines, zds.warnings.zeroCostMaterials], ['IMPORTED', 2, ['Z1']]);
+  eq('PC-M gate: clean file carries no warning', buildDataset(clean, 'PC-M-O-202609.xlsx', P2).warnings, undefined);
+  const txt = thrown(() => buildDataset(gridOf([['PC-1', 'A', 'A', 'T1', '34,6', 10]]), 'PC-M-O-202609.xlsx', P2));
+  eq('PC-M gate: text quantity blocks the file', !!txt && /không phải số/.test(txt), true);
+  const pcpNeg = [['PC No.', 'Product Code', 'Current Complete Qty', 'Total Cost'], ['PC-1', 'A', 5, -100]];
+  eq('PC-M gate: other reports (PC-P) are not gated by this rule', buildDataset(pcpNeg, 'PC-P-O-202609.xlsx', P2).status, 'IMPORTED');
+}
+
+// ---- v1.14.18 STEP 2 per-rule amounts and checkpoint 11 in whole VND
+{
+  const { ruleSummary } = await import('../src/engine/step2report.js');
+  const { step2Controls } = await import('../src/engine/controls.js');
+  const P9 = '2026-09';
+  const D18 = (erp, key, type, src, tErp, pc, alloc, status, note) => [erp, key, type, 1, src, key, tErp, 'SP', pc, '', '', '', '', 0, 0, alloc, status, note];
+  const detail = [
+    D18('T', 'DOONA', 'Customer', 100, 'T', 'PC-A', 60, 'ALLOCATED', 'DOONA -> T SP*.'),
+    D18('T', 'DOONA', 'Customer', 100, 'T', 'PC-B', 40, 'ALLOCATED', 'DOONA -> T SP*.'),
+    D18('O', 'XX', 'Job', 30, 'O', 'PC-C', 30, 'FALLBACK RM COST', 'O other -> all O theo PC RM Cost.'),
+    D18('S', 'Y', 'Loc', 10, 'T+O', 'PC-D', 10, 'FALLBACK RM COST', 'S other -> T+O theo PC RM Cost.'),
+  ];
+  const s2 = { period: P9, runAt: '', status: 'PASS', detail, summary: [], pc: [], fallbackApproval: null, total: { src: 140, alloc: 140, unalloc: 0, diff: 0, status: 'PASS' } };
+  const rs = ruleSummary(s2);
+  const byCode = Object.fromEntries(rs.map((r) => [r.code, r]));
+  eq('ruleSummary: R1 amount = 100 over 2 lots', [byCode.R1.alloc, byCode.R1.lines, byCode.R1.groups], [100, 2, 1]);
+  eq('ruleSummary: R4c and R6 amounts', [byCode.R4c.alloc, byCode.R6.alloc], [30, 10]);
+  eq('ruleSummary: rule amounts add to total allocated', rs.reduce((a, r) => a + r.alloc, 0), 140);
+  eq('ruleSummary: share of total allocated', Math.round(byCode.R1.share * 1000) / 1000, 0.714);
+  const c = step2Controls({ period: P9, step2: s2, register: null, latestImport: '' }).rows;
+  const r11 = c.find((r) => r.no === '11');
+  eq('CP11: expected = 5% threshold, actual = fallback, diff = excess, all whole VND', [r11.expected, r11.actual, r11.diff], [7, 40, 33]);
+  eq('CP11: fallback above 5% needs approval', r11.status, 'BLOCK - APPROVAL');
+  eq('CP11: per-rule sub-rows show the fallback rules', c.filter((r) => /^11\./.test(r.no)).map((r) => [r.no, r.actual]), [['11.R4c', 30], ['11.R6', 10]]);
+  eq('CP11: sub-rows add up to the fallback amount', c.filter((r) => /^11\./.test(r.no)).reduce((a, r) => a + r.actual, 0), 40);
+}
+
+// ---- v1.14.18 R4c (O còn lại → mọi lô O) is counted in the broad fallback, end-to-end through runStep2 (default FAMILY rule)
+{
+  const { runStep2 } = await import('../src/engine/step2.js');
+  const { fallbackAlloc } = await import('../src/engine/controls.js');
+  const { ruleSummary } = await import('../src/engine/step2report.js');
+  const { buildDataset: bd } = await import('../src/engine/step1.js');
+  const ser8 = (d) => (Date.UTC(2026, 7, d) - Date.UTC(1899, 11, 30)) / 86400000;
+  const HPx = ['PC No.', 'Document Group', 'Date', 'Status', 'MO No.', 'Sub-MO', 'Product Code', 'Product Name', 'Location', 'Unit', 'Current Complete Qty', 'Total Cost'];
+  const HSOx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Base Unit', 'Base Qty', 'Base Unit Cost', 'Total Cost', 'MO No.', 'DIVISION', 'JOB CODE', 'CUSTOMER'];
+  const HSSx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Quantity', 'Unit', 'Location', 'Base Unit Cost', 'Total Cost', 'Remark', 'MO No.', 'Doc Ref 1', 'DIVISION', 'JOB CODE'];
+  const HSTx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Unit', 'Quantity', 'Total Cost', 'Customer', 'MO No.'];
+  const dsR = {};
+  const addR = (name, h, rows) => { const d = bd([h, ...rows], `${name}-202608.xlsx`, P2); dsR[d.key] = d; };
+  addR('PC-P-O', HPx, [
+    ['PC-O1', 'PC', ser8(3), 'Completed', 'MO-1', 'MO-1-001', 'OLX-300', 'Bag', 'MKX1', 'PCS', 1, 100],
+    ['PC-O2', 'PC', ser8(3), 'Completed', 'MO-2', 'MO-2-001', 'OLX-400', 'Belt', 'VEX1', 'PCS', 1, 300],
+  ]);
+  addR('PC-P-T', HPx, []);
+  addR('STOCK OUT-O', HSOx, [['SO-O-1', 'Stock Out', 'G', 'Completed', ser8(7), null, 1, '300001', 'Material', 'RM', 'MKX1', 'PC', -10, 5, -50, null, 'DIV', 'ZZ-UNKNOWN', null]]);
+  addR('STOCK OUT-T', HSTx, []);
+  addR('STOCK OUT-S', HSSx, []);
+  const sR = runStep2(dsR, P2);
+  const fb = fallbackAlloc(sR);
+  const r4c = ruleSummary(sR).find((r) => r.code === 'R4c');
+  eq('R4c: the unmatched O job code is allocated to all O lots', [r4c && r4c.alloc, r4c && r4c.lines], [50, 2]);
+  eq('R4c: counted in the broad fallback amount (checkpoint 11)', fb, 50);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

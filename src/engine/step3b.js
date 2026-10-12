@@ -192,13 +192,18 @@ export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AM
   }
   const rows = []; let nUse = 0, nNo = 0;
   const row = (key, erp, pc, prod, pname, qLot, qTot, bLot, bTot, share, note, type) => rows.push({ key, desc: inpDesc.get(key), erp, pc, prod, pname, qLot, qTot, bLot, bTot, share, note, type });
+  // Gom TẤT CẢ vật tư lỗi (không dừng ở vật đầu tiên) để người dùng xử lý một lần.
+  const blocked = [];
   for (const key of order) {
     const erp = inpErp.get(key); const d = useD.get(key);
     let totQ = 0, totA = 0; if (d) for (const v of d.values()) { totQ += v[3]; totA += v[4]; }
     const amountValid = !!d && totA > 0 && [...d.values()].every((v) => v[4] >= 0);
     if (basis === 'AMOUNT' && totQ > 0 && !amountValid) {
-      throw new Error(`Material ${key}: ACTUAL_USAGE đang chọn AMOUNT nhưng PC-M Total Cost không đủ cơ sở dương. Không tự fallback sang QTY; sửa dữ liệu PC-M hoặc chọn QTY như một ngoại lệ legacy có chủ ý.`);
+      let zeroLines = 0; for (const v of d.values()) if (v[4] <= 0) zeroLines++;
+      blocked.push({ key, erp, desc: inpDesc.get(key), qty: totQ, amt: totA, lines: d.size, zeroLines, pcs: [...new Set([...d.values()].map((v) => v[0]))] });
+      continue;
     }
+    if (blocked.length) continue;
     const byAmt = basis === 'AMOUNT' && amountValid;
     if (byAmt) {
       nUse++;
@@ -212,6 +217,12 @@ export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AM
       row(key, erp, '', '', '', 0, 0, 0, tot, 0, 'No exact-code PC-M consumption in current period', 'METHOD');
       for (const it of pcp[erp] || []) row(key, erp, it[0], it[1], it[2], 0, 0, it[3], tot, tot !== 0 ? it[3] / tot : 0, 'Fallback: PC amount ratio within same ERP', 'ERP');
     }
+  }
+  if (blocked.length) {
+    const list = blocked.map((b) => `${b.key} (${b.erp}, ${b.zeroLines}/${b.lines} dòng PC-M Total Cost ≤ 0, SL ${Math.round(b.qty * 1000) / 1000})`).join('; ');
+    const err = new Error(`ACTUAL_USAGE đang chọn AMOUNT nhưng ${blocked.length} vật tư có PC-M Total Cost tổng ≤ 0 (SL > 0): ${list}. Không tự fallback sang QTY. Sửa PC-M trên ERP rồi import lại, hoặc chọn QTY như một ngoại lệ legacy có chủ ý.`);
+    err.blocked = blocked;
+    throw err;
   }
   if (!rows.length) throw new Error('No ENGINE rows could be built.');
   return { period, rows, nUse, nNo, basis, rebuiltAt: nowISO() };

@@ -1,5 +1,6 @@
 // Control Center checkpoints (port of 00_CONTROL_CENTER formulas rows 9-70)
 import { ttxt, num, headerCol, headerColAny, isNumeric, cellYM, cellDateSerial } from './util.js';
+import { ruleSummary } from './step2report.js';
 
 const abs = Math.abs;
 export const FALLBACK_REVIEW = 0.05;
@@ -99,7 +100,16 @@ export function step2Controls(st) {
   const needFbApproval = Math.abs(fb) > 1 && fr > FALLBACK_REVIEW;
   const ap = s2.fallbackApproval;
   const fbApproved = !!(ap && Math.abs(num(ap.amount) - fb) <= 1 && Math.abs(num(ap.totalAlloc) - num(t.alloc)) <= 1);
-  if (s2.detail) rows.push(cp('11', 'Stock Out phân bổ theo quy tắc dự phòng rộng', needFbApproval ? 'APPROVAL REQUIRED' : 'INFO', fb, fr, needFbApproval ? (fbApproved ? 'REVIEW - APPROVED' : 'BLOCK - APPROVAL') : 'INFO', `O không khớp Job Code → mọi lô O; S khác → chia đều T+O. > ${FALLBACK_REVIEW * 100}% phải được Quản trị xác nhận kèm lý do`));
+  // v1.14.18: amounts in whole VND (no fractional display); the ratio is shown as text, the threshold as an amount.
+  if (s2.detail) {
+    const threshold = Math.round(FALLBACK_REVIEW * num(t.alloc)), fbR = Math.round(fb);
+    const pctTxt = `${(fr * 100).toFixed(2).replace('.', ',')}%`;
+    rows.push(cp('11', 'Stock Out phân bổ theo quy tắc dự phòng rộng', threshold, fbR, fbR - threshold, needFbApproval ? (fbApproved ? 'REVIEW - APPROVED' : 'BLOCK - APPROVAL') : 'INFO', `Kỳ vọng = ngưỡng ${FALLBACK_REVIEW * 100}% × tổng đã phân bổ; Chênh lệch = số tiền vượt ngưỡng (VND). Tỷ lệ thực tế ${pctTxt}. Vượt ngưỡng phải được Quản trị xác nhận kèm lý do`));
+    // broad rules only (R4c = O còn lại → mọi lô O, R6 = S khác → T+O): the same amount as fallbackAlloc
+    for (const r of ruleSummary(s2).filter((x) => x.code === 'R4c' || x.code === 'R6')) {
+      rows.push(cp(`11.${r.code}`, `${r.code} · ${r.label}`, '', Math.round(r.alloc), '', 'INFO', `${r.lines} dòng PC · ${(r.share * 100).toFixed(2).replace('.', ',')}% tổng đã phân bổ`));
+    }
+  }
   return { rows, ...overall(rows, 'Chạy STEP 3 – Material WIP', 'Xử lý các checkpoint STEP 2 rồi chạy lại STEP 2') };
 }
 
