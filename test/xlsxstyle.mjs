@@ -95,5 +95,65 @@ ok('footer shows the app and page numbers', String(wsSum.headerFooter?.oddFooter
 // Excel does not allow sheet names over 31 characters
 ok('all sheet names fit Excel limits', back.worksheets.every((w) => w.name.length <= 31));
 
+// ---- array sheets (table exports, full-period export, import templates) ----
+const { buildStyledWorkbook: build2 } = await import(path.join(root, 'src/ui/xlsxstyle.js'));
+const aoaSheets = [
+  { name: 'LO_TEST', title: 'LO TEST · kỳ 2026-10', subtitle: 'SVL – test', cols: [12, 16, 14], aoa: [
+    ['Mã', 'Số tiền', 'Trạng thái', 'Ngày'],
+    ['A1', 1234.5, 'PASS', 46000],
+    ['A2', -0.0000001, 'CHECK', ''],
+    ['A3', 2000, 'FALLBACK RM COST', '2026-10-12T09:19:00.000Z'],
+  ] },
+  { name: 'TEMPLATE', keep: true, header: 4, aoa: [
+    ['SVL_FG_OPENING_TEMPLATE', 'v1', 'Mẫu nhập liệu'],
+    ['Opening Period', '', '2026-10'],
+    ['Ghi chú dài dòng ' + 'x'.repeat(80)],
+    ['PC No.', 'Layer Date', 'Qty', 'Total Amount'],
+    ['PC-1', '2026-09-30', 5, 100],
+    ['PC-2', '', 7, 200],
+  ] },
+  { name: 'META', aoa: [
+    ['STOCK OUT ALLOCATION TO PC-P'],
+    ['Reporting Period', '2026-10', '', 'Run Time', '2026-10-12T09:19:00.000Z'],
+    [],
+    ['Source ERP', 'Source Stock Out', 'Allocated', 'Status', '', ''],
+    ['T', 1000, 1000, 'PASS'],
+  ] },
+];
+const wbA = build2(ExcelJS, aoaSheets, { title: 'aoa' });
+const bufA = Buffer.from(await wbA.xlsx.writeBuffer());
+const backA = XLSX.read(bufA, { type: 'buffer' });
+const rowsOf = (nm) => XLSX.utils.sheet_to_json(backA.Sheets[nm], { header: 1, defval: null, raw: true });
+
+// import templates: every value stays at its original position
+const tplRead = rowsOf('TEMPLATE');
+const tplSrc = aoaSheets[1].aoa;
+ok('template keeps every cell at its position (header on row 4)', tplSrc.every((r, i) => r.every((v, c) => (v === '' ? (tplRead[i]?.[c] ?? null) === null : tplRead[i]?.[c] === v))), JSON.stringify(tplRead.slice(0, 6)));
+ok('template dates are not converted (importer reads text)', tplRead[4]?.[1] === '2026-09-30', String(tplRead[4]?.[1]));
+
+// table export: title on top, header on row 4, numbers and dates styled
+const lo = rowsOf('LO_TEST');
+ok('table export: title row, subtitle, header on row 4', lo[0]?.[0] === 'LO TEST · kỳ 2026-10' && lo[3]?.[0] === 'Mã' && lo[4]?.[0] === 'A1', JSON.stringify(lo.slice(0, 5)));
+const loadBack = async (b) => { const w = new ExcelJS.Workbook(); const u = new VmU8(b.length); u.set(b); await w.xlsx.load(u.buffer); return w; };
+const loWs = (await loadBack(bufA)).getWorksheet('LO_TEST');
+ok('table export: header is filled, body bordered', loWs.getCell(4, 1).fill?.fgColor?.argb === 'FF2F6B5A' && !!loWs.getCell(5, 2).border?.top);
+ok('table export: filter covers the table', !!loWs.autoFilter, JSON.stringify(loWs.autoFilter));
+ok('table export: freeze below header only for long tables (not applied to 3 rows)', !(loWs.views?.[0]?.state === 'frozen'));
+ok('table export: tiny residue shows as dash, not 0.00', String(loWs.getCell(6, 2).numFmt).startsWith('[>=0.005]'), String(loWs.getCell(6, 2).numFmt));
+// 09:19 UTC is 16:19 in Vietnam: the clock time stored in the cell must be 16:19 (ExcelJS returns a Date built on UTC)
+const tsVal = loWs.getCell(7, 4).value;
+const tsHours = tsVal && typeof tsVal.getUTCHours === 'function' ? tsVal.getUTCHours() + tsVal.getUTCMinutes() / 60 : (tsVal % 1) * 24;
+ok('table export: ISO timestamp becomes a Vietnam-time date cell (16:19)', /hh:mm/.test(String(loWs.getCell(7, 4).numFmt)) && Math.abs(tsHours - 16.3167) < 0.02, `${tsVal} ${loWs.getCell(7, 4).numFmt}`);
+ok('table export: PASS / FALLBACK / CHECK are coloured by content', loWs.getCell(5, 3).fill?.fgColor?.argb === 'FFE2F3E8' && loWs.getCell(6, 3).fill?.fgColor?.argb === 'FFFCE6E4' && loWs.getCell(7, 3).fill?.fgColor?.argb === 'FFFFF1CF');
+
+// full-period export style sheet: meta lines keep position; header fill stops at the last header column
+const metaRead = rowsOf('META');
+const txtSheet = [{ name: 'TXT', aoa: [['Mức', 'Nhóm', 'Nội dung'], ['L1', 'G1', 'msg one'], ['L2', 'G2', 'msg two']] }];
+const txtWs = (await loadBack(Buffer.from(await build2(ExcelJS, txtSheet, {}).xlsx.writeBuffer()))).getWorksheet('TXT');
+ok('text-only table: only the first row is a header; data rows keep body styling', txtWs.getCell(1, 1).fill?.fgColor?.argb === 'FF2F6B5A' && txtWs.getCell(2, 1).fill?.fgColor?.argb !== 'FF2F6B5A' && !!txtWs.getCell(3, 1).border?.top);
+ok('full export keeps title / meta / table rows where they were', metaRead[0]?.[0] === 'STOCK OUT ALLOCATION TO PC-P' && metaRead[1]?.[0] === 'Reporting Period' && metaRead[3]?.[0] === 'Source ERP' && metaRead[4]?.[0] === 'T', JSON.stringify(metaRead));
+const wsMeta = (await loadBack(bufA)).getWorksheet('META');
+ok('full export: header fill stops at the last header column (no empty green cells)', wsMeta.getCell(4, 4).fill?.fgColor?.argb === 'FF2F6B5A' && wsMeta.getCell(4, 5).fill?.fgColor?.argb !== 'FF2F6B5A', `${wsMeta.getCell(4, 5).fill?.fgColor?.argb}`);
+
 console.log(`\n${n - bad}/${n} styled export checks passed`);
 if (bad) { console.error(`${bad} FAILED`); process.exit(1); }

@@ -329,17 +329,13 @@ function cpVal(x) {
   return esc(x ?? '');
 }
 
+// Every export is written with the styled workbook (src/ui/xlsxstyle.js). Sheets with keep:true are import templates and keep their cell positions.
 async function exportBook(fileName, sheets) {
-  const X = await xlsx();
-  const wb = X.utils.book_new();
-  for (const s of sheets) {
-    const ws = X.utils.aoa_to_sheet(s.aoa);
-    if (s.cols) ws['!cols'] = s.cols.map((w) => ({ wch: w }));
-    X.utils.book_append_sheet(wb, ws, s.name.slice(0, 31));
-  }
-  X.writeFile(wb, fileName);
+  const when = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false });
+  const subtitle = `SVL – Starry Vietnam Co., Ltd.   ·   Kỳ ${S.period}   ·   ${APP_VERSION.split('·')[0].trim()}   ·   Xuất lúc ${when}`;
+  await exportStyledBook(fileName, sheets, { title: fileName.replace(/\.xlsx$/, ''), subtitle, company: 'SVL – Starry Vietnam Co., Ltd.' });
 }
-const exportTable = (name, columns) => (rows) => exportBook(`${name}_${S.period}.xlsx`, [{ name, aoa: [columns.map((c) => c.label), ...rows.map((r) => columns.map((c) => { const x = Array.isArray(r) ? r[c.key] : r[c.key]; return c.type === 'date' && typeof x === 'number' ? serialToISO(x) : x ?? ''; }))], cols: columns.map((c) => Math.round((c.width || 120) / 7)) }]);
+const exportTable = (name, columns) => (rows) => exportBook(`${name}_${S.period}.xlsx`, [{ name, title: `${name.replace(/_/g, ' ')}`, aoa: [columns.map((c) => c.label), ...rows.map((r) => columns.map((c) => { const x = Array.isArray(r) ? r[c.key] : r[c.key]; return c.type === 'date' && typeof x === 'number' ? serialToISO(x) : x ?? ''; }))], cols: columns.map((c) => Math.round((c.width || 120) / 7)) }]);
 
 // ======================= layout =======================
 const NAV = [
@@ -1210,7 +1206,7 @@ document.addEventListener('click', async (e) => {
     case 'reset-wip':
       if (confirm(`Xoá Opening WIP kỳ ${S.period}? (Không xoá dữ liệu ERP)`)) { S.d.opening = null; audit('OPENING WIP RESET', ''); markDirty('opening', 'audit'); render(); } break;
     case 'template-wip':
-      exportBook('SVL_WIP_Opening_Template.xlsx', [{ name: 'WIP_OPENING', aoa: [['WIP OPENING BALANCE CONTROL'], ['Opening Period', S.period], [], [], ['Material Code', 'Material Name', 'Unit', 'Opening Qty', 'Opening Amount', 'Source', 'Note']] }]); break;
+      exportBook('SVL_WIP_Opening_Template.xlsx', [{ name: 'WIP_OPENING', keep: true, header: 5, aoa: [['WIP OPENING BALANCE CONTROL'], ['Opening Period', S.period], [], [], ['Material Code', 'Material Name', 'Unit', 'Opening Qty', 'Opening Amount', 'Source', 'Note']] }]); break;
     case 'reset-erp': {
       const has = (sc) => Object.keys({ ...S.d.datasets, ...S.d.importLog }).filter((k) => sc === 'ALL' || k.endsWith('-' + sc));
       const sc = (prompt(`Xoá dữ liệu ERP đã import của kỳ ${S.period}.\n\nBước 1/2 – nhập PHẠM VI cần xoá:\n  ALL = cả 3 hệ (${has('ALL').length} báo cáo)\n  T = hệ T (${has('T').length})   S = hệ S (${has('S').length})   O = hệ O (${has('O').length})`, 'ALL') || '').trim().toUpperCase();

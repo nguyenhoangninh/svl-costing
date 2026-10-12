@@ -1,6 +1,7 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.14 (12/10/2026):** Xuất Excel · Mọi file xuất (bảng, kết quả kỳ, Chi tiết / Truy xuất, mẫu đầu kỳ) có định dạng thống nhất: tiêu đề và dòng kỳ, tiêu đề cột tô màu, số có dấu phẩy và số âm trong ngoặc, ngày dd/mm/yyyy, trạng thái tô màu, bộ lọc và khung cố định. Mẫu nhập liệu giữ nguyên vị trí ô. STEP 2 · Tổng hợp có số tiền đã / chưa phân bổ theo đúng 9 quy tắc của màn hình (kèm mã chi tiết R1–R6).
 > **v1.14.13 (12/10/2026):** STEP 2 · File "Xuất Excel tổng hợp phân bổ" trình bày lại: tiêu đề và thông tin kỳ, bảng có viền và màu, số âm trong ngoặc, trạng thái tô màu (PASS xanh, FALLBACK vàng, CHECK / CHƯA PHÂN BỔ đỏ), khung cố định dòng tiêu đề và bộ lọc ở các sheet chi tiết, in A4 ngang vừa một trang chiều rộng. Thư viện ExcelJS được nạp từ lib/exceljs.min.js khi bấm xuất.
 > **v1.14.12 (12/10/2026):** STEP 2 · R4c (Stock Out hệ O, JOB CODE còn lại) và R6 (hệ S, Location khác/trống) chia theo PC RM Cost như các logic khác, thay vì chia đều; trạng thái 'FALLBACK RM COST' vẫn được tính vào ngưỡng 5% của F-12. STEP 2 và STEP 3 phải chạy lại.
 > **v1.14.11 (12/10/2026):** STEP 3 · Điều chỉnh PC-P theo PC-M: chỉ tiêu 08 liệt kê từng PC/sản phẩm lệch, áp dụng đặt Total Cost PC-P bằng PC-M (lưu số gốc, lý do và người thao tác, hoàn tác được); STEP 2 và STEP 3 phải chạy lại sau điều chỉnh.

@@ -1,6 +1,7 @@
 // STEP 2 — Excel summary of the Stock Out allocation (owner request 12/10/2026): logic, totals by source / rule / target,
 // per source group, per PC lot and the full detail. Pure: returns sheets as arrays of rows for exportBook().
 import { num } from './util.js';
+import { STEP2_RULES } from './step2.js';
 
 const RULES = [
   ['DOONA -> T SP*.', 'R1', 'T · Customer DOONA → PC hệ T mã SP*', 'Theo khoá'],
@@ -26,7 +27,7 @@ const RULES = [
   ['Unknown T Customer.', 'RX', 'T · Customer lạ – chưa phân bổ', 'Chưa phân bổ'],
 ];
 export const ruleOf = (note) => { const r = RULES.find(([k]) => String(note || '').startsWith(k)); return r ? { code: r[1], label: r[2], kind: r[3] } : { code: 'RX', label: String(note || ''), kind: 'Chưa phân bổ' }; };
-const M = (v) => ({ v: num(v), t: 'n', z: '#,##0;(#,##0);"-"' }); // money
+const M = (v) => ({ v: num(v), t: 'n', z: '[>=0.5]#,##0;[<=-0.5](#,##0);"-"' }); // money (tiny residues show as "-")
 const P = (v, z = '0.00%') => ({ v: num(v), t: 'n', z }); // percent
 const D = { erp: 0, key: 1, type: 2, rows: 3, src: 4, fam: 5, tErp: 6, tKey: 7, pc: 8, mo: 9, prod: 10, name: 11, loc: 12, cost: 13, pct: 14, alloc: 15, status: 16, note: 17 };
 
@@ -68,6 +69,26 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
   const ver = String(appVersion || '').split('·')[0].trim();
   const subtitle = `SVL – Starry Vietnam Co., Ltd.   ·   Chạy STEP 2 lúc ${when}   ·   ${ver}   ·   Đơn vị: VND`;
   const cnt = (e) => R.groups.filter((g) => g.erp === e);
+  // Quy tắc theo bảng trên màn hình (STEP2_RULES, 9 dòng). Mỗi mã chi tiết (R1…R6) thuộc đúng một dòng màn hình.
+  const SCREEN_OF = { R1: 1, R2: 2, R3: 3, R4: 4, R4a: 5, R4b: 6, R4c: 7, R5a: 8, R5b: 8, R5c: 8, R6: 9 };
+  const screenCodes = (n) => Object.keys(SCREEN_OF).filter((k) => SCREEN_OF[k] === n).join(', ');
+  const acc = new Map();
+  for (const g of R.groups) {
+    const n = SCREEN_OF[g.code] ?? 0;
+    const a = acc.get(n) || { src: 0, alloc: 0, unalloc: 0, groups: 0, lines: 0 };
+    a.src += g.src; a.alloc += g.alloc; a.unalloc += g.unalloc; a.groups += 1; a.lines += g.pcs;
+    acc.set(n, a);
+  }
+  const accOf = (n) => acc.get(n) || { src: 0, alloc: 0, unalloc: 0, groups: 0, lines: 0 };
+  const shareOf = (x) => (R.total ? x / R.total : 0);
+  const screenRows = STEP2_RULES.map(([n, src, cond, , , , , use]) => {
+    const a = accOf(n);
+    return [`${n} · ${src} · ${cond}   (${screenCodes(n)})`, M(a.src), M(a.alloc), M(a.unalloc), P(shareOf(a.src)), a.groups, a.lines, use];
+  });
+  const outside = accOf(0);
+  const fb = [7, 9].map(accOf).reduce((x, a) => ({ src: x.src + a.src, alloc: x.alloc + a.alloc, unalloc: x.unalloc + a.unalloc, groups: x.groups + a.groups, lines: x.lines + a.lines }), { src: 0, alloc: 0, unalloc: 0, groups: 0, lines: 0 });
+  const sumAll = (k) => [...acc.values()].reduce((x, a) => x + a[k], 0);
+
   const sum = [
     { kind: 'section', text: 'A. Đối chiếu Stock Out trong kỳ' },
     { kind: 'kv', rows: [
@@ -80,11 +101,11 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
       rows: (R.summary || []).map((x) => [x.erp, M(x.src), M(x.alloc), M(x.unalloc), M(x.diff), cnt(x.erp).length, cnt(x.erp).reduce((a, g) => a + num(g.rows), 0), x.status]),
       total: ['Tổng', M(T.src), M(T.alloc), M(T.unalloc), M(T.diff), R.groups.length, R.groups.reduce((a, g) => a + num(g.rows), 0), T.status] },
     { kind: 'gap' },
-    { kind: 'section', text: 'C. Theo quy tắc phân bổ' },
-    { kind: 'table', head: ['Quy tắc', 'Stock Out NVL', '% tổng', 'Số nhóm nguồn', 'Số dòng PC nhận', 'Loại'],
-      rows: R.rules.map((x) => [`${x.code} – ${x.rule}`, M(x.src), P(x.pct), x.groups, x.lines, x.kind]),
-      total: ['Tổng', M(R.total), P(R.total ? 1 : 0), R.groups.length, R.rules.reduce((a, x) => a + x.lines, 0), ''],
-      foot: [['Trong đó dự phòng (không khớp đúng khoá)', M(R.fallback), P(R.total ? R.fallback / R.total : 0), '', '', '']] },
+    { kind: 'section', text: 'C. Số tiền theo từng quy tắc (đúng thứ tự bảng quy tắc trên màn hình)' },
+    { kind: 'table', head: ['Quy tắc', 'Stock Out NVL', 'Đã phân bổ', 'Chưa phân bổ', '% tổng', 'Số nhóm nguồn', 'Số dòng PC nhận', 'Xử lý'],
+      rows: [...screenRows, [`Ngoài bảng: R0 (nhóm 0 VND) · RX (Customer lạ)   (${['R0', 'RX'].join(', ')})`, M(outside.src), M(outside.alloc), M(outside.unalloc), P(shareOf(outside.src)), outside.groups, outside.lines, outside.unalloc ? 'Kiểm tra' : '–']],
+      total: ['Tổng', M(sumAll('src')), M(sumAll('alloc')), M(sumAll('unalloc')), P(R.total ? 1 : 0), R.groups.length, sumAll('lines'), ''],
+      foot: [['Trong đó Fallback (quy tắc 7 và 9)', M(fb.src), M(fb.alloc), M(fb.unalloc), P(shareOf(fb.src)), fb.groups, fb.lines, 'Fallback']] },
     { kind: 'gap' },
     { kind: 'section', text: 'D. Hệ nguồn → hệ PC nhận' },
     { kind: 'table', head: ['Hệ nguồn', 'PC hệ T', 'PC hệ O', 'Tổng'],
@@ -106,24 +127,15 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
     { kind: 'para', text: '1. Lấy toàn bộ dòng STOCK OUT trong kỳ của 3 hệ T, S, O. Dòng Item Type = FG (thành phẩm xuất đi rework) bị LOẠI khỏi STEP 2 – chuyển sang Sổ FG Rework (2B / 5B).' },
     { kind: 'para', text: '2. Gom Stock Out NVL theo khoá nguồn: hệ T theo Customer · hệ O theo JOB CODE · hệ S theo Location (DS/DN = DOONA, VE = VETO, MK = MK, còn lại = khác).' },
     { kind: 'para', text: '3. Mỗi nhóm nguồn chọn tập lô PC nhận theo quy tắc dưới (chỉ lô trong PC-P kỳ này, hệ T và hệ O).' },
-    { kind: 'para', text: '4. Chia giá trị nhóm cho các lô nhận theo TỶ LỆ PC RM COST (cột Total Cost của PC-P). Lô có RM ≤ 0 không nhận. Kể cả nhóm dự phòng R4c và R6.' },
+    { kind: 'para', text: '4. Chia giá trị nhóm cho các lô nhận theo TỶ LỆ PC RM COST (cột Total Cost của PC-P), kể cả nhóm dự phòng. Lô có RM ≤ 0 không nhận. Xử lý Allocate = khớp đúng khoá; Fallback = không khớp khoá, chia cho mọi lô của nhóm lô đích (quy tắc 7 và 9, tính vào ngưỡng 5% của F-12).' },
     { kind: 'para', text: '5. RM của lô = PC RM Cost + Stock Out được phân bổ → STEP 3 (WIP) và STEP 4 (giá thành lô). Kiểm tra: nguồn = đã phân bổ + chưa phân bổ.' },
     { kind: 'gap' },
-    { kind: 'section', text: 'Bảng quy tắc phân bổ' },
-    { kind: 'table', head: ['Mã', 'Hệ nguồn', 'Điều kiện nhóm nguồn', 'Hệ PC nhận', 'Lô PC được nhận', 'Cơ sở chia', 'Ghi chú'], filter: false, rows: [
-      ['R1', 'T', 'Customer = DOONA', 'T', 'PC-P-T mã SP*', 'PC RM Cost', ''],
-      ['R2', 'T', 'Customer = COMMON', 'T', 'Mọi PC-P-T', 'PC RM Cost', ''],
-      ['RX', 'T', 'Customer khác', '–', 'Không phân bổ', '–', 'Báo CHECK CUSTOMER'],
-      ['R3', 'O', 'JOB CODE trùng đúng Location PC-P-O', 'O', 'PC-P-O có Location = JOB CODE', 'PC RM Cost', 'Khớp đúng'],
-      ['R4', 'O', 'JOB CODE DN* / DS*', 'T', 'PC-P-T mã SP*', 'PC RM Cost', ''],
-      ['R4a', 'O', 'JOB CODE MK* (hoặc SVL-MK)', 'O', 'PC-P-O Location MK*', 'PC RM Cost', ''],
-      ['R4b', 'O', 'JOB CODE VE* (kèm SVL-VE)', 'O', 'PC-P-O Location VE*', 'PC RM Cost', ''],
-      ['R4c', 'O', 'JOB CODE còn lại (hoặc không có lô nhận)', 'O', 'Mọi PC-P-O', 'PC RM Cost', 'Dự phòng'],
-      ['R5a', 'S', 'Location DS* / DN*', 'T', 'PC-P-T mã SP*', 'PC RM Cost', ''],
-      ['R5b', 'S', 'Location VE*', 'O', 'PC-P-O Location VE*', 'PC RM Cost', ''],
-      ['R5c', 'S', 'Location MK*', 'O', 'PC-P-O Location MK*', 'PC RM Cost', ''],
-      ['R6', 'S', 'Location khác / trống', 'T + O', 'Mọi PC-P-T và PC-P-O', 'PC RM Cost', 'Dự phòng'],
-    ] },
+    { kind: 'section', text: 'Bảng quy tắc phân bổ (giống màn hình STEP 2)' },
+    { kind: 'table', head: ['Ưu tiên', 'Nguồn', 'Điều kiện nguồn', 'Đích', 'Nhóm lô đích', 'Tiêu thức', 'Xử lý', 'Mã chi tiết'], filter: false,
+      rows: [
+        ...STEP2_RULES.map(([n, src, cond, tgt, lots, basis, , use]) => [n, src, cond, tgt, lots, basis, use, screenCodes(n)]),
+        ['–', 'T / S / O', 'Nhóm 0 VND (R0) · Customer lạ (RX)', '–', 'Không phân bổ', '–', 'Kiểm tra', 'R0, RX'],
+      ] },
   ];
   const grp = [
     { kind: 'table', filter: true, zebra: true, head: ['Hệ nguồn', 'Khoá nguồn', 'Loại khoá', 'Nhóm (S)', 'Số dòng Stock Out', 'Giá trị Stock Out NVL', 'Mã quy tắc', 'Quy tắc áp dụng', 'Hệ PC nhận', 'Điều kiện PC nhận', 'Số lô nhận', 'Đã phân bổ', 'Chưa phân bổ', 'Chênh lệch', 'Kiểm tra'],
@@ -139,8 +151,8 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
   ];
   const sheet = (name, title, cols, blocks, extra = {}) => ({ name, title, subtitle, cols, blocks, footer: 'STEP 2', ...extra });
   return { report: R, sheets: [
-    sheet('Tổng hợp', `TỔNG HỢP PHÂN BỔ STOCK OUT · KỲ ${period}`, [52, 19, 19, 17, 17, 17, 17, 20], sum),
-    sheet('Logic phân bổ', 'LOGIC PHÂN BỔ STOCK OUT VÀO LÔ PC', [9, 11, 44, 12, 36, 16, 18], logic),
+    sheet('Tổng hợp', `TỔNG HỢP PHÂN BỔ STOCK OUT · KỲ ${period}`, [60, 19, 19, 19, 13, 14, 14, 16], sum),
+    sheet('Logic phân bổ', 'LOGIC PHÂN BỔ STOCK OUT VÀO LÔ PC', [10, 11, 42, 10, 30, 26, 14, 16], logic),
     sheet('Theo nhóm nguồn', 'PHÂN BỔ THEO NHÓM NGUỒN', [9, 14, 11, 10, 12, 18, 11, 44, 11, 16, 11, 18, 16, 14, 13], grp, { freeze: 4 }),
     sheet('Theo lô PC', 'PHÂN BỔ THEO LÔ PC NHẬN', [7, 15, 12, 18, 20, 18, 34, 13, 12, 17, 17, 17, 17, 19, 18, 11, 16], pc, { freeze: 4 }),
     sheet('Chi tiết phân bổ', 'CHI TIẾT PHÂN BỔ · TỪNG DÒNG NGUỒN → LÔ PC', [9, 14, 11, 10, 11, 16, 18, 18, 36, 13, 18, 12, 18, 18, 18], det, { freeze: 4 }),
