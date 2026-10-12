@@ -559,5 +559,32 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('PC-M gate: other reports (PC-P) are not gated by this rule', buildDataset(pcpNeg, 'PC-P-O-202609.xlsx', P2).status, 'IMPORTED');
 }
 
+// ---- v1.14.18 STEP 2 per-rule amounts and checkpoint 11 in whole VND
+{
+  const { ruleSummary } = await import('../src/engine/step2report.js');
+  const { step2Controls } = await import('../src/engine/controls.js');
+  const P9 = '2026-09';
+  const D18 = (erp, key, type, src, tErp, pc, alloc, status, note) => [erp, key, type, 1, src, key, tErp, 'SP', pc, '', '', '', '', 0, 0, alloc, status, note];
+  const detail = [
+    D18('T', 'DOONA', 'Customer', 100, 'T', 'PC-A', 60, 'ALLOCATED', 'DOONA -> T SP*.'),
+    D18('T', 'DOONA', 'Customer', 100, 'T', 'PC-B', 40, 'ALLOCATED', 'DOONA -> T SP*.'),
+    D18('O', 'XX', 'Job', 30, 'O', 'PC-C', 30, 'FALLBACK RM COST', 'O other -> all O theo PC RM Cost.'),
+    D18('S', 'Y', 'Loc', 10, 'T+O', 'PC-D', 10, 'FALLBACK RM COST', 'S other -> T+O theo PC RM Cost.'),
+  ];
+  const s2 = { period: P9, runAt: '', status: 'PASS', detail, summary: [], pc: [], fallbackApproval: null, total: { src: 140, alloc: 140, unalloc: 0, diff: 0, status: 'PASS' } };
+  const rs = ruleSummary(s2);
+  const byCode = Object.fromEntries(rs.map((r) => [r.code, r]));
+  eq('ruleSummary: R1 amount = 100 over 2 lots', [byCode.R1.alloc, byCode.R1.lines, byCode.R1.groups], [100, 2, 1]);
+  eq('ruleSummary: R4c and R6 amounts', [byCode.R4c.alloc, byCode.R6.alloc], [30, 10]);
+  eq('ruleSummary: rule amounts add to total allocated', rs.reduce((a, r) => a + r.alloc, 0), 140);
+  eq('ruleSummary: share of total allocated', Math.round(byCode.R1.share * 1000) / 1000, 0.714);
+  const c = step2Controls({ period: P9, step2: s2, register: null, latestImport: '' }).rows;
+  const r11 = c.find((r) => r.no === '11');
+  eq('CP11: expected = 5% threshold, actual = fallback, diff = excess, all whole VND', [r11.expected, r11.actual, r11.diff], [7, 40, 33]);
+  eq('CP11: fallback above 5% needs approval', r11.status, 'BLOCK - APPROVAL');
+  eq('CP11: per-rule sub-rows show the fallback rules', c.filter((r) => /^11\./.test(r.no)).map((r) => [r.no, r.actual]), [['11.R4c', 30], ['11.R6', 10]]);
+  eq('CP11: sub-rows add up to the fallback amount', c.filter((r) => /^11\./.test(r.no)).reduce((a, r) => a + r.actual, 0), 40);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

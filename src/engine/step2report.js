@@ -31,6 +31,31 @@ const M = (v) => ({ v: num(v), t: 'n', z: '[>=0.5]#,##0;[<=-0.5](#,##0);"-"' });
 const P = (v, z = '0.00%') => ({ v: num(v), t: 'n', z }); // percent
 const D = { erp: 0, key: 1, type: 2, rows: 3, src: 4, fam: 5, tErp: 6, tKey: 7, pc: 8, mo: 9, prod: 10, name: 11, loc: 12, cost: 13, pct: 14, alloc: 15, status: 16, note: 17 };
 
+const RULE_ORDER = ['R1', 'R2', 'R3', 'R4', 'R4a', 'R4b', 'R4c', 'R5a', 'R5b', 'R5c', 'R6', 'R0', 'RX'];
+/**
+ * Số tiền theo từng rule STEP 2, lấy từ chi tiết phân bổ (không làm tròn trong engine).
+ * src = Stock Out của các nhóm thuộc rule; alloc = số tiền thực sự đổ vào lô PC; share = alloc / tổng đã phân bổ.
+ * Dùng cho Control Center (checkpoint 11) và bảng "Số tiền theo rule" trên màn hình STEP 2.
+ */
+export function ruleSummary(s2) {
+  const detail = (s2 && s2.detail) || [];
+  const groups = new Map();
+  for (const x of detail) {
+    const k = `${x[D.erp]}|${x[D.key]}|${x[D.type]}`;
+    let g = groups.get(k);
+    if (!g) { const r = ruleOf(x[D.note]); g = { code: r.code, label: r.label, kind: r.kind, src: num(x[D.src]), lines: 0, alloc: 0 }; groups.set(k, g); }
+    if (x[D.pc]) { g.lines++; g.alloc += num(x[D.alloc]); }
+  }
+  const byCode = new Map();
+  for (const g of groups.values()) {
+    const r = byCode.get(g.code) || { code: g.code, label: g.label, kind: g.kind, groups: 0, lines: 0, src: 0, alloc: 0 };
+    r.groups++; r.lines += g.lines; r.src += g.src; r.alloc += g.alloc; byCode.set(g.code, r);
+  }
+  const totalAlloc = [...byCode.values()].reduce((a, r) => a + r.alloc, 0);
+  return RULE_ORDER.filter((c) => byCode.has(c)).concat([...byCode.keys()].filter((c) => !RULE_ORDER.includes(c)))
+    .map((c) => { const r = byCode.get(c); return { ...r, share: totalAlloc ? r.alloc / totalAlloc : 0, totalAlloc }; });
+}
+
 /** Allocation views from a STEP 2 result. cls = step2Classification() (raw / FG / RM split) when available. */
 export function step2Report(s2, cls = null) {
   const detail = s2.detail || [];
