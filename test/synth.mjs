@@ -108,6 +108,15 @@ const M = run('MONTHLY'), St = run('STRICT_DATE');
 
 // ---------- invariants
 let fails = 0; const ok = (label, cond, info = '') => { if (!cond) { fails++; console.log(`✗ ${label} ${info}`); } };
+// ---------- broad fallbacks (O other / S other / safety) split by PC RM cost, not equally
+{
+  const fb = s2.detail.filter((d) => ['FALLBACK RM COST', 'FALLBACK EQUAL'].includes(d[16]));
+  const groups = {}; for (const d of fb) (groups[d[0] + '|' + d[1]] ||= []).push(d);
+  let worst = 0;
+  for (const l of Object.values(groups)) { const sum = l.reduce((a, d) => a + d[13], 0); for (const d of l) worst = Math.max(worst, Math.abs(d[14] - d[13] / sum)); }
+  ok('fallback groups split proportional to PC RM cost (FAMILY mode)', fb.every((d) => d[16] === 'FALLBACK RM COST'), JSON.stringify(fb.map((d) => d[16])));
+  ok('fallback pct = RM / sum RM', worst < 1e-9, `worst=${worst}`);
+}
 ok('step2 PASS', s2.status === 'PASS', s2.status);
 ok('step3 roll-forward', Math.abs(s3.summary.opening + s3.summary.inAmt - s3.summary.outAmt - s3.summary.closingAmt) < 1);
 ok('3B has amount-basis rows', b.engine.rows.some((r) => r.note === 'Actual PC-M amount ratio'));
@@ -131,7 +140,7 @@ ok('155 bridge STRICT', Math.abs(f155(St)) <= 1, f155(St));
 // ---------- snapshot
 const r2 = (x) => Math.round(num(x) * 100) / 100;
 const snap = {
-  step2: { alloc: r2(s2.total.alloc), fallback: s2.detail.filter((d) => String(d[17]).includes('fallback ALL') || d[16] === 'FALLBACK EQUAL').length },
+  step2: { alloc: r2(s2.total.alloc), fallback: s2.detail.filter((d) => String(d[17]).includes('fallback ALL') || ['FALLBACK EQUAL', 'FALLBACK RM COST'].includes(d[16])).length },
   step3: { closing: r2(s3.summary.closingAmt), final: r2(wf.finalClosing) },
   b3: eng.filter((e) => e.Y === 'Y').map((e) => [e.key, e.pc, r2(e.AA)]),
   step4: fl.rows.map((r) => [r.pc, r2(r.totalCost)]),

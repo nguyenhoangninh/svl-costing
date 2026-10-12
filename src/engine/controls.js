@@ -6,7 +6,7 @@ export const FALLBACK_REVIEW = 0.05;
 /** Amount allocated through the broad STEP 2 fallbacks ('O fallback ALL', 'S other -> equal T+O'). */
 export function fallbackAlloc(s2) {
   let a = 0;
-  for (const d of (s2 && s2.detail) || []) { const note = String(d[17] || ''); if (note.includes('fallback ALL') || d[16] === 'FALLBACK EQUAL') a += num(d[15]); }
+  for (const d of (s2 && s2.detail) || []) { const note = String(d[17] || ''); if (note.includes('fallback ALL') || d[16] === 'FALLBACK EQUAL' || d[16] === 'FALLBACK RM COST') a += num(d[15]); }
   return a;
 }
 function overall(rows, nextOk, nextBad) {

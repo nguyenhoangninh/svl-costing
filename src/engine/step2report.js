@@ -9,7 +9,8 @@ const RULES = [
   ['O DS/DN -> T SP*.', 'R4', 'O · JOB CODE DN*/DS* → PC hệ T mã SP*', 'Theo khoá'],
   ['O MK* -> O MK*.', 'R4a', 'O · JOB CODE MK* (kèm SVL-MK) → PC hệ O location MK*', 'Theo khoá'],
   ['O VE* (kèm SVL-VE) -> O VE*.', 'R4b', 'O · JOB CODE VE* (kèm SVL-VE) → PC hệ O location VE*', 'Theo khoá'],
-  ['O other -> equal all O.', 'R4c', 'O · JOB CODE còn lại → chia ĐỀU mọi PC hệ O', 'Dự phòng'],
+  ['O other -> all O theo PC RM Cost.', 'R4c', 'O · JOB CODE còn lại → chia theo PC RM Cost mọi PC hệ O', 'Dự phòng'],
+  ['O other -> equal all O.', 'R4c', 'O · JOB CODE còn lại → chia đều mọi PC hệ O (workbook cũ)', 'Dự phòng'],
   ['O fallback MK*.', 'R4a', 'O (workbook cũ) · không khớp → PC hệ O location MK*', 'Dự phòng'],
   ['O fallback VE*.', 'R4b', 'O (workbook cũ) · không khớp → PC hệ O location VE*', 'Dự phòng'],
   ['O fallback ALL.', 'R4c', 'O (workbook cũ) · không khớp → mọi PC hệ O', 'Dự phòng'],
@@ -19,7 +20,8 @@ const RULES = [
   ['S DS/DN -> T SP*.', 'R5a', 'S · location DS*/DN* → PC hệ T mã SP*', 'Theo khoá'],
   ['S VE -> O VE*.', 'R5b', 'S · location VE* → PC hệ O VE*', 'Theo khoá'],
   ['S MK -> O MK*.', 'R5c', 'S · location MK* → PC hệ O MK*', 'Theo khoá'],
-  ['S other -> equal T+O.', 'R6', 'S · location khác → chia ĐỀU mọi PC T + O', 'Dự phòng'],
+  ['S other -> T+O theo PC RM Cost.', 'R6', 'S · location khác → chia theo PC RM Cost mọi PC T + O', 'Dự phòng'],
+  ['S other -> equal T+O.', 'R6', 'S · location khác → chia đều mọi PC T + O (workbook cũ)', 'Dự phòng'],
   ['No cost to allocate.', 'R0', 'Nhóm 0 VND – không phân bổ', '–'],
   ['Unknown T Customer.', 'RX', 'T · Customer lạ – chưa phân bổ', 'Chưa phân bổ'],
 ];
@@ -42,7 +44,7 @@ export function step2Report(s2, cls = null) {
     }
     if (x[D.pc]) { g.pcs++; g.alloc += num(x[D.alloc]); }
   }
-  for (const g of groups) { g.unalloc = ['ALLOCATED', 'FALLBACK EQUAL', 'ZERO COST'].includes(g.status) ? 0 : g.src; g.diff = g.src - g.alloc - g.unalloc; g.check = Math.abs(g.diff) < 1 ? (g.unalloc ? 'CHƯA PHÂN BỔ' : 'PASS') : 'CHECK'; }
+  for (const g of groups) { g.unalloc = ['ALLOCATED', 'FALLBACK EQUAL', 'FALLBACK RM COST', 'ZERO COST'].includes(g.status) ? 0 : g.src; g.diff = g.src - g.alloc - g.unalloc; g.check = Math.abs(g.diff) < 1 ? (g.unalloc ? 'CHƯA PHÂN BỔ' : 'PASS') : 'CHECK'; }
   const ord = { T: 0, S: 1, O: 2 };
   groups.sort((a, b) => ord[a.erp] - ord[b.erp] || b.src - a.src);
   const byRule = new Map();
@@ -87,7 +89,7 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
     ['1. Lấy toàn bộ dòng STOCK OUT trong kỳ của 3 hệ T, S, O. Dòng Item Type = FG (thành phẩm xuất đi rework) bị LOẠI khỏi STEP 2 – chuyển sang Sổ FG Rework (2B / 5B).'],
     ['2. Gom Stock Out NVL theo khoá nguồn: hệ T theo Customer · hệ O theo JOB CODE · hệ S theo Location (DS/DN = DOONA, VE = VETO, MK = MK, còn lại = khác).'],
     ['3. Mỗi nhóm nguồn chọn tập lô PC nhận theo quy tắc dưới (chỉ lô trong PC-P kỳ này, hệ T và hệ O).'],
-    ['4. Chia giá trị nhóm cho các lô nhận theo TỶ LỆ PC RM COST (cột Total Cost của PC-P). Lô có RM ≤ 0 không nhận. Riêng R6 chia ĐỀU số lô.'],
+    ['4. Chia giá trị nhóm cho các lô nhận theo TỶ LỆ PC RM COST (cột Total Cost của PC-P). Lô có RM ≤ 0 không nhận. Kể cả nhóm dự phòng R4c và R6.'],
     ['5. RM của lô = PC RM Cost + Stock Out được phân bổ → STEP 3 (WIP) và STEP 4 (giá thành lô). Kiểm tra: nguồn = đã phân bổ + chưa phân bổ.'], [],
     ['Mã', 'Hệ nguồn', 'Điều kiện nhóm nguồn', 'Hệ PC nhận', 'Lô PC được nhận', 'Cơ sở chia', 'Ghi chú'],
     ['R1', 'T', 'Customer = DOONA', 'T', 'PC-P-T mã SP*', 'PC RM Cost', ''],
@@ -97,11 +99,11 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
     ['R4', 'O', 'JOB CODE DN* / DS*', 'T', 'PC-P-T mã SP*', 'PC RM Cost', ''],
     ['R4a', 'O', 'JOB CODE MK* (hoặc SVL-MK)', 'O', 'PC-P-O Location MK*', 'PC RM Cost', ''],
     ['R4b', 'O', 'JOB CODE VE* (kèm SVL-VE)', 'O', 'PC-P-O Location VE*', 'PC RM Cost', ''],
-    ['R4c', 'O', 'JOB CODE còn lại (hoặc không có lô nhận)', 'O', 'Mọi PC-P-O', 'Chia đều số lô', 'Dự phòng'],
+    ['R4c', 'O', 'JOB CODE còn lại (hoặc không có lô nhận)', 'O', 'Mọi PC-P-O', 'PC RM Cost', 'Dự phòng'],
     ['R5a', 'S', 'Location DS* / DN*', 'T', 'PC-P-T mã SP*', 'PC RM Cost', ''],
     ['R5b', 'S', 'Location VE*', 'O', 'PC-P-O Location VE*', 'PC RM Cost', ''],
     ['R5c', 'S', 'Location MK*', 'O', 'PC-P-O Location MK*', 'PC RM Cost', ''],
-    ['R6', 'S', 'Location khác / trống', 'T + O', 'Mọi PC-P-T và PC-P-O', 'Chia đều số lô', 'Dự phòng'],
+    ['R6', 'S', 'Location khác / trống', 'T + O', 'Mọi PC-P-T và PC-P-O', 'PC RM Cost', 'Dự phòng'],
   ];
   const grp = [['Hệ nguồn', 'Khoá nguồn', 'Loại khoá', 'Nhóm (S)', 'Số dòng Stock Out', 'Giá trị Stock Out NVL', 'Mã quy tắc', 'Quy tắc áp dụng', 'Hệ PC nhận', 'Điều kiện PC nhận', 'Số lô nhận', 'Đã phân bổ', 'Chưa phân bổ', 'Chênh lệch', 'Kiểm tra'],
     ...R.groups.map((g) => [g.erp, g.key, g.type, g.fam, g.rows, M(g.src), g.code, g.rule, g.tErp, g.tKey, g.pcs, M(g.alloc), M(g.unalloc), M(g.diff), g.check])];

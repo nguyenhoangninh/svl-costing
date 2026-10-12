@@ -1,6 +1,7 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.12 (12/10/2026):** STEP 2 · R4c (Stock Out hệ O, JOB CODE còn lại) và R6 (hệ S, Location khác/trống) chia theo PC RM Cost như các logic khác, thay vì chia đều; trạng thái 'FALLBACK RM COST' vẫn được tính vào ngưỡng 5% của F-12. STEP 2 và STEP 3 phải chạy lại.
 > **v1.14.11 (12/10/2026):** STEP 3 · Điều chỉnh PC-P theo PC-M: chỉ tiêu 08 liệt kê từng PC/sản phẩm lệch, áp dụng đặt Total Cost PC-P bằng PC-M (lưu số gốc, lý do và người thao tác, hoàn tác được); STEP 2 và STEP 3 phải chạy lại sau điều chỉnh.
 > **v1.14.9 (12/10/2026):** STEP 2 · Stock Out hệ O theo thứ tự: 1) JOB CODE khớp đúng Location PC-P-O → lô đó; 2) DN*/DS* → PC hệ T mã SP*; 3) MK* (kèm SVL-MK) → PC hệ O MK*; 4) VE* → PC hệ O VE*; 5) còn lại → chia đều mọi PC hệ O. Nhóm không có lô nhận → chia đều O và ghi chú dự phòng.
 > **v1.14.8 (12/10/2026):** STEP 2 · Stock Out hệ O theo JOB CODE: DN*/DS* → PC hệ T mã SP*; MK* (kèm SVL-MK) → PC hệ O location MK*; VE* → PC hệ O location VE*; còn lại → chia đều mọi PC hệ O. Bỏ khớp đúng job code = location (giữ lại qua tuỳ chọn oRule 'WORKBOOK' cho test parity Excel).

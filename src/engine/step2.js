@@ -104,9 +104,9 @@ export const STEP2_RULES = [
   [4, 'O', 'JOB CODE DN* / DS*', 'T', 'PC-P-T Product Code SP*', 'Total Cost', '', 'Allocate'],
   [5, 'O', 'JOB CODE MK* (kèm SVL-MK)', 'O', 'PC-P-O Location MK*', 'Total Cost', '', 'Allocate'],
   [6, 'O', 'JOB CODE VE* (kèm SVL-VE)', 'O', 'PC-P-O Location VE*', 'Total Cost', '', 'Allocate'],
-  [7, 'O', 'Còn lại', 'O', 'All PC-P-O', 'Equal', '', 'Fallback Equal'],
+  [7, 'O', 'Còn lại', 'O', 'All PC-P-O', 'Total Cost (PC RM Cost)', '', 'Fallback'],
   [8, 'S', 'DS*/DN* | VE* | MK*', 'T / O', 'T SP* | O VE* | O MK*', 'Total Cost', '', 'Allocate'],
-  [9, 'S', 'Other / Blank', 'T + O', 'All PC-P', 'Equal', '', 'Fallback Equal'],
+  [9, 'S', 'Other / Blank', 'T + O', 'All PC-P', 'Total Cost (PC RM Cost)', '', 'Fallback'],
 ];
 
 export const STEP2_DETAIL_HEADERS = ['Source ERP', 'Source Key', 'Source Key Type', 'Source Rows', 'Source Stock Out', 'Family', 'Target ERP', 'Target Match', 'PC No.', 'MO No.', 'Product Code', 'Product Name', 'PC Location', 'PC RM Cost', 'Allocation %', 'Allocated Stock Out', 'Status', 'Note'];
@@ -153,7 +153,7 @@ export function runStep2(datasets, period, opts = {}) {
   const sum = { T: [0, 0, 0], S: [0, 0, 0], O: [0, 0, 0] };
   for (const g of groups) {
     const srcERP = g.erp, srcAmt = g.cost;
-    let allocated = 0, unalloc = 0, totalW = 0, cand = 0, forceEqual = false, note = '', status = 'ALLOCATED';
+    let allocated = 0, unalloc = 0, totalW = 0, cand = 0, forceEqual = false, broad = false, note = '', status = 'ALLOCATED';
     let targetERP = '', field = '', tKey = '';
     if (Math.abs(srcAmt) < 0.005) {
       detail.push([srcERP, g.key, g.type, g.rows, srcAmt, g.fam, '', '', '', '', '', '', '', 0, 0, 0, 'ZERO COST', 'No cost to allocate.']);
@@ -179,16 +179,16 @@ export function runStep2(datasets, period, opts = {}) {
         else if (p2 === 'DN' || p2 === 'DS') { targetERP = 'T'; field = 'PRODUCT PREFIX'; tKey = 'SP'; note = 'O DS/DN -> T SP*.'; }
         else if (p2 === 'MK' || uk === 'SVL-MK') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'MK'; note = 'O MK* -> O MK*.'; }
         else if (p2 === 'VE' || uk === 'SVL-VE') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'VE'; note = 'O VE* (kèm SVL-VE) -> O VE*.'; }
-        else { targetERP = 'O'; field = 'ALL O'; tKey = 'ALL'; forceEqual = true; note = 'O other -> equal all O.'; }
+        else { targetERP = 'O'; field = 'ALL O'; tKey = 'ALL'; broad = true; note = 'O other -> all O theo PC RM Cost.'; }
         // safety: if the chosen group has no eligible receiving lot, spread equally over all O lots (flagged)
         if (oRule !== 'WORKBOOK' && field !== 'ALL O' && !pool.some((p) => matches(targetERP, field, tKey, p))) {
-          targetERP = 'O'; field = 'ALL O'; tKey = 'ALL'; forceEqual = true; note += ' Dự phòng: nhóm không có lô nhận, chia đều O.';
+          targetERP = 'O'; field = 'ALL O'; tKey = 'ALL'; broad = true; note += ' Dự phòng: nhóm không có lô nhận, chia theo PC RM Cost trên O.';
         }
       } else {
         if (g.fam === 'DOONA') { targetERP = 'T'; field = 'PRODUCT PREFIX'; tKey = 'SP'; note = 'S DS/DN -> T SP*.'; }
         else if (g.fam === 'VETO') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'VE'; note = 'S VE -> O VE*.'; }
         else if (g.fam === 'MK') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'MK'; note = 'S MK -> O MK*.'; }
-        else { targetERP = 'T+O'; field = 'ALL'; tKey = 'ALL'; forceEqual = true; note = 'S other -> equal T+O.'; }
+        else { targetERP = 'T+O'; field = 'ALL'; tKey = 'ALL'; broad = true; forceEqual = oRule === 'WORKBOOK'; note = forceEqual ? 'S other -> equal T+O.' : 'S other -> T+O theo PC RM Cost.'; }
       }
       if (status === 'ALLOCATED') {
         for (const p of pool) if (matches(targetERP, field, tKey, p)) { cand++; if (forceEqual) totalW += 1; else if (p.cost > 0) totalW += p.cost; }
@@ -209,7 +209,7 @@ export function runStep2(datasets, period, opts = {}) {
             allocated += a; p.alloc += a;
             if (!('+' + p.src.toUpperCase() + '+').includes('+' + srcERP + '+')) p.src = p.src ? p.src + '+' + srcERP : srcERP;
             if (srcERP === 'T') p.allocT += a; else if (srcERP === 'S') p.allocS += a; else p.allocO += a;
-            const st = forceEqual ? 'FALLBACK EQUAL' : 'ALLOCATED';
+            const st = forceEqual ? 'FALLBACK EQUAL' : broad ? 'FALLBACK RM COST' : 'ALLOCATED';
             detail.push([srcERP, g.key, g.type, g.rows, srcAmt, g.fam, p.erp, tKey, p.pcNo, p.mo, p.prod, p.name, p.loc, p.cost, pct, a, st, note]);
           }
         }
