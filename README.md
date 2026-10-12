@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.5 (12/10/2026):** STEP 2 có nút **Xuất Excel tổng hợp phân bổ** cho kỳ đang mở: đối chiếu Stock Out (tổng / FG loại ra / NVL), theo hệ nguồn, theo quy tắc (R1–R6, phần dự phòng), hệ nguồn → hệ PC nhận, ảnh hưởng lên RM lô, 15 lô nhận nhiều nhất; sheet logic, theo nhóm nguồn, theo lô PC và chi tiết.
+
 > **v1.14.4 (09/10/2026):** Cài đặt → "Kỳ hiện có" thành bảng có trạng thái từng kỳ (OPEN / CLOSED / đã từng đóng) và nút ngay trên dòng: **Xoá kỳ** cho kỳ chưa từng đóng (không cần mở kỳ đó trước), **Ẩn kỳ / Hiện lại** cho kỳ đã từng đóng (hồ sơ kế toán không xoá được; danh sách ẩn lưu trong svl_costing_config/access, dữ liệu và lịch sử vẫn giữ).
 
 > **v1.14.3 (09/10/2026):** sửa "Xoá dữ liệu ERP": báo cáo đã xoá không còn quay lại sau khi tải lại trang (trước đây chỉ xoá trong bộ nhớ, bản lưu trên máy vẫn còn và được đẩy lại lên cloud); hỏi lần lượt phạm vi (ALL / T / S / O) rồi lý do, báo rõ khi nhập sai. File ERP mới import cũng được lưu ngay trên máy. Xoá kỳ: xoá trên cloud trước, cloud từ chối thì dữ liệu trên máy giữ nguyên.

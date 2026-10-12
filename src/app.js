@@ -13,6 +13,7 @@ import * as P3 from './views/phase3.js';
 import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
+import { step2ReportSheets } from './engine/step2report.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
@@ -601,7 +602,7 @@ VIEWS.step2 = (el) => {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 2 · Phân bổ Stock Out vào lô PC</h1><p class="lead">Stock Out NVL được phân bổ vào các lô PC-P theo quy tắc khách hàng / job code / location. Stock Out thành phẩm (FG) không phải NVL — được tách sang sổ Rework (2B).</p></div>
       <div class="result"><span>Kết quả</span>${pill(st.s2c.status)}<small>${esc(st.s2c.okText)}</small></div></header>
-    <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${canEditPeriod() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
+    <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<button class="btn ghost" data-act="s2-report" type="button">Xuất Excel tổng hợp phân bổ</button><span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${canEditPeriod() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
     ${s2 ? `
     <div class="grid2">
       <div><h2>Đối chiếu theo hệ nguồn</h2><table class="cp"><thead><tr><th>Hệ</th><th class="r">Stock Out nguồn</th><th class="r">Đã phân bổ</th><th class="r">Chưa phân bổ</th><th class="r">Chênh lệch</th><th>Trạng thái</th></tr></thead><tbody>
@@ -1161,6 +1162,12 @@ document.addEventListener('click', async (e) => {
       markDirty('importLog', 'audit');
       toast(`Đã xoá ${keys.length} báo cáo ERP (${sc}) của kỳ ${S.period}. Import lại file ERP rồi chạy lại STEP 2 → 3 → 3B → 4.`, 'pass');
       render(); break;
+    }
+    case 's2-report': {
+      const s2 = S.d.step2; if (!s2) { toast('Chưa chạy STEP 2.', 'review'); break; }
+      const cls = step2Classification(S.d.datasets, S.period, s2, S.d.register);
+      const { sheets } = step2ReportSheets(s2, cls, S.period, APP_VERSION);
+      await exportBook(`SVL_STEP2_PhanBo_StockOut_${S.period}.xlsx`, sheets); break;
     }
     case 'view-ds': S.dsView = a.dataset.k; if (S.view !== 'data') location.hash = 'data'; else render(); break;
     case 'goto-period': await openPeriod(a.dataset.p); break;
