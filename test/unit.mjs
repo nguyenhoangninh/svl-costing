@@ -586,5 +586,33 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('CP11: sub-rows add up to the fallback amount', c.filter((r) => /^11\./.test(r.no)).reduce((a, r) => a + r.actual, 0), 40);
 }
 
+// ---- v1.14.18 R4c (O còn lại → mọi lô O) is counted in the broad fallback, end-to-end through runStep2 (default FAMILY rule)
+{
+  const { runStep2 } = await import('../src/engine/step2.js');
+  const { fallbackAlloc } = await import('../src/engine/controls.js');
+  const { ruleSummary } = await import('../src/engine/step2report.js');
+  const { buildDataset: bd } = await import('../src/engine/step1.js');
+  const ser8 = (d) => (Date.UTC(2026, 7, d) - Date.UTC(1899, 11, 30)) / 86400000;
+  const HPx = ['PC No.', 'Document Group', 'Date', 'Status', 'MO No.', 'Sub-MO', 'Product Code', 'Product Name', 'Location', 'Unit', 'Current Complete Qty', 'Total Cost'];
+  const HSOx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Base Unit', 'Base Qty', 'Base Unit Cost', 'Total Cost', 'MO No.', 'DIVISION', 'JOB CODE', 'CUSTOMER'];
+  const HSSx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Quantity', 'Unit', 'Location', 'Base Unit Cost', 'Total Cost', 'Remark', 'MO No.', 'Doc Ref 1', 'DIVISION', 'JOB CODE'];
+  const HSTx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Unit', 'Quantity', 'Total Cost', 'Customer', 'MO No.'];
+  const dsR = {};
+  const addR = (name, h, rows) => { const d = bd([h, ...rows], `${name}-202608.xlsx`, P2); dsR[d.key] = d; };
+  addR('PC-P-O', HPx, [
+    ['PC-O1', 'PC', ser8(3), 'Completed', 'MO-1', 'MO-1-001', 'OLX-300', 'Bag', 'MKX1', 'PCS', 1, 100],
+    ['PC-O2', 'PC', ser8(3), 'Completed', 'MO-2', 'MO-2-001', 'OLX-400', 'Belt', 'VEX1', 'PCS', 1, 300],
+  ]);
+  addR('PC-P-T', HPx, []);
+  addR('STOCK OUT-O', HSOx, [['SO-O-1', 'Stock Out', 'G', 'Completed', ser8(7), null, 1, '300001', 'Material', 'RM', 'MKX1', 'PC', -10, 5, -50, null, 'DIV', 'ZZ-UNKNOWN', null]]);
+  addR('STOCK OUT-T', HSTx, []);
+  addR('STOCK OUT-S', HSSx, []);
+  const sR = runStep2(dsR, P2);
+  const fb = fallbackAlloc(sR);
+  const r4c = ruleSummary(sR).find((r) => r.code === 'R4c');
+  eq('R4c: the unmatched O job code is allocated to all O lots', [r4c && r4c.alloc, r4c && r4c.lines], [50, 2]);
+  eq('R4c: counted in the broad fallback amount (checkpoint 11)', fb, 50);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

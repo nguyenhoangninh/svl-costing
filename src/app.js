@@ -640,7 +640,8 @@ VIEWS.step2 = (el) => {
       { key: 0, label: 'Rule', width: 70 }, { key: 1, label: 'Mô tả', width: 380 }, { key: 2, label: 'Loại', width: 110 },
       { key: 3, label: 'Nhóm nguồn', type: 'int', width: 110 }, { key: 4, label: 'Số dòng PC', type: 'int', width: 110 },
       { key: 5, label: 'Stock Out nguồn', type: 'num', width: 150 }, { key: 6, label: 'Đã phân bổ vào lô', type: 'num', width: 160 }, { key: 7, label: '% tổng phân bổ', type: 'pct', width: 130 },
-    ], rows: rs.map((r) => [r.code, r.label, r.kind, r.groups, r.lines, r.src, r.alloc, r.share]), height: 280 });
+    ], rows: rs.map((r) => [r.code, r.label, r.kind, r.groups, r.lines, r.src, r.alloc, r.share]), height: 280,
+      onExport: exportTable('02_STEP2_SO_TIEN_THEO_RULE', [{ key: 0, label: 'Rule', width: 70 }, { key: 1, label: 'Mô tả', width: 380 }, { key: 2, label: 'Loại', width: 110 }, { key: 3, label: 'Nhóm nguồn', width: 110 }, { key: 4, label: 'Số dòng PC', width: 110 }, { key: 5, label: 'Stock Out nguồn', width: 150 }, { key: 6, label: 'Đã phân bổ vào lô', width: 160 }, { key: 7, label: '% tổng phân bổ', width: 130 }]) });
     // Detail table: column 18 = rule code (derived from the note), filtered by the rule selector
     const dcRule = [...dc, { key: 18, label: 'Rule', width: 80 }];
     const mountDetail = () => {
