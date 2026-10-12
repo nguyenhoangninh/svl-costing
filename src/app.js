@@ -604,8 +604,8 @@ VIEWS.step2 = (el) => {
       <div class="result"><span>Kết quả</span>${pill(st.s2c.status)}<small>${esc(st.s2c.okText)}</small></div></header>
     <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<button class="btn ghost" data-act="s2-report" type="button">Xuất Excel tổng hợp phân bổ</button><span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${canEditPeriod() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
     ${s2 ? `
-    <div class="grid2">
-      <div><h2>Đối chiếu theo hệ nguồn</h2><table class="cp"><thead><tr><th rowspan="2">Hệ nguồn</th><th class="r" rowspan="2">Stock Out nguồn</th><th class="r" colspan="3" style="text-align:center">Đã phân bổ vào lô PC của hệ</th><th class="r" rowspan="2">Tổng đã phân bổ</th><th class="r" rowspan="2">Chưa phân bổ</th><th class="r" rowspan="2">Chênh lệch</th><th rowspan="2">Trạng thái</th></tr>
+    <div class="s2-stack">
+      <div class="s2-block"><h2>Đối chiếu theo hệ nguồn</h2><table class="cp s2-rec"><thead><tr><th rowspan="2">Hệ nguồn</th><th class="r" rowspan="2">Stock Out nguồn</th><th class="r" colspan="3" style="text-align:center">Đã phân bổ vào lô PC của hệ</th><th class="r" rowspan="2">Tổng đã phân bổ</th><th class="r" rowspan="2">Chưa phân bổ</th><th class="r" rowspan="2">Chênh lệch</th><th rowspan="2">Trạng thái</th></tr>
         <tr><th class="r"><span class="erp erp-T">T</span></th><th class="r"><span class="erp erp-S">S</span></th><th class="r"><span class="erp erp-O">O</span></th></tr></thead><tbody>
       ${(() => {
         // allocated amount by source system × system of the receiving PC lot (detail col 0 = source, 6 = PC system, 8 = PC No., 15 = amount)
@@ -614,7 +614,7 @@ VIEWS.step2 = (el) => {
         return [...s2.summary, s2.total].map((r) => `<tr class="${r.erp === 'TOTAL' ? 'tot' : ''}"><td>${r.erp === 'TOTAL' ? 'Tổng' : `<span class="erp erp-${r.erp}">${r.erp}</span>`}</td><td class="r">${v(r.src)}</td><td class="r">${v(cell(r.erp, 'T'))}</td><td class="r">${v(cell(r.erp, 'S'))}</td><td class="r">${v(cell(r.erp, 'O'))}</td><td class="r">${v(r.alloc)}</td><td class="r">${v(r.unalloc)}</td><td class="r">${v(r.diff)}</td><td>${pill(r.status)}</td></tr>`).join('');
       })()}
       </tbody></table><p class="muted">Hệ S không có lô PC-P nên Stock Out hệ S được phân bổ sang lô hệ T (location DS/DN → mã SP*) hoặc hệ O (VE*, MK*); location khác chia đều cho T + O.</p></div>
-      <div><h2>Phân loại Stock Out (NVL / FG)</h2><table class="cp"><tbody>
+      <div class="s2-block"><h2>Phân loại Stock Out (NVL / FG)</h2><table class="cp s2-cls"><tbody>
         <tr><td>Tổng Stock Out thô</td><td class="r">${v(cls.totalRaw)}</td><td>Số dòng FG</td><td class="r">${cls.fgRows}</td></tr>
         <tr><td>NVL / non-FG đủ điều kiện</td><td class="r">${v(cls.rmEligible)}</td><td>SL FG rework</td><td class="r">${fmtNum(cls.fgQty)}</td></tr>
         <tr><td>FG Rework – giá ERP (memo)</td><td class="r">${v(cls.fgRef)}</td><td>FG phân bổ vào PC</td><td class="r">${v(cls.fgAllocated)}</td></tr>

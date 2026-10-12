@@ -1,5 +1,6 @@
 # SVL Costing Web
 
+> **v1.14.7 (12/10/2026):** STEP 2 · dàn trang lại: bảng "Đối chiếu theo hệ nguồn" chiếm toàn bộ chiều rộng, tiêu đề và số không xuống dòng; bảng "Phân loại Stock Out" xếp bên dưới.
 > **v1.14.6 (12/10/2026):** STEP 2 · bảng "Đối chiếu theo hệ nguồn" tách cột "Đã phân bổ" theo hệ của lô PC nhận (T / S / O) cho từng hệ nguồn.
 
 > **v1.14.5 (12/10/2026):** STEP 2 có nút **Xuất Excel tổng hợp phân bổ** cho kỳ đang mở: đối chiếu Stock Out (tổng / FG loại ra / NVL), theo hệ nguồn, theo quy tắc (R1–R6, phần dự phòng), hệ nguồn → hệ PC nhận, ảnh hưởng lên RM lô, 15 lô nhận nhiều nhất; sheet logic, theo nhóm nguồn, theo lô PC và chi tiết.

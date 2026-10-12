@@ -138,6 +138,12 @@ form.inline input { display: block; padding: 6px 8px; border: 1px solid var(--ru
 .card { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 16px 18px; }
 .card h2:first-child { margin-top: 0; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 20px; }
+.s2-stack { display: flex; flex-direction: column; gap: 8px; }
+.s2-block { min-width: 0; }
+table.s2-rec th, table.s2-rec td { white-space: nowrap; padding-left: 8px; padding-right: 8px; }
+table.s2-rec td.r, table.s2-cls td.r { font-variant-numeric: tabular-nums; }
+table.s2-cls { width: 100%; }
+table.s2-cls td:nth-child(1) { width: 32%; } table.s2-cls td:nth-child(3) { width: 22%; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
 .sys { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--T); border-radius: var(--radius); padding: 10px 14px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
 .sys-S { border-left-color: var(--S); } .sys-O { border-left-color: var(--O); }
