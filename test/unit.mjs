@@ -437,5 +437,33 @@ for (const f of [...walk(path.join(root, 'src')), ...walk(path.join(root, 'lib')
 const man = JSON.parse(fs.readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8'));
 for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(path.join(root, ic.src)), true);
 
+// ---- PC cost basis: PC-P lot cost aligned to PC-M (per PC No. + Product Code) ----
+{
+  const { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } = await import('../src/engine/pcbasis.js');
+  const H = ['PC No.', 'Product Code', 'Product Name', 'Location', 'MO No.', 'Total Cost'];
+  const mk = (rows) => ({ header: H, rows });
+  const ds = {
+    'PC-P-T': mk([['PC-1', 'A', 'n', 'L', 'MO1', 100], ['PC-1', 'B', 'n', 'L', 'MO1', 50], ['PC-2', 'A', 'n', 'L', 'MO2', 60], ['PC-2', 'A', 'n', 'L', 'MO2', 40]]),
+    'PC-M-T': mk([['PC-1', 'A', 'n', 'L', 'MO1', 99.5], ['PC-1', 'B', 'n', 'L', 'MO1', 50], ['PC-2', 'A', 'n', 'L', 'MO2', 98]]),
+  };
+  const sc = pcBasisScan(ds);
+  eq('pcb: gaps found', sc.lines.length, 2);
+  eq('pcb: only-one-side empty', sc.onlyPCM.length + sc.onlyPCP.length, 0);
+  eq('pcb: diff = PC-M − PC-P', Math.abs(sc.totals.diff - (-2.5)) < 0.001, true);
+  const res = applyPcBasis(ds, '2026-09');
+  eq('pcb: tie zero after apply', res.ok, true);
+  const sum = res.changes.reduce((a, c) => a + (c.adj - Number(c.orig)), 0);
+  eq('pcb: adjustments sum to diff', Math.abs(sum - sc.totals.diff) < 0.001, true);
+  eq('pcb: split by current cost (PC-2 rows 60/40 of 98)', [res.datasets['PC-P-T'].rows[2][5], res.datasets['PC-P-T'].rows[3][5]], [58.8, 39.2]);
+  eq('pcb: intact right after apply', pcBasisIntact(res.datasets, res.changes), true);
+  const back = undoPcBasis(res.datasets, res.changes);
+  eq('pcb: undo restores original cost', back['PC-P-T'].rows.map((r) => r[5]), [100, 50, 60, 40]);
+  eq('pcb: undo leaves dataset identical to input', pcBasisScan(back).totals.diff.toFixed(2), sc.totals.diff.toFixed(2));
+  eq('pcb: intact false after undo', pcBasisIntact(back, res.changes), false);
+  const bad = { ...ds, 'PC-M-T': mk([['PC-1', 'A', 'n', 'L', 'MO1', 99.5], ['PC-9', 'Z', 'n', 'L', 'MO9', 7]]) };
+  let threw = false; try { applyPcBasis(bad, '2026-09'); } catch { threw = true; }
+  eq('pcb: refuses when a PC exists on one side only', threw, true);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

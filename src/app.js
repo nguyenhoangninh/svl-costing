@@ -14,15 +14,16 @@ import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
 import { step2ReportSheets } from './engine/step2report.js';
+import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
+const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -266,7 +267,7 @@ function guardPeriod() {
 }
 const guardMutate = () => guardEdit() && guardPeriod();
 const canEditPeriod = () => store.canEdit() && !isClosed();
-const WRITE_ACTS = new Set(['new-period', 'run-step2', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
+const WRITE_ACTS = new Set(['new-period', 'run-step2', 'pc-basis-apply', 'pc-basis-undo', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
 
 /** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
 function parseNum(v, label) {
@@ -814,12 +815,38 @@ async function checkPrevDrift() {
 }
 
 // ---------- STEP 3 ----------
+/** PC-P lot cost vs PC-M material ledger (checkpoint 08). Applying aligns PC-P to PC-M; original values are kept for undo. */
+function pcBasisPanel() {
+  if (!S.d.datasets || !(S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] || S.d.datasets['PC-P-T'] || S.d.datasets['PC-P-O'])) return '';
+  const sc = pcBasisScan(S.d.datasets), adj = S.d.pcAdj, intact = !!adj && pcBasisIntact(S.d.datasets, adj.changes);
+  const dis = canEditPeriod() ? '' : 'disabled';
+  let body = '';
+  if (adj) {
+    body += `<div class="alert review">Đã điều chỉnh ${adj.changes.length} dòng PC-P về PC-M · tổng ${fmtNum(adj.total)} VND · ${esc(adj.by)} · ${fmtTs(adj.at)} · lý do: ${esc(adj.note)}${intact ? '' : ' — PC-P đã import lại sau điều chỉnh, điều chỉnh không còn khớp dữ liệu.'}</div>`;
+    if (intact) body += `<div class="row"><button class="btn danger ghost" data-act="pc-basis-undo" type="button" ${dis}>Hoàn tác điều chỉnh</button></div>`;
+  }
+  if (sc.onlyPCM.length || sc.onlyPCP.length) {
+    body += `<div class="alert block">Có ${sc.onlyPCM.length} PC chỉ có ở PC-M và ${sc.onlyPCP.length} PC chỉ có ở PC-P. Không điều chỉnh tự động được; kiểm tra lại file ERP.</div>`;
+  } else if (!sc.lines.length) {
+    if (!adj) body += `<p class="muted">PC-M và PC-P khớp theo từng PC và sản phẩm.</p>`;
+  } else {
+    body += `<p class="muted">Chênh lệch PC-M − PC-P: ${fmtNum(sc.totals.diff)} VND ở ${sc.lines.length} dòng. Áp dụng sẽ đặt Total Cost PC-P bằng PC-M cho từng PC và sản phẩm; số gốc được lưu để hoàn tác.</p>
+      <table class="cp"><thead><tr><th>Hệ</th><th>PC No.</th><th>Product Code</th><th>Location</th><th class="r">PC-P</th><th class="r">PC-M</th><th class="r">Điều chỉnh</th></tr></thead><tbody>
+      ${sc.lines.map((g) => `<tr><td>${esc(g.erp)}</td><td>${esc(g.pcNo)}</td><td>${esc(g.prod)}</td><td>${esc(g.loc)}</td><td class="r">${fmtNum(g.pcp)}</td><td class="r">${fmtNum(g.pcm)}</td><td class="r">${fmtNum(g.diff)}</td></tr>`).join('')}
+      <tr class="tot"><td colspan="4">Tổng</td><td class="r">${fmtNum(sc.totals.pcp)}</td><td class="r">${fmtNum(sc.totals.pcm)}</td><td class="r">${fmtNum(sc.totals.diff)}</td></tr></tbody></table>
+      <div class="row"><input id="pcb-note" type="text" placeholder="Lý do điều chỉnh (tối thiểu 5 ký tự)" style="min-width:340px" ${dis}/><button class="btn" data-act="pc-basis-apply" type="button" ${dis}>Áp dụng điều chỉnh về PC-M</button></div>`;
+  }
+  if (!body) return '';
+  return `<h2>Điều chỉnh PC-P theo PC-M</h2>${body}`;
+}
+
 VIEWS.step3 = (el) => {
   const st = statusAll(); const s3 = S.d.step3;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 3A · Material WIP</h1><p class="lead">Opening WIP + MI + Stock Out − PC − MR = Closing WIP ERP theo từng vật tư. FG Stock Out không đi vào WIP.</p></div>
       <div class="result"><span>Kết quả</span>${pill(st.s3c.status)}<small>${esc(st.s3c.okText)}</small></div></header>
     <div class="row"><button class="btn" data-act="run-step3" type="button">Chạy STEP 3</button>${s3 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s3.runAt)} · Nguồn opening: ${esc(s3.openingSource)}</span>` : ''}</div>
+    ${pcBasisPanel()}
     ${s3 ? `<div class="flow">
       ${flowBox('Opening WIP', s3.summary.opening)}<i>+</i>${flowBox('MI', s3.summary.miAmt)}<i>+</i>${flowBox('Stock Out', s3.summary.soAmt)}<i>−</i>${flowBox('PC', s3.summary.pcAmt)}<i>−</i>${flowBox('MR', s3.summary.mrAmt)}<i>−</i>${flowBox('Stock Out', s3.summary.soOutAmt)}<i>=</i>${flowBox('Closing WIP', s3.summary.closingAmt, true)}
     </div>
@@ -1145,6 +1172,36 @@ document.addEventListener('click', async (e) => {
       markDirty('step2', 'audit'); render(); break;
     }
     case 'run-step3': await busy('Đang chạy STEP 3…', async () => doStep3()); break;
+    case 'pc-basis-apply': {
+      if (!canEditPeriod()) break;
+      const reason = String((document.querySelector('#pcb-note') || {}).value || '').trim();
+      if (reason.length < 5) { toast('Cần lý do điều chỉnh ít nhất 5 ký tự.', 'review'); break; }
+      try {
+        const res = applyPcBasis(S.d.datasets, S.period);
+        const total = res.changes.reduce((a, c) => a + (num(c.adj) - num(c.orig)), 0);
+        S.d.datasets = res.datasets;
+        for (const e of ['T', 'O']) S.dirty.add('ds:PC-P-' + e);
+        S.d.pcAdj = { period: S.period, at: nowISO(), by: store.cloud.user ? store.cloud.user.email : 'thiết bị này', note: reason, total: Math.round(total * 100) / 100, changes: res.changes, before: res.before, after: res.after };
+        S.d.step2 = null; S.d.step3 = null; S.d.register = null;
+        audit('PC-P COST BASIS → PC-M', `${res.changes.length} dòng · tổng ${fmtNum(total)} VND · ${reason}`);
+        markDirty('pcAdj', 'step2', 'step3', 'register', 'audit');
+        toast(`Đã điều chỉnh ${res.changes.length} dòng PC-P về PC-M. Chạy lại STEP 2 và STEP 3.`, 'pass');
+      } catch (e) { toast('Không điều chỉnh được: ' + e.message, 'block'); }
+      render(); break;
+    }
+    case 'pc-basis-undo': {
+      if (!canEditPeriod() || !S.d.pcAdj) break;
+      if (!confirm('Hoàn tác điều chỉnh PC-P về số liệu ERP gốc?')) break;
+      try {
+        S.d.datasets = undoPcBasis(S.d.datasets, S.d.pcAdj.changes);
+        for (const e of ['T', 'O']) S.dirty.add('ds:PC-P-' + e);
+        audit('PC-P COST BASIS UNDO', `${S.d.pcAdj.changes.length} dòng · ${S.d.pcAdj.note}`);
+        S.d.pcAdj = null; S.d.step2 = null; S.d.step3 = null; S.d.register = null;
+        markDirty('pcAdj', 'step2', 'step3', 'register', 'audit');
+        toast('Đã hoàn tác. Chạy lại STEP 2 và STEP 3.', 'pass');
+      } catch (e) { toast('Không hoàn tác được: ' + e.message, 'block'); }
+      render(); break;
+    }
     case 'roll-wip': await rollWIP(); break;
     case 'validate-wip':
       validateOpening(S.d.opening, S.d.datasets, S.period); S.d.opening.changedAt = nowISO();
