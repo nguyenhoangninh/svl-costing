@@ -522,5 +522,22 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('STEP 4 gate: real negative WIP blocks until taken into 3B', /1 vật tư WIP âm/.test(threeBBlock(S([okRow, negRow]), null)), true);
 }
 
+// ---- v1.14.18 STEP 3B ACTUAL_USAGE AMOUNT: every material with PC-M Total Cost ≤ 0 is reported in one error (no stop at the first)
+{
+  const H = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const s2 = { period: P2, pc: [{ erp: 'T', pcNo: 'PC-1', prod: 'A', name: 'A', rmIncl: 100, rowIdx: 1 }, { erp: 'T', pcNo: 'PC-2', prod: 'B', name: 'B', rmIncl: 100, rowIdx: 2 }] };
+  const dsx = { 'PC-M-T': { header: H, rows: [
+    ['PC-1', 'A', 'A', 'Z1', 1.145, 0], ['PC-2', 'B', 'B', 'Z1', 2, 0],   // Z1: quantity but zero cost → blocked
+    ['PC-1', 'A', 'A', 'OK', 80, 40], ['PC-2', 'B', 'B', 'OK', 20, 60],  // OK: amount basis fine
+    ['PC-1', 'A', 'A', 'Z2', 3, 0],                                       // Z2: zero cost → blocked
+  ] } };
+  const inp = [{ key: 'Z1', erp: 'T', desc: 'z1' }, { key: 'OK', erp: 'T', desc: 'ok' }, { key: 'Z2', erp: 'T', desc: 'z2' }];
+  let err = null; try { rebuildEngine(inp, s2, dsx, P2, 'AMOUNT'); } catch (e) { err = e; }
+  eq('3B AMOUNT: blocked list has all bad materials, not only the first', err && err.blocked.map((b) => b.key), ['Z1', 'Z2']);
+  eq('3B AMOUNT: message names every blocked material', !!err && /Z1[\s\S]*Z2/.test(err.message) && !/OK \(/.test(err.message), true);
+  eq('3B AMOUNT: message does not silently fall back to QTY', !!err && /Không tự fallback sang QTY/.test(err.message), true);
+  eq('3B QTY basis still builds (legacy exception chosen on purpose)', rebuildEngine(inp, s2, dsx, P2, 'QTY').rows.length > 0, true);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
