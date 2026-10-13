@@ -66,7 +66,7 @@ function snap(S, D4) {
 /** Rework dispositions entered by the user (status / scrap / expense account / completion) – a change needs RUN FIFO again. */
 export const rwKey = (S) => fpRows((S.d.register && S.d.register.rows) || [], (r) => [ttxt(r.rid), utxt(r.rwType), utxt(r.rwStatus), ttxt(r.pcNo), num(r.compQty), num(r.scrapQty), utxt(r.scrapTreat), ttxt(r.woAccount), ttxt(r.dispNote).length >= 5 ? 1 : 0].join('|'));
 /** STEP 5R resolutions (original invoice / manual unit cost per return line). */
-export const rmKey = (S) => fpRows(Object.entries(S.d.returnMatches || {}), ([k, v]) => `${k}=${ttxt(v.origInv)}|${num(v.unitCost)}`);
+export const rmKey = (S) => fpRows(Object.entries(S.d.returnMatches || {}), ([k, v]) => `${k}=${ttxt(v.origInv)}|${num(v.unitCost)}|${ttxt(v.approvedBy)}`);
 /** Audit F-03: final STEP 4 cost per lot (3B / rework carry-in can move between lots with an unchanged total) and the FIFO overrides. */
 export const flKey = (fl) => fpRows(fl ? fl.rows : [], (r) => [r.erp, utxt(r.pc), utxt(r.prod), num(r.qty), num(r.totalRM).toFixed(0), num(r.t622).toFixed(0), num(r.t627).toFixed(0), num(r.totalCost).toFixed(0)].join('|'));
 export const ovKey = (S) => fpRows(Object.entries(S.d.fifoOverrides || {}).filter(([, v]) => v), ([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
@@ -167,7 +167,7 @@ function step5Controls(S, x) {
   const und = res && res.undated ? res.undated.length : 0, adv = res && res.stats ? num(res.stats.advisory) : 0;
   if (res) {
     add('09a', 'Dòng bán thiếu / sai ngày hoá đơn', 0, und, und ? 'BLOCK' : 'PASS', 'Không xác định được kỳ → chưa tính giá vốn. Sửa ngày ở nguồn rồi import & lưu lại (4.1)');
-    if (res.mode === 'STRICT_DATE') { const ul = num(res.stats && res.stats.undatedLayers); add('09c', 'STRICT_DATE: lớp sản xuất không có ngày hoàn thành đã được dùng', 0, ul, ul ? 'REVIEW' : 'PASS', 'PC-P thiếu Date → không chứng minh được thứ tự thời gian'); }
+    if (res.mode === 'STRICT_DATE') { const ul = num(res.stats && res.stats.undatedLayers); add('09c', 'STRICT_DATE: lớp sản xuất không có ngày hoàn thành (không được dùng)', 0, ul, ul ? 'BLOCK' : 'PASS', 'PC-P thiếu / sai Date → không chứng minh được thứ tự thời gian. Sửa Date trên ERP, import lại rồi chạy lại'); }
     add('09b', 'Dòng FIFO có cảnh báo kiểm tra dữ liệu bán', 0, adv, adv ? 'REVIEW' : 'PASS', 'Thiếu khách hàng, SL×đơn giá lệch, loại OTHER… (không chặn)');
     const r5s = returnStepStatus(S, { res, fresh: x.fresh }), nPhys = salesReturnsInPeriod(S).length;
     const rc = res.withReturns && res.returnControl ? res.returnControl : { total: nPhys, processed: 0, blocked: 0, qty: 0, cogsReversal: 0 };
@@ -501,6 +501,13 @@ export function doReturnsSave() {
     S.tab5r = 'run';
   } catch (e) { A.toast('Validate & Save hàng trả lại lỗi: ' + e.message, 'block'); }
 }
+/** v1.14.19 (audit P0-02): a manual unit cost needs a second person (maker-checker) before STEP 5R uses it. */
+function approvalCell(m, edit) {
+  if (!m || !(num(m.unitCost) > 0)) return '';
+  if (m.approvedBy && utxt(m.approvedBy) !== utxt(m.by)) return `<div class="muted">Đã duyệt: ${esc(m.approvedBy)}</div>`;
+  if (!edit) return '<div class="muted">Chờ duyệt</div>';
+  return utxt(m.by) === utxt(A.who()) ? '<div class="muted">Chờ người khác duyệt</div>' : ' <button class="btn sm" type="button" data-5r-approve>Duyệt</button>';
+}
 /** STEP 5R resolution: original invoice or manual unit cost per return line (stored in returnMatches, rerun FIFO to apply). */
 function resolvePanel(el, S, res, rc) {
   const d = S.d; const M = d.returnMatches || {};
@@ -510,14 +517,14 @@ function resolvePanel(el, S, res, rc) {
   const inv = new Map(); // invoices of this period per product (FIFO lines) as suggestions
   for (const x of res.sales) if (x.fin === 'FIFO COGS' && num(x.fq) > 0 && x.inv) { const k = utxt(x.prod); if (!inv.has(k)) inv.set(k, new Set()); inv.get(k).add(x.inv); }
   el.querySelector('.page').insertAdjacentHTML('beforeend', `<h2>Xử lý dòng trả lại</h2>
-    <p class="muted">Dòng <b>BLOCK</b>: chưa tìm được hoá đơn gốc. <b>AUTO-MATCHED</b>: hệ thống tự chọn hoá đơn gần nhất của cùng khách – sản phẩm (cần xác nhận). <b>MANUAL COST</b>: dùng đơn giá vốn nhập tay.
+    <p class="muted">Dòng <b>BLOCK</b>: chưa tìm được hoá đơn gốc. <b>AUTO-MATCHED</b>: hệ thống tự chọn hoá đơn gần nhất của cùng khách – sản phẩm (cần xác nhận). <b>MANUAL COST</b>: dùng đơn giá vốn nhập tay – chỉ được áp dụng sau khi <b>một người dùng khác</b> bấm Duyệt; không dùng để trả vượt số lượng còn lại của hoá đơn gốc.
     Nhập <b>Hoá đơn gốc</b> (ưu tiên) hoặc <b>Đơn giá vốn/sp (VND)</b> khi hàng bán trước thời kỳ dùng web, kèm ghi chú, rồi bấm RUN STEP 5R lại.</p>
     <div class="el-wrap"><table class="cp" id="t5r-fix"><thead><tr><th>Ngày</th><th>Hoá đơn trả</th><th>Khách hàng</th><th>Sản phẩm</th><th class="r">SL trả</th><th>Trạng thái</th><th>Hoá đơn gốc</th><th>Đơn giá vốn/sp (VND)</th><th>Ghi chú</th><th></th></tr></thead><tbody>
     ${need.map((r, i) => { const m = M[r.key] || {}; const dl = `dl5r${i}`; return `<tr data-k="${esc(r.key)}"><td>${esc(serialToISO(r.date))}</td><td>${esc(r.returnInv)}</td><td>${esc(r.customer)}</td><td>${esc(r.product)}</td><td class="r">${A.fmtNum(r.returnQty)}</td><td>${A.pill(r.status === 'PROCESSED' ? 'PASS' : r.status === 'BLOCK' ? 'BLOCK' : 'REVIEW')} <small>${esc(r.status)}</small></td>
       <td><input name="origInv" list="${dl}" value="${esc(m.origInv || (r.status === 'AUTO-MATCHED' ? r.originalInv : ''))}" ${edit ? '' : 'disabled'} style="min-width:150px"><datalist id="${dl}">${[...(inv.get(utxt(r.product)) || [])].map((x) => `<option value="${esc(x)}">`).join('')}</datalist></td>
       <td><input name="unitCost" inputmode="decimal" value="${m.unitCost ? A.fmtNum(m.unitCost) : ''}" ${edit ? '' : 'disabled'} style="width:130px;text-align:right"></td>
       <td><input name="note" value="${esc(m.note || '')}" ${edit ? '' : 'disabled'} placeholder="Căn cứ / chứng từ" style="min-width:180px"></td>
-      <td>${edit ? `<button class="btn sm" type="button" data-5r-save>Lưu</button>${M[r.key] ? ' <button class="btn ghost sm" type="button" data-5r-del>Xoá</button>' : ''}` : ''}</td></tr>`; }).join('')}
+      <td>${edit ? `<button class="btn sm" type="button" data-5r-save>Lưu</button>${M[r.key] ? ' <button class="btn ghost sm" type="button" data-5r-del>Xoá</button>' : ''}` : ''}${approvalCell(m, edit)}</td></tr>`; }).join('')}
     </tbody></table></div>`);
   if (!edit) return;
   el.querySelectorAll('#t5r-fix [data-5r-save]').forEach((b) => b.addEventListener('click', () => {
@@ -530,6 +537,16 @@ function resolvePanel(el, S, res, rc) {
     (d.returnMatches || (d.returnMatches = {}))[key] = { origInv, unitCost, note, by: A.who(), at: nowISO() };
     A.audit('STEP 5R RESOLVE', `${key}: ${origInv ? 'HĐ gốc ' + origInv : ''}${unitCost ? ' đơn giá ' + unitCost : ''} – ${note}`);
     A.markDirty('returnMatches', 'audit'); A.toast('Đã lưu. Bấm RUN STEP 5R để áp dụng.', 'review'); A.render();
+  }));
+  el.querySelectorAll('#t5r-fix [data-5r-approve]').forEach((b) => b.addEventListener('click', () => {
+    if (!A.guardEdit()) return;
+    const key = b.closest('tr').dataset.k; const m = d.returnMatches && d.returnMatches[key];
+    if (!m || !(num(m.unitCost) > 0)) return;
+    if (utxt(m.by) === utxt(A.who())) { A.toast('Người nhập đơn giá không được tự duyệt. Cần một người dùng khác.', 'block'); return; }
+    if (!confirm(`Duyệt đơn giá vốn ${A.fmtNum(m.unitCost)} VND/sp cho dòng trả lại này?\nCăn cứ: ${m.note || ''}\nNgười nhập: ${m.by || ''}`)) return;
+    Object.assign(m, { approvedBy: A.who(), approvedAt: nowISO() });
+    A.audit('STEP 5R APPROVE MANUAL COST', `${key}: đơn giá ${m.unitCost} (nhập bởi ${m.by}) – ${m.note}`);
+    A.markDirty('returnMatches', 'audit'); A.toast('Đã duyệt. Bấm RUN STEP 5R để áp dụng.', 'review'); A.render();
   }));
   el.querySelectorAll('#t5r-fix [data-5r-del]').forEach((b) => b.addEventListener('click', () => {
     if (!A.guardEdit()) return;
@@ -748,6 +765,11 @@ export function doBuildHistory() {
   if (recon.batch7 !== 'PASS') { A.toast(`FG History KHÔNG được tạo: Batch 7 = ${recon.batch7}.`, 'block'); return; }
   const rs = returnStale(S, D5);
   if (rs) { A.toast(`BUILD FG HISTORY bị chặn – STEP 5R: ${rs}. Mở màn hình 5R → RUN STEP 5R.`, 'block'); return; }
+  // v1.14.19 (audit P1-06): an auto-matched original invoice must be confirmed by a user before history is final
+  const rcRows = (res.returnControl && res.returnControl.rows) || [];
+  const rBlk = rcRows.filter((r) => r.status === 'BLOCK').length, rAuto = rcRows.filter((r) => r.status === 'AUTO-MATCHED').length;
+  if (rBlk) { A.toast(`BUILD FG HISTORY bị chặn – STEP 5R còn ${rBlk} dòng trả lại BLOCK (chưa có hoá đơn gốc / đơn giá chưa duyệt / trả vượt hoá đơn).`, 'block'); return; }
+  if (rAuto) { A.toast(`BUILD FG HISTORY bị chặn – STEP 5R còn ${rAuto} dòng AUTO-MATCHED: kiểm tra hoá đơn gốc hệ thống tự chọn, bấm Lưu để xác nhận rồi RUN STEP 5R.`, 'block'); return; }
   if (F5.reworkCount(d.register) && (!res.rework || res.rework.gate8 !== 'PASS')) { A.toast(`BUILD FG HISTORY bị chặn: FG Rework Batch 8 = ${res.rework ? res.rework.gate8 : 'NOT RUN'}.`, 'block'); return; }
   try {
     const fl = P2.derive(S).d4.fl;

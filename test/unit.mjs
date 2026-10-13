@@ -247,8 +247,12 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const rAuto = F5.runFIFO({ ...ctx({}), salesRows: noInv });
   eq('#6 no original invoice → latest invoice, AUTO (review, not block)', [rAuto.sales.find((x) => x.inv === 'CN5').matchedOrigInv, rAuto.returnControl.status], ['Y2', 'REVIEW']);
   const cn5 = rAuto.sales.find((x) => x.inv === 'CN5').key;
-  const rMan = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { unitCost: 150, note: 'pre-web sale' } } });
-  eq('#6 manual unit cost resolution', [rMan.sales.find((x) => x.inv === 'CN5').matchMode, Math.round(rMan.sales.find((x) => x.inv === 'CN5').tot), rMan.rec[9].status], ['MANUAL', -150, 'PASS']);
+  const rPend = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { unitCost: 150, note: 'pre-web sale', by: 'a@svl' } } });
+  eq('#6 manual unit cost NOT approved → BLOCK (v1.14.19 audit P0-02)', [rPend.sales.find((x) => x.inv === 'CN5').status === 'RETURNED', rPend.returnControl.status], [false, 'BLOCK']);
+  const rSelf = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { unitCost: 150, note: 'pre-web sale', by: 'a@svl', approvedBy: 'a@svl' } } });
+  eq('#6 manual unit cost approved by the same user → still BLOCK', rSelf.returnControl.status, 'BLOCK');
+  const rMan = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { unitCost: 150, note: 'pre-web sale', by: 'a@svl', approvedBy: 'b@svl' } } });
+  eq('#6 manual unit cost approved by another user', [rMan.sales.find((x) => x.inv === 'CN5').matchMode, Math.round(rMan.sales.find((x) => x.inv === 'CN5').tot), rMan.rec[9].status], ['MANUAL', -150, 'PASS']);
   const rPick = F5.runFIFO({ ...ctx({}), salesRows: noInv, returnMatches: { [cn5]: { origInv: 'Y1', note: 'credit note ref Y1' } } });
   eq('#6 chosen original invoice', [rPick.sales.find((x) => x.inv === 'CN5').matchedOrigInv, rPick.returnControl.status], ['Y1', 'PASS']);
   const rr = F5.runFIFO({ ...ctx({}), salesRows: rt, mode: 'STRICT_DATE' });
@@ -612,6 +616,51 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   const r4c = ruleSummary(sR).find((r) => r.code === 'R4c');
   eq('R4c: the unmatched O job code is allocated to all O lots', [r4c && r4c.alloc, r4c && r4c.lines], [50, 2]);
   eq('R4c: counted in the broad fallback amount (checkpoint 11)', fb, 50);
+}
+
+// ---- v1.14.19 audit Release A — the exact regression cases of the 13/10/2026 audit
+{
+  const RT = await import('../src/engine/return.js');
+  // P0-02: invoice sold 100, 60 already returned, return 50 with an approved manual cost → BLOCK (10 over), nothing booked
+  const cand = [{ inv: 'INV1', prod: 'A', cust: 'C', date: ser(2026, 8, 2), fq: 100, rm: 1000, c622: 0, c627: 0, tot: 1000, returned: 60 }];
+  const sale = { prod: 'A', qty: -50, date: ser(2026, 8, 20), cust: 'C', inv: 'CN9' };
+  const r1 = RT.processReturnEvent({ sale, candidates: cand, returnedNow: new Map(), period: P2, sequence: 1, match: { origInv: 'INV1', unitCost: 10, by: 'a@svl', approvedBy: 'b@svl' } });
+  eq('P0-02: over-return with manual cost → BLOCK, 40 left, 10 over, no FG layer', [r1.ok, r1.available, /vượt 10/.test(r1.message), !!r1.layer], [false, 40, true, false]);
+  const r2 = RT.processReturnEvent({ sale: { ...sale, qty: -40 }, candidates: cand, returnedNow: new Map(), period: P2, sequence: 1, match: { origInv: 'INV1' } });
+  eq('P0-02: return within the remaining 40 is booked at the invoice cost', [r2.ok, r2.qty, Math.round(r2.amount)], [true, 40, 400]);
+  const r3 = RT.processReturnEvent({ sale: { ...sale, qty: -5 }, candidates: [], returnedNow: new Map(), period: P2, sequence: 1, match: { unitCost: 10, by: 'a@svl' } });
+  eq('P0-02: legacy manual cost without a second-person approval → BLOCK', [r3.ok, /CHỜ DUYỆT/.test(r3.message)], [false, true]);
+  // P0-01: STRICT_DATE, opening FG 0, production layer without date, sale on 05/08 → layer not consumed, 09c counts it
+  const opU = { period: P2, status: 'LOADED', rows: [] }; F5.validateOpeningFG(opU, P2);
+  const caU = [{ pc: 'PCU', date: null, prod: 'A', name: 'A', qty: 5, totalRM: 300, t622: 100, t627: 100, totalCost: 500, statusText: '' }];
+  const sU = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'XU', 'A', 2, 20)] }, { rows: [] }, P2).db.rows;
+  const rU = F5.runFIFO({ period: P2, opening: opU, caRows: caU, salesRows: sU, pmRows: [], fx: 25000, overrides: {}, dupDecisions: {}, tol: 1, mode: 'STRICT_DATE', step4: { current: 'CURRENT', overall: 'PASS', finalCost: 500, qty: 5 } });
+  const xu = rU.sales.find((x) => x.inv === 'XU');
+  eq('P0-01: STRICT_DATE never consumes an undated production layer', [num(xu.fq), xu.status, rU.stats.undatedLayers], [0, 'INSUFFICIENT FG', 1]);
+  const caD = [{ ...caU[0], date: ser(2026, 8, 1) }];
+  const rD = F5.runFIFO({ period: P2, opening: opU, caRows: caD, salesRows: sU, pmRows: [], fx: 25000, overrides: {}, dupDecisions: {}, tol: 1, mode: 'STRICT_DATE', step4: { current: 'CURRENT', overall: 'PASS', finalCost: 500, qty: 5 } });
+  eq('P0-01: the same layer with a date before the sale is used', [num(rD.sales.find((x) => x.inv === 'XU').fq), rD.stats.undatedLayers], [2, 0]);
+  // P0-01 root cause: a text completion date in PC-P is read as a date by STEP 2 (was num() → 0)
+  const { runStep2: rs2 } = await import('../src/engine/step2.js');
+  const { buildDataset: bd2 } = await import('../src/engine/step1.js');
+  const HPd = ['PC No.', 'Document Group', 'Date', 'Status', 'MO No.', 'Sub-MO', 'Product Code', 'Product Name', 'Location', 'Unit', 'Current Complete Qty', 'Total Cost'];
+  const HSOd = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Base Unit', 'Base Qty', 'Base Unit Cost', 'Total Cost', 'MO No.', 'DIVISION', 'JOB CODE', 'CUSTOMER'];
+  const HSSd = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Quantity', 'Unit', 'Location', 'Base Unit Cost', 'Total Cost', 'Remark', 'MO No.', 'Doc Ref 1', 'DIVISION', 'JOB CODE'];
+  const HSTd = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Unit', 'Quantity', 'Total Cost', 'Customer', 'MO No.'];
+  const dsD = {}; const addD = (name, h, rows) => { const x = bd2([h, ...rows], `${name}-202608.xlsx`, P2); dsD[x.key] = x; };
+  addD('PC-P-O', HPd, [['PC-O1', 'PC', '05/08/2026', 'Completed', 'MO-1', 'MO-1-001', 'OLX-300', 'Bag', 'MKX1', 'PCS', 1, 100]]);
+  addD('PC-P-T', HPd, []); addD('STOCK OUT-O', HSOd, []); addD('STOCK OUT-T', HSTd, []); addD('STOCK OUT-S', HSSd, []);
+  eq('P0-01 root cause: text PC-P date "05/08/2026" is kept as a date in STEP 2', rs2(dsD, P2).pc[0].date, ser(2026, 8, 5));
+}
+
+// ---- v1.14.19 sales import reads text numbers with the decimal comma
+{
+  const { importSales } = await import('../src/engine/step4.js');
+  const g = [['Invoice Date', 'Invoice No', 'Customer', 'Product Number', 'Product Name', 'Exchange Rate', 'Quantity', 'Unit Price', 'Amount USD', 'Amount VND'],
+    [ser(2026, 8, 5), 'I1', 'C', 'P1', 'n', 26300, '34,6', '2,5', '86,5', '2.274.950'], [ser(2026, 8, 5), 'I2', 'C', 'P2', 'n', 26300, 10, 'abc', 20, 526000]];
+  const st = importSales({ S: g }, 'f.xlsx', 'MONTHLY', P2);
+  eq('sales import: "34,6" = 34.6 (was 346), "2.274.950" = 2274950', [st.rows[0].qty, st.rows[0].unitPrice, st.rows[0].amtUSD, st.rows[0].amtVND], [34.6, 2.5, 86.5, 2274950]);
+  eq('sales import: unreadable text is kept for validation to flag', st.rows[1].unitPrice, 'abc');
 }
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);

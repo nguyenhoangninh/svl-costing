@@ -208,7 +208,7 @@ export function runFIFO(ctx) {
     if (!s5t(r.pc) || !prod || !(qty > 0)) continue;
     const n = L.length + 1 - nO;
     const pDate = dateVal(r.date);
-    // STRICT_DATE without a completion date: usable but flagged (checkpoint 09c) instead of stopping the run.
+    // STRICT_DATE without a completion date: the layer is never consumed (v1.14.19) and checkpoint 09c blocks.
     const l = { lid: `PR-${period.replace('-', '')}-${s5t(r.pc)}-${pad(n, 3)}`, src: 'PRODUCTION', sp: period, pc: s5t(r.pc), dt: pDate || 0, mo: s5t(r.sub) || s5t(r.mo), prod, name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty, rm: num(r.totalRM), a622: num(r.t622), a627: num(r.t627), tot: num(r.totalCost), price: num(r.price), prov: 0, cons: '', flag: '' };
     if (/NON-POSITIVE/i.test(txt(r.statusText))) l.flag = 'STEP 4 REVIEW: no 622/627 allocated (non-positive contribution)';
     L.push(l); step4Qty += qty; step4Cost += l.tot;
@@ -369,14 +369,19 @@ export function runFIFO(ctx) {
       let nd = x.k === 'S' ? x.s.qty : x.e.qty; const takes = [];
       for (const l of prodLayers) {
         if (nd <= TOLQ) break;
-        if (!(l.dt <= x.d || l.dt === 0)) continue;
         const avail = l.qty - l.oq - (l.rq || 0);
         if (avail <= TOLQ) continue;
+        // v1.14.19 (audit P0-01): STRICT_DATE never consumes a production layer without a completion date –
+        // its order against the sale / rework cannot be proven. The layer stays in closing FG and checkpoint 09c BLOCKS.
+        if (l.dt === 0 && l.src !== 'OPENING') {
+          undatedUsed.add(l.lid || `${l.pc}|${prod}`);
+          if (x.k === 'S') x.s.msg += `Production layer ${l.pc || ''} has no completion date – not used (STRICT_DATE); `;
+          continue;
+        }
+        if (!(l.dt <= x.d || l.dt === 0)) continue;
         const take = avail <= nd + TOLQ ? avail : nd;
-        if (l.dt === 0 && l.src !== 'OPENING') undatedUsed.add(l.lid || `${l.pc}|${prod}`);
         if (x.k === 'S') {
           const s = x.s; const d = takeLayer(l, take, D, prod, s.seq);
-          if (l.dt === 0 && l.src !== 'OPENING') s.msg += `Used production layer ${l.pc || ''} without completion date; `;
           s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
         } else { l.rq = (l.rq || 0) + take; takes.push({ lid: l.lid, qty: take }); }
         nd -= take;
