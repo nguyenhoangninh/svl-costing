@@ -3,7 +3,8 @@
 // node test/e2e-returns.mjs <base-url> <costing.xlsm> <outDir>
 import { chromium } from 'playwright';
 import path from 'node:path';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 const [, , base0, wbPath, outDir] = process.argv;
 const base = base0 + '?sandbox=1';
 // a combined ERP-style file: one physical return of an August invoice, one credit note, one ordinary sale (must be skipped)

@@ -1,6 +1,6 @@
 {
   "name": "svl-costing",
-  "version": "1.14.19",
+  "version": "1.14.20",
   "description": "SVL Costing Master on the web",
   "scripts": {
     "test": "node test/unit.mjs && node test/synth.mjs && node test/rules-contract.mjs && node test/xlsxstyle.mjs",
@@ -8,9 +8,6 @@
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "xlsx": "^0.18.5"
-  },
   "type": "module",
   "devDependencies": {
     "playwright": "^1.63.0"

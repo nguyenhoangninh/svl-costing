@@ -1,7 +1,8 @@
 // Regression test STEP 3B + STEP 4 vs the Aug-2026 workbook.
 // Usage: node test/verify2.mjs <costing.xlsm> <erp-fixture-folder> <sales-fixture.xlsx>
 import fs from 'node:fs';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 import { loadWorkbook, loadDatasets, runBase, checker, PERIOD } from './load.mjs';
 import { sheetToGrid } from '../src/engine/grid.js';
 import { MAP_FIELDS, deriveInput, runBuild, engineDynamic, applyControl, wipFinal, postedByLot, balancePassCount } from '../src/engine/step3b.js';

@@ -3,7 +3,8 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 
 const [, , base = 'http://localhost:8765/', fixDir, outDir] = process.argv;
 const root = base + (base.includes('?') ? '&' : '?') + 'sandbox=1';

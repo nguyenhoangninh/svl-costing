@@ -1,7 +1,8 @@
 // Shared loader for regression tests: workbook grids + Step 1-3 engine run on ERP fixtures.
 import fs from 'node:fs';
 import path from 'node:path';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 import { sheetToGrid } from '../src/engine/grid.js';
 import { buildDataset, planImport } from '../src/engine/step1.js';
 import { runStep2, buildReworkRegister, RW_FIELDS } from '../src/engine/step2.js';

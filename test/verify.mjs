@@ -2,7 +2,8 @@
 // Usage: node test/verify.mjs <costing.xlsm> <erp-fixture-folder>
 import fs from 'node:fs';
 import path from 'node:path';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 import { sheetToGrid } from '../src/engine/grid.js';
 import { buildDataset, planImport, step1Status } from '../src/engine/step1.js';
 import { runStep2, buildReworkRegister, step2Classification, RW_FIELDS } from '../src/engine/step2.js';
