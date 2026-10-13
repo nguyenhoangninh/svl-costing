@@ -14,6 +14,7 @@ import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
 import { step2ReportSheets, ruleSummary, ruleOf } from './engine/step2report.js';
+import * as TPL from './engine/templates.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
@@ -1231,7 +1232,10 @@ document.addEventListener('click', async (e) => {
     case 'reset-wip':
       if (confirm(`Xoá Opening WIP kỳ ${S.period}? (Không xoá dữ liệu ERP)`)) { S.d.opening = null; audit('OPENING WIP RESET', ''); markDirty('opening', 'audit'); render(); } break;
     case 'template-wip':
-      exportBook('SVL_WIP_Opening_Template.xlsx', [{ name: 'WIP_OPENING', keep: true, header: 5, aoa: [['WIP OPENING BALANCE CONTROL'], ['Opening Period', S.period], [], [], ['Material Code', 'Material Name', 'Unit', 'Opening Qty', 'Opening Amount', 'Source', 'Note']] }]); break;
+      exportBook(`SVL_WIP_Opening_Template_${S.period}.xlsx`, TPL.wipOpeningTemplate(S.period)); break;
+    case 'sales-tpl': await exportBook(`SVL_Sales_Revenue_Import_Template_v2_${S.period}.xlsx`, TPL.salesTemplate(S.period)); break;
+    case 'ret-tpl': await exportBook(`SVL_Sales_Returns_Import_Template_v1_${S.period}.xlsx`, TPL.returnsTemplate(S.period)); break;
+    case 'so-tpl': await exportBook(`SVL_SO_Price_Import_Template_v1_${S.period}.xlsx`, TPL.soTemplate(S.period)); break;
     case 'reset-erp': {
       const has = (sc) => Object.keys({ ...S.d.datasets, ...S.d.importLog }).filter((k) => sc === 'ALL' || k.endsWith('-' + sc));
       const sc = (prompt(`Xoá dữ liệu ERP đã import của kỳ ${S.period}.\n\nBước 1/2 – nhập PHẠM VI cần xoá:\n  ALL = cả 3 hệ (${has('ALL').length} báo cáo)\n  T = hệ T (${has('T').length})   S = hệ S (${has('S').length})   O = hệ O (${has('O').length})`, 'ALL') || '').trim().toUpperCase();

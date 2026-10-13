@@ -203,7 +203,7 @@ export function templateAOA(rows, forPeriod, note = '') {
   return [
     [FGP_MARKER, 'v1', 'SVL - THÀNH PHẨM SẢN XUẤT LŨY KẾ TỪ ĐẦU NĂM (FILE ĐẦU KỲ CHO STEP 4.4)'],
     ['Dùng cho kỳ', forPeriod, 'Gồm các tháng', rows.length ? [...new Set(rows.map((r) => r.period))].sort().join(', ') : `${yearOf(forPeriod)}-01 … tháng trước ${forPeriod}`, note],
-    ['Mỗi dòng là một lô (hoặc một sản phẩm / tháng). Bắt buộc: Kỳ (YYYY-MM, cùng năm và trước kỳ dùng), Product Code, Complete Qty, Tổng giá thành (hoặc RM + 622 + 627). Không đổi tiêu đề dòng 4.'],
+    ['Mỗi dòng là một lô (hoặc một sản phẩm / tháng). Bắt buộc: Kỳ (YYYY-MM, cùng năm và trước kỳ dùng), Product Code, Complete Qty, Tổng giá thành (hoặc RM + 622 + 627). Không đổi tiêu đề dòng 4. Hướng dẫn chi tiết và ví dụ: sheet HUONG_DAN.'],
     TPL_COLS.map(([, h]) => h),
     ...rows.map((r) => TPL_COLS.map(([k]) => (k === 'date' && typeof r.date === 'number' ? isoDate(r.date) : k === 'soldQty0' ? num(r.soldQty) + num(r.rwQty) || num(r.soldQty0) || '' : k === 'soldTot0' ? num(r.soldTot) + num(r.rwTot) || num(r.soldTot0) || '' : r[k] ?? ''))),
   ];

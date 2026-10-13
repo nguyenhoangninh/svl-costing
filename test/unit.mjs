@@ -682,5 +682,55 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('PC price: Price Master of another period → RERUN', pcPriceCheck(s2, { ...pm, period: '2026-07' }, P2).status, 'RERUN PRICE MASTER');
 }
 
+// ---- v1.14.23 import templates: the guide examples import cleanly with the real readers; the guide sheet is never read as data
+{
+  const T = await import('../src/engine/templates.js');
+  const S3 = await import('../src/engine/step3.js');
+  const F4x = await import('../src/engine/step4.js');
+  const FPx = await import('../src/engine/fgprod.js');
+  const P9 = '2026-09';
+  const book = (sheets, fill) => Object.fromEntries(sheets.map((sh, i) => [sh.name, i === 0 ? [...sh.aoa, ...fill] : sh.aoa]));
+  const guideOnly = (sheets) => ({ [T.GUIDE_SHEET]: sheets.find((x) => x.name === T.GUIDE_SHEET).aoa });
+  const thrown = (fn) => { try { const r = fn(); return r === null || r === undefined ? 'null' : ''; } catch (e) { return e.message; } };
+  // WIP opening
+  const wip = T.wipOpeningTemplate(P9);
+  const gw = book(wip, T.exampleRows(T.WIP_COLS));
+  const det = S3.detectOpeningSource(gw);
+  const { opening } = S3.openingFromSource(gw, det, 'wip.xlsx', P9);
+  eq('template WIP: examples read from WIP_OPENING (2 rows, codes, amounts)', [det.sheet, opening.rows.length, opening.rows.map((r) => String(r.code)), opening.rows.map((r) => r.amt)], ['WIP_OPENING', 2, ['50120788', '300001'], [600991.2, 1250000]]);
+  eq('template WIP: guide sheet alone is not a WIP table', S3.detectOpeningSource(guideOnly(wip)), null);
+  // FG opening (template rows 1–4 as in STEP 5.1 + guide)
+  const fgData = { name: 'FG_OPENING', aoa: [[F5.TPL_MARKER, 'v1', 'x'], ['Opening Period', '', P9, 'Source Closing', '2026-08', 'Prepared By', 'tester', 'Prepared At'], ['note'], F5.TPL_HEADERS] };
+  const gf = book([fgData, T.fgOpeningGuide(P9)], T.exampleRows(T.FG_OPEN_COLS));
+  const of = F5.importOpeningFG(gf, 'fg.xlsx', P9); F5.validateOpeningFG(of, P9);
+  eq('template FG opening: 2 example lots validate', [of.rows.length, of.status, of.rows.filter((r) => /ERROR|BLOCK/.test(String(r.status))).length], [2, 'VALIDATED', 0]);
+  eq('template FG opening: guide sheet alone is not a template', /Không thấy template/.test(thrown(() => F5.importOpeningFG(guideOnly([T.fgOpeningGuide(P9)].map((x) => x)), 'g.xlsx', P9))), true);
+  // FG production YTD
+  const fpData = { name: 'FG_PRODUCTION', aoa: FPx.templateAOA([], P9) };
+  const gp = book([fpData, T.fgProductionGuide(P9)], T.exampleRows(T.FG_PROD_COLS));
+  const op = FPx.importOpening(gp, 'fp.xlsx', P9);
+  eq('template FG production: 2 example rows, no BLOCK', [op.rows.length, op.block || 0], [2, 0]);
+  eq('template FG production: guide sheet alone is not a table', /Không tìm thấy bảng/.test(thrown(() => FPx.importOpening(guideOnly([T.fgProductionGuide(P9)]), 'g.xlsx', P9))), true);
+  // Sales revenue (TK 511)
+  const sales = T.salesTemplate(P9);
+  const ss = F4x.importSales(book(sales, T.exampleRows(T.SALES_COLS)), 's.xlsx', 'MONTHLY', P9);
+  const sv = F4x.validateSaveSales(ss, { rows: [] }, P9, { book: 'SALES' });
+  eq('template sales: 2 example lines saved, none blocked or skipped', [ss.rows.length, sv.stats.saved, sv.stats.skipped], [2, 2, 0]);
+  eq('template sales: example 2 (B/L in October) is recognised in October', sv.db.rows.map((r) => r.month), [9, 10]);
+  eq('template sales: guide sheet alone is not a sales table', /Không tìm thấy sheet doanh thu/.test(thrown(() => F4x.importSales(guideOnly(sales), 'g.xlsx', 'MONTHLY', P9))), true);
+  // Returns (TK 5212 / 5213)
+  const rets = T.returnsTemplate(P9);
+  const rs = F4x.importSales(book(rets, T.exampleRows(T.RETURN_COLS)), 'r.xlsx', 'MONTHLY', P9);
+  const rv = F4x.validateSaveSales(rs, { rows: [] }, P9, { book: 'RETURNS' });
+  eq('template returns: SALES RETURN + CREDIT NOTE examples saved in the returns book', [rv.stats.saved, rv.stats.skipped, rv.db.rows.map((r) => r.tranType)], [2, 0, ['SALES RETURN', 'CREDIT NOTE']]);
+  // SO price list
+  const so = T.soTemplate(P9);
+  const sr = F4x.parseSOGrids(book(so, T.exampleRows(T.SO_COLS)));
+  eq('template SO: 2 example rows with full product codes and prices', [sr.length, sr.map((r) => r.product), sr.map((r) => r.price)], [2, ['SP101-10-043-003', 'OLI-5017VU'], [137.78, 34.6]]);
+  eq('template SO: guide sheet alone is not an SO table', /Không tìm thấy bảng/.test(thrown(() => F4x.parseSOGrids(guideOnly(so)))), true);
+  // every guide has its header row styled and one line per data column
+  eq('template guides: one guide line per data column', [wip, sales, rets, so].map((x) => x[1].aoa.length - x[1].header === x[0].aoa[x[0].header - 1].length), [true, true, true, true]);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

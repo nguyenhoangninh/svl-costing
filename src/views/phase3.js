@@ -1,5 +1,6 @@
 // Phase 3 views: STEP 5 — Opening FG, FIFO COGS + FG Rework FIFO (5B), FG History & month close.
 import * as F5 from '../engine/step5.js';
+import * as TPL from '../engine/templates.js';
 import * as F4 from '../engine/step4.js';
 import * as P2 from './phase2.js';
 import * as FGP from './fgprod.js';
@@ -325,7 +326,7 @@ export async function doTemplate() {
   if (pd && pd.step5 && pd.step5.closing && confirm(`Điền sẵn template bằng FG cuối kỳ ${prev} (${pd.step5.closing.length} lớp)?`)) {
     rows = pd.step5.closing.map((c) => [c.pc, typeof c.date === 'number' ? serialToISO(c.date) : c.date, c.mo, c.prod, c.name, c.loc, c.unit, c.qty, c.rm, c.a622, c.a627, c.tot, c.price, c.prov, c.cons, `05_FG_CLOSING ${prev} | ${c.lid}`, '']);
   }
-  await A.exportBook(`SVL_FG_Opening_Import_Template_v1_${S.period}.xlsx`, [{ name: 'FG_OPENING', keep: true, header: 4, aoa: [[F5.TPL_MARKER, 'v1', 'SVL - OPENING FINISHED GOODS BY PRODUCTION LOT (IMPORT TEMPLATE FOR STEP 5)'], ['Opening Period', '', S.period, 'Source Closing', prev, 'Prepared By', '', 'Prepared At'], ['Mỗi dòng là một lô còn tồn. Bắt buộc: PC No., Layer Date, Product Code, Qty, RM / 622 / 627 / Total Amount. Không đổi tiêu đề dòng 4 và dấu A1.'], F5.TPL_HEADERS, ...rows], cols: [15, 11, 17, 19, 32, 12, 7, 10, 17, 16, 16, 17, 11, 15, 13, 22, 24] }]);
+  await A.exportBook(`SVL_FG_Opening_Import_Template_v1_${S.period}.xlsx`, [{ name: 'FG_OPENING', keep: true, header: 4, aoa: [[F5.TPL_MARKER, 'v1', 'SVL - OPENING FINISHED GOODS BY PRODUCTION LOT (IMPORT TEMPLATE FOR STEP 5)'], ['Opening Period', '', S.period, 'Source Closing', prev, 'Prepared By', '', 'Prepared At'], ['Mỗi dòng là một lô còn tồn. Bắt buộc: PC No., Layer Date, Product Code, Qty, RM / 622 / 627 / Total Amount. Không đổi tiêu đề dòng 4 và dấu A1. Hướng dẫn chi tiết và ví dụ: sheet HUONG_DAN.'], F5.TPL_HEADERS, ...rows], cols: [15, 11, 17, 19, 32, 12, 7, 10, 17, 16, 16, 17, 11, 15, 13, 22, 24] }, TPL.fgOpeningGuide(S.period)]);
 }
 
 // ======================= 5.2 FIFO COGS =======================
@@ -427,7 +428,7 @@ export function viewReturns(el) {
   const box = el.querySelector('#t5r-box');
   if (tab === 'import') {
     box.innerHTML = `<div class="row"><label>Chế độ <select id="r-mode"><option>YTD</option><option>MONTHLY</option></select></label>
-      <label class="btn">Chọn file hàng trả lại / giảm giá…<input type="file" id="f-ret" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label>
+      <label class="btn">Chọn file hàng trả lại / giảm giá…<input type="file" id="f-ret" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label><button class="btn ghost" type="button" data-act="ret-tpl">Tải template (có hướng dẫn)</button>
       <button class="btn" type="button" data-act="ret-save" ${st && st.rows.length && !String(st.status).includes('SAVED') && !closed ? '' : 'disabled'}>Validate &amp; Save</button>
       <span class="muted">${st ? `${esc(st.fileName || '')} · ${esc(st.mode || '')} · ${A.pill(st.status)}` : 'Chưa import.'}</span></div>
       <p class="muted">Cùng cấu trúc cột với file doanh thu (Invoice Date, Customer, Product Number, Quantity, Amount USD / VND, SI Invoice No., Transaction Type; nên có <b>Original Invoice No.</b> và Bill Date). Chỉ nhận dòng <b>SALES RETURN</b> (SL âm, hoặc chỉ có tiền) và <b>CREDIT NOTE</b>; dòng bán hàng thường bị bỏ qua, nên dùng được cả file ERP xuất chung. Validate &amp; Save thay toàn bộ dòng trả lại cũ trong khoảng ngày của file (YTD: từ 01/01 đến hết kỳ).</p><div id="t-rstg"></div>`;

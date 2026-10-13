@@ -258,6 +258,7 @@ export function viewSales(el) {
   if (tab === 'import') {
     box.innerHTML = `<div class="row"><label>Chế độ <select id="s-mode"><option>YTD</option><option>MONTHLY</option></select></label>
       <label class="btn">Chọn file doanh thu…<input type="file" id="f-sales" accept=".xlsx,.xlsm,.xls,.xlsb" hidden></label>
+      <button class="btn ghost" type="button" data-act="sales-tpl">Tải template (có hướng dẫn)</button>
       <button class="btn" type="button" data-act="sales-save" ${st && st.rows.length && !String(st.status).includes('SAVED') ? '' : 'disabled'}>Validate &amp; Save</button>
       <span class="muted">${st ? `${esc(st.fileName || '')} · ${esc(st.mode || '')} · ${A.pill(st.status)}` : 'Chưa import.'}</span></div>
       <p class="muted">File cần có Invoice Date, Product Number, Quantity, Amount (USD). Nếu có Bill/B.L. Date thì đây là Recognition Date bắt buộc và phải hợp lệ. YTD chỉ thay dữ liệu đến hết kỳ giá thành, không đụng các kỳ tương lai. Dòng SALES RETURN / CREDIT NOTE trong file được bỏ qua (SKIPPED) – import chúng ở <a href="#salesreturn">màn hình 5R</a> (có thể dùng cùng file).</p><div id="t-stg"></div>`;
@@ -304,7 +305,7 @@ export function viewSales(el) {
     const cp = F.PC_PRICE_FIELDS.map((f, i) => ({ key: f, label: F.PC_PRICE_HEADERS[i], type: f === 'qty' ? 'qty' : f === 'price' ? 'qty' : f === 'salesUSD' ? 'num' : f === 'status' ? 'status' : 'text', width: f === 'name' ? 260 : f === 'source' ? 200 : f === 'status' ? 220 : f === 'erp' ? 50 : 120 }));
     A.mountTable(box.querySelector('#t-pcp'), { columns: cp, rows: pcc.rows, filterKey: 'status', height: 480, totals: ['qty', 'salesUSD'], onExport: A.exportTable('04_PC_PRICE_CHECK', cp) });
   } else if (tab === 'so') {
-    box.innerHTML = `<div class="row"><label class="btn ghost">Import danh sách SO…<input type="file" id="f-so" accept=".xlsx,.xlsm,.xls" hidden></label><span class="muted">Cần cột Product Code và Unit Price USD (tuỳ chọn: Active, SO Date, SO No., Customer, Qty, Note). Import sẽ thay toàn bộ danh sách.</span></div><div id="t-so"></div>`;
+    box.innerHTML = `<div class="row"><label class="btn ghost">Import danh sách SO…<input type="file" id="f-so" accept=".xlsx,.xlsm,.xls" hidden></label><button class="btn ghost" type="button" data-act="so-tpl">Tải template (có hướng dẫn)</button><span class="muted">Cần cột Product Code và Unit Price USD (tuỳ chọn: Active, SO Date, SO No., Customer, Qty, Note). Import sẽ thay toàn bộ danh sách.</span></div><div id="t-so"></div>`;
     box.querySelector('#f-so').addEventListener('change', (e) => importSOFile(e.target.files[0]));
     const cols = [['active', 'Active', 60], ['product', 'Product Code', 140], ['soDate', 'SO Date', 100, 'date'], ['soNo', 'SO No.', 140], ['customer', 'Customer', 140], ['qty', 'Qty', 90, 'qty'], ['price', 'Unit Price USD', 110, 'qty'], ['note', 'Note', 220], ['check', 'Price Master Check', 320]].map(([key, label, width, type]) => ({ key, label, width, type }));
     A.mountTable(box.querySelector('#t-so'), { columns: cols, rows: d.soPrice || [], filterKey: 'check', height: 480, onExport: A.exportTable('04_SO_PRICE', cols) });
@@ -356,24 +357,7 @@ async function importSOFile(file) {
   await A.busy(`Đang đọc ${file.name}…`, async () => {
     try {
       const res = await A.parseFile(await file.arrayBuffer(), 'all');
-      const norm = (s) => txt(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
-      let found = null;
-      for (const g of Object.values(res.grids)) {
-        for (let r = 0; r < Math.min(g.length, 40) && !found; r++) {
-          const h = (g[r] || []).map(norm);
-          const cp = h.indexOf('PRODUCTCODE'), cpr = h.findIndex((x) => x === 'UNITPRICEUSD' || x === 'PRICEUSD' || x === 'UNITPRICE');
-          if (cp >= 0 && cpr >= 0) found = { g, r, h, cp, cpr };
-        }
-        if (found) break;
-      }
-      if (!found) throw new Error('Không tìm thấy bảng có cột Product Code và Unit Price USD.');
-      const col = (n) => found.h.indexOf(n);
-      const c = { active: col('ACTIVE'), soDate: col('SODATE'), soNo: col('SONO'), customer: col('CUSTOMER'), qty: col('QTY'), note: col('NOTE') };
-      const rows = [];
-      for (let i = found.r + 1; i < found.g.length; i++) {
-        const x = found.g[i] || []; if (!ttxt(x[found.cp]) && !ttxt(x[c.active])) continue;
-        rows.push({ active: c.active >= 0 ? x[c.active] : '', product: x[found.cp], soDate: c.soDate >= 0 ? x[c.soDate] : null, soNo: c.soNo >= 0 ? x[c.soNo] : '', customer: c.customer >= 0 ? x[c.customer] : '', qty: c.qty >= 0 ? x[c.qty] : null, price: x[found.cpr], note: c.note >= 0 ? x[c.note] : '', check: '' });
-      }
+      const rows = F.parseSOGrids(res.grids);
       A.S.d.soPrice = rows; if (A.S.d.pm) A.S.d.pm.status = 'OUTDATED';
       A.audit('SO PRICE IMPORT', `${file.name} · ${rows.length} dòng`); A.markDirty('soPrice', 'pm', 'audit');
       A.toast(`Đã nạp ${rows.length} dòng Sales Order. Chạy lại Update Price Master.`, 'pass');
