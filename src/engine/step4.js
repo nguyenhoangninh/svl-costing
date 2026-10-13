@@ -301,6 +301,30 @@ export function pcPriceCheck(step2, pm, period) {
   };
 }
 
+/** SO price list reader (moved from the STEP 4.1 view in v1.14.23 so it can be tested): the first row of any sheet
+ *  (within 40 rows) that has Product Code and Unit Price USD is the header; rows below with a product or Active value. */
+export function parseSOGrids(grids) {
+  const norm = (s) => txt(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  let found = null;
+  for (const g of Object.values(grids || {})) {
+    for (let r = 0; r < Math.min(g.length, 40) && !found; r++) {
+      const h = (g[r] || []).map(norm);
+      const cp = h.indexOf('PRODUCTCODE'), cpr = h.findIndex((x) => x === 'UNITPRICEUSD' || x === 'PRICEUSD' || x === 'UNITPRICE');
+      if (cp >= 0 && cpr >= 0) found = { g, r, h, cp, cpr };
+    }
+    if (found) break;
+  }
+  if (!found) throw new Error('Không tìm thấy bảng có cột Product Code và Unit Price USD.');
+  const col = (n) => found.h.indexOf(n);
+  const c = { active: col('ACTIVE'), soDate: col('SODATE'), soNo: col('SONO'), customer: col('CUSTOMER'), qty: col('QTY'), note: col('NOTE') };
+  const rows = [];
+  for (let i = found.r + 1; i < found.g.length; i++) {
+    const x = found.g[i] || []; if (!ttxt(x[found.cp]) && !ttxt(x[c.active])) continue;
+    rows.push({ active: c.active >= 0 ? x[c.active] : '', product: x[found.cp], soDate: c.soDate >= 0 ? x[c.soDate] : null, soNo: c.soNo >= 0 ? x[c.soNo] : '', customer: c.customer >= 0 ? x[c.customer] : '', qty: c.qty >= 0 ? x[c.qty] : null, price: x[found.cpr], note: c.note >= 0 ? x[c.note] : '', check: '' });
+  }
+  return rows;
+}
+
 export function requiredProducts(step2, salesDB = null, period = '') {
   const order = []; const set = new Set();
   const add = (code) => { code = utxt(code); if (code && !set.has(code)) { set.add(code); order.push(code); } };
