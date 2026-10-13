@@ -15,17 +15,18 @@ import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
 import { step2ReportSheets, ruleSummary, ruleOf } from './engine/step2report.js';
 import * as TPL from './engine/templates.js';
+import * as DQ from './engine/dataquality.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'step2', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
+const BLOBS = ['importLog', 'importAck', 'step2', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -245,7 +246,8 @@ function datasetsMeta() {
 }
 function statusAll() {
   const s1 = step1Status(datasetsMeta());
-  const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets), outOfPeriodRows(S.d.datasets, S.period));
+  const dq = DQ.erpAnomalies(S.d.datasets);
+  const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets), outOfPeriodRows(S.d.datasets, S.period), { ...dq, status: DQ.anomalyStatus(dq, S.d.importAck) });
   const ctx = { period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport, opening: S.d.opening, step3: S.d.step3, datasets: S.d.datasets };
   const p2 = S.period ? P2.derive(S) : { d3b: null, d4: null };
   const s3bc = p2.d3b ? p2.d3b.controls : { status: 'NOT RUN', okText: '', rows: [], next: 'Chạy STEP 3A trước' };
@@ -268,6 +270,7 @@ function guardPeriod() {
   return false;
 }
 const guardMutate = () => guardEdit() && guardPeriod();
+const who = () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này');
 const canEditPeriod = () => store.canEdit() && !isClosed();
 const WRITE_ACTS = new Set(['new-period', 'run-step2', 'pc-basis-apply', 'pc-basis-undo', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
 
@@ -527,6 +530,22 @@ function journal(st) {
 }
 
 // ---------- STEP 1 ----------
+/** v1.14.25: abnormal ERP material lines (PC-M / MI-M) – shown at STEP 1 until a user confirms the list. */
+function dqSection(dq) {
+  if (!dq) return '';
+  if (!dq.lines.length) return S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? '<div class="alert pass">Kiểm tra dữ liệu ERP: không có dòng bất thường ở PC-M / MI-M (SL ≠ 0 mà Total Cost = 0, số âm, giá trị dạng chữ).</div>' : '';
+  const ack = S.d.importAck; const ok = dq.status === 'REVIEW - CONFIRMED';
+  const changed = ack && !ok ? `<p><b>Danh sách đã thay đổi</b> sau lần xác nhận ${fmtTs(ack.at)} của ${esc(ack.by)} (dữ liệu ERP được import lại) – cần xác nhận lại.</p>` : '';
+  return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Dữ liệu ERP bất thường: ${fmtNum(dq.lines.length)} dòng · ${fmtNum(dq.materials)} vật tư ${pill(ok ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h2>
+    <p>Các dòng vật tư dưới đây có số liệu bất thường trên báo cáo ERP. STEP 3B không định giá được vật tư có SL nhưng Total Cost = 0 (ví dụ hàng khách cấp, hàng chưa có giá). Rà soát với ERP / kho: sửa và import lại, hoặc xác nhận là đúng thực tế. <b>STEP 2 chỉ chạy được sau khi danh sách đã được xác nhận.</b></p>
+    ${changed}
+    <table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
+      ${dq.summary.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
+    </tbody></table>
+    ${ok ? `<p>Đã xác nhận bởi <b>${esc(ack.by)}</b> lúc ${fmtTs(ack.at)}: ${esc(ack.note)}</p>` : ''}
+    <div class="row"><button class="btn ${ok ? 'ghost' : ''}" type="button" data-act="dq-confirm">${ok ? 'Xác nhận lại' : 'Xác nhận đã rà soát danh sách'}</button><span class="muted">Danh sách chi tiết (lọc theo loại, Xuất Excel) ở bảng dưới.</span></div>
+    <div id="t-dq"></div></div>`;
+}
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
   el.innerHTML = `<section class="page">
@@ -539,6 +558,7 @@ VIEWS.step1 = (el) => {
       <p class="muted">File được đọc ngay trong trình duyệt; chỉ dữ liệu đã chuẩn hoá được lưu.</p>
     </div>
     <div id="plan"></div>
+    ${dqSection(c.dq)}
     ${c.dateIssues && c.dateIssues.length ? `<div class="alert review"><b>Có dòng ngày ngoài kỳ ${esc(S.period)}</b> – kiểm tra file xuất ERP trước khi chạy STEP 2:<ul>${c.dateIssues.map((x) => `<li>${esc(x.key)}: ${fmtNum(x.n)} dòng (${esc(x.months.join(', '))})${x.amt ? ` · ${fmtNum(x.amt)} VND` : ''}</li>`).join('')}</ul></div>` : ''}
     <div class="grid3">${ERPS.map((e) => { const b = st.s1.bySys[e]; return `<div class="sys sys-${e}"><b>Hệ ${e}</b>${pill(b.status)}<span>${b.files} file · ${fmtNum(b.rows)} dòng</span><small>${fmtTs(b.lastImport)}</small></div>`; }).join('')}</div>
     <h2>Danh mục 21 báo cáo bắt buộc</h2>
@@ -548,6 +568,10 @@ VIEWS.step1 = (el) => {
     <div class="row end"><span class="muted">Dòng báo "access right" từ ERP: ${c.accessLimited}</span>
       <button class="btn danger ghost" data-act="reset-erp" type="button" ${isClosed() ? 'disabled title="Kỳ đã đóng – mở lại kỳ (5.3) nếu cần xoá"' : ''}>Xoá dữ liệu ERP…</button></div>
   </section>`;
+  if (c.dq && c.dq.lines.length && $('#t-dq')) {
+    const cols = DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
+    mountTable($('#t-dq'), { columns: cols, rows: c.dq.lines, filterKey: 'type', height: 360, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_BAT_THUONG', cols) });
+  }
   const handle = (files) => importERP([...files]);
   $('#f-files').addEventListener('change', (e) => handle(e.target.files));
   $('#f-dir').addEventListener('change', (e) => handle(e.target.files));
@@ -580,7 +604,7 @@ async function importERP(files) {
         audit(`${prior ? 'REPLACE' : 'NEW'} ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${ds.status} · ${ds.dataRows} dòng`);
         if (ds.warnings) {
           const w = ds.warnings, shown = w.zeroCostMaterials.slice(0, 40).join(', ') + (w.zeroCostMaterials.length > 40 ? `… (+${w.zeroCostMaterials.length - 40} mã)` : '');
-          warns.push(`${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 (${w.zeroCostMaterials.length} vật tư: ${shown}). STEP 3B (basis AMOUNT) sẽ chặn các vật tư có tổng = 0.`);
+          warns.push(ds.erp === 'S' ? `${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 – chỉ thông tin: PC-M-S không dùng trong giá thành (hệ S không có lô PC).` : `${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 (${w.zeroCostMaterials.length} vật tư: ${shown}). Xem và xác nhận ở mục "Dữ liệu ERP bất thường" bên dưới.`);
           audit(`WARN ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${w.zeroCostLines} dòng Total Cost = 0 · ${w.zeroCostMaterials.length} vật tư`);
         }
       } catch (e) {
@@ -665,6 +689,11 @@ VIEWS.step2 = (el) => {
 };
 
 function doStep2() {
+  const dq = DQ.erpAnomalies(S.d.datasets);
+  if (DQ.anomalyStatus(dq, S.d.importAck) === 'BLOCK - CONFIRM') {
+    toast(`STEP 2 bị chặn: STEP 1 có ${dq.lines.length} dòng dữ liệu ERP bất thường (${dq.materials} vật tư) chưa được xác nhận. Mở STEP 1 → "Dữ liệu ERP bất thường", rà soát danh sách rồi bấm Xác nhận.`, 'block');
+    location.hash = '#step1'; return;
+  }
   const periodIssues = outOfPeriodRows(S.d.datasets, S.period);
   if (periodIssues.length) {
     const sample = periodIssues.slice(0, 3).map((x) => {
@@ -1233,6 +1262,16 @@ document.addEventListener('click', async (e) => {
       if (confirm(`Xoá Opening WIP kỳ ${S.period}? (Không xoá dữ liệu ERP)`)) { S.d.opening = null; audit('OPENING WIP RESET', ''); markDirty('opening', 'audit'); render(); } break;
     case 'template-wip':
       exportBook(`SVL_WIP_Opening_Template_${S.period}.xlsx`, TPL.wipOpeningTemplate(S.period)); break;
+    case 'dq-confirm': {
+      if (!guardMutate()) break;
+      const dq = DQ.erpAnomalies(S.d.datasets); if (!dq.lines.length) break;
+      const note = (prompt(`Xác nhận đã rà soát ${dq.lines.length} dòng dữ liệu ERP bất thường (${dq.materials} vật tư)?\n${dq.summary.map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`).join('\n')}\n\nGhi chú / kết luận (bắt buộc), ví dụ: "Hàng khách cấp – ERP giá trị 0 là đúng":`, (S.d.importAck && S.d.importAck.note) || '') || '').trim();
+      if (!note) break;
+      if (note.length < 5) { toast('Ghi chú cần ít nhất 5 ký tự.', 'review'); break; }
+      S.d.importAck = { fp: dq.fp, lines: dq.lines.length, materials: dq.materials, summary: dq.summary.map((g) => ({ report: g.report, type: g.type, lines: g.lines, materials: g.materials })), by: who(), at: nowISO(), note };
+      audit('ERP DATA ANOMALY CONFIRM', `${dq.lines.length} dòng · ${dq.materials} vật tư · ${dq.summary.map((g) => `${g.report} ${g.type} ${g.lines}`).join('; ')} · ${note}`);
+      markDirty('importAck', 'audit'); toast('Đã xác nhận danh sách dữ liệu ERP bất thường. Có thể chạy STEP 2.', 'pass'); render(); break;
+    }
     case 'sales-tpl': await exportBook(`SVL_Sales_Revenue_Import_Template_v2_${S.period}.xlsx`, TPL.salesTemplate(S.period)); break;
     case 'ret-tpl': await exportBook(`SVL_Sales_Returns_Import_Template_v1_${S.period}.xlsx`, TPL.returnsTemplate(S.period)); break;
     case 'so-tpl': await exportBook(`SVL_SO_Price_Import_Template_v1_${S.period}.xlsx`, TPL.soTemplate(S.period)); break;

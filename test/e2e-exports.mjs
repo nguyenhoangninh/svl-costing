@@ -35,6 +35,8 @@ await page.goto(root + '#step1');
 await page.waitForSelector('#f-files', { state: 'attached' });
 await page.setInputFiles('#f-files', fs.readdirSync(fixDir).filter((f) => f.endsWith('.xlsx')).map((f) => path.join(fixDir, f)));
 await page.waitForSelector('#plan .alert', { timeout: 120000 });
+// v1.14.25: confirm the abnormal ERP lines listed at STEP 1 before STEP 2
+if (await page.$('[data-act=dq-confirm]')) { await page.click('[data-act=dq-confirm]'); await page.waitForTimeout(400); }
 await page.goto(root + '#step2');
 await page.click('[data-act=run-step2]');
 await page.waitForSelector('#t-detail .vt-table', { timeout: 60000 });

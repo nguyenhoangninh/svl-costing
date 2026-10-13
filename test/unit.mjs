@@ -740,5 +740,32 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('template guides: one guide line per data column', [wip, sales, rets, so].map((x) => x[1].aoa.length - x[1].header === x[0].aoa[x[0].header - 1].length), [true, true, true, true]);
 }
 
+// ---- v1.14.25 STEP 1 ERP data-quality check: listed, persistent, must be confirmed before STEP 2
+{
+  const DQ = await import('../src/engine/dataquality.js');
+  const { step1Controls } = await import('../src/engine/controls.js');
+  const HM = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Material Name', 'Quantity', 'Total Cost'];
+  const pcmT = buildDataset([['x'], HM, ['PC-1', 'A', 'a', '50728557', 'Tape', 1.145, 0], ['PC-2', 'A', 'a', '50728557', 'Tape', 2, 0], ['PC-1', 'A', 'a', 'OK1', 'ok', 5, 100], [null, null, null, null, null, 9, 0]], 'PC-M-T-202608.xlsx', P2);
+  // dataset imported by an older version (no import gate): a negative and a text value are still found
+  const pcmO = { key: 'PC-M-O', headerRow: 1, header: HM, rows: [['PC-9', 'B', 'b', '326551', 'PE board', 1018.08, 0], ['PC-9', 'B', 'b', 'NEG1', 'n', -3, 10], ['PC-9', 'B', 'b', 'TXT1', 't', '1,5', 5]] };
+  const HI = ['MI No.', 'Material Code', 'Material Name', 'Current Issue Qty', 'Total Cost'];
+  const mimT = { key: 'MI-M-T', headerRow: 1, header: HI, rows: [['MI-1', '50661189', 'Liki', 700, 0], ['MI-2', 'OK2', 'ok', 3, 30]] };
+  const ds = { 'PC-M-T': pcmT, 'PC-M-O': pcmO, 'MI-M-T': mimT };
+  const an = DQ.erpAnomalies(ds);
+  eq('DQ: abnormal lines by report / type (footer row ignored)', an.summary.map((g) => [g.report, g.type, g.lines, g.materials]), [['PC-M-T', 'ZERO COST', 2, 1], ['PC-M-O', 'ZERO COST', 1, 1], ['PC-M-O', 'NEGATIVE', 1, 1], ['PC-M-O', 'TEXT', 1, 1], ['MI-M-T', 'ZERO COST', 1, 1]]);
+  eq('DQ: Excel row numbers and materials listed', [an.lines[0].row, an.lines[0].mat, an.materials], [3, '50728557', 5]);
+  eq('DQ: not confirmed → BLOCK - CONFIRM', DQ.anomalyStatus(an, null), 'BLOCK - CONFIRM');
+  const ack = { fp: an.fp, by: 'a@svl', at: '2026-10-13T09:00:00Z', note: 'Hàng khách cấp' };
+  eq('DQ: confirmed for this list → REVIEW - CONFIRMED', DQ.anomalyStatus(an, ack), 'REVIEW - CONFIRMED');
+  const an2 = DQ.erpAnomalies({ ...ds, 'MI-M-T': { ...mimT, rows: [...mimT.rows, ['MI-3', 'NEW', 'new', 1, 0]] } });
+  eq('DQ: list changed by a re-import → confirmation needed again', DQ.anomalyStatus(an2, ack), 'BLOCK - CONFIRM');
+  eq('DQ: clean data → PASS', DQ.anomalyStatus(DQ.erpAnomalies({ 'MI-M-T': { ...mimT, rows: [mimT.rows[1]] } }), null), 'PASS');
+  const s1 = { checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } };
+  const c1 = step1Controls(s1, 0, [], { ...an, status: DQ.anomalyStatus(an, null) });
+  eq('STEP 1: unconfirmed anomalies block STEP 1 (status / result / next)', [c1.status, c1.result, /xác nhận 6 dòng/.test(c1.next)], ['BLOCK', 'BLOCK - XÁC NHẬN DỮ LIỆU BẤT THƯỜNG', true]);
+  const c2 = step1Controls(s1, 0, [], { ...an, status: DQ.anomalyStatus(an, ack) });
+  eq('STEP 1: confirmed anomalies → PASS WITH REVIEW, next = STEP 2', [c2.status, c2.result, c2.next], ['PASS WITH REVIEW', 'PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG', 'Chạy STEP 2']);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

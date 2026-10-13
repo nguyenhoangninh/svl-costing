@@ -26,7 +26,17 @@ await page.setInputFiles('#f-files', files);
 await page.waitForSelector('#plan .alert', { timeout: 120000 });
 console.log('import:', (await page.textContent('#plan')).slice(0, 200));
 await shot('02-step1');
-
+// v1.14.25: abnormal ERP lines are listed at STEP 1 and STEP 2 is blocked until they are confirmed
+const dqText = (await page.textContent('body')).replace(/\s+/g, ' ');
+console.log('DQ section:', (dqText.match(/Dữ liệu ERP bất thường:[^.]*/) || ['(none)'])[0].slice(0, 120));
+await page.goto(base + '#step2');
+await page.click('[data-act=run-step2]');
+await page.waitForTimeout(500);
+console.log('STEP 2 before confirm blocked:', !(await page.$('#t-detail .vt-table')) && /STEP 2 bị chặn: STEP 1 có/.test(await page.textContent('body')));
+await page.goto(base + '#step1');
+if (await page.$('[data-act=dq-confirm]')) { await page.click('[data-act=dq-confirm]'); await page.waitForTimeout(400); }
+console.log('DQ after confirm:', ((await page.textContent('body')).replace(/\s+/g, ' ').match(/Đã xác nhận bởi[^:]*/) || ['(no confirmation)'])[0]);
+await shot('02b-step1-confirmed');
 await page.goto(base + '#step2');
 await page.click('[data-act=run-step2]');
 await page.waitForSelector('#t-detail .vt-table', { timeout: 60000 });
