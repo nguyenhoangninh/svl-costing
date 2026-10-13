@@ -206,7 +206,7 @@ export function do3bApply() {
   const S = A.S; const w = S.d.wipadj;
   if (!w || !w.control) { A.toast('Chưa BUILD.', 'block'); return; }
   if (!w.control.builtAt || w.control.builtAt < S.d.step3.runAt) { A.toast('CONTROL cũ hơn STEP 3. Chạy 1 BUILD / REFRESH trước.', 'block'); return; }
-  if (w.control.fp && w.control.fp !== B.buildFingerprint(w.input, S.d.erpMap, S.d.step2, S.d.step3)) { A.toast('STOPPED: INPUT hoặc ERP map đã thay đổi sau lần BUILD mà người duyệt đã xem. Chạy 1 · BUILD / REFRESH rồi duyệt lại.', 'block'); return; }
+  if (w.control.fp && w.control.fp !== B.buildFingerprint(w.input, S.d.erpMap, S.d.step2, S.d.step3, B.basisOf(w))) { A.toast('STOPPED: INPUT hoặc ERP map đã thay đổi sau lần BUILD mà người duyệt đã xem. Chạy 1 · BUILD / REFRESH rồi duyệt lại.', 'block'); return; }
   let res = B.applyControl(w.control, S.d.step3, '');
   if (res.mode === 'NEED_REASON') {
     const prev = w.control.noAdj ? w.control.noAdj.reason : '';

@@ -254,11 +254,18 @@ export function engineDynamic(engine, inputDerived, control) {
     const Q = active === 'Y' ? F * e.share : 0, R = active === 'Y' ? G * e.share : 0;
     const S = H === 'DIRECT_632' ? F : 0, T = H === 'DIRECT_632' ? G : 0;
     const U = i ? txt(i.option) : '';
-    const V = active !== 'Y' ? '' : e.type === 'METHOD' ? (H === 'METHOD REQUIRED' ? 'METHOD REQUIRED' : 'READY TO REVIEW') : e.type === 'ERP' ? (e.bTot > 0 ? 'READY TO REVIEW' : 'BLOCK - ZERO ERP AMOUNT') : (e.share > 0 ? 'READY TO REVIEW' : 'BLOCK - ZERO SHARE');
+    // AMOUNT allocation: a PC-M line with 0 Total Cost legitimately receives 0% of this
+    // material's adjustment when the *material-wide* amount basis is positive.
+    // This is not a zero-value MATERIAL (which has its own rule), and must not block
+    // the entire CONTROL solely because one of many PCs has no cost contribution.
+    // Preserve BLOCK for negative/missing/inconsistent share or nonzero cost without a share.
+    const zeroCostPC = e.type === 'USAGE' && e.share === 0 && e.bLot === 0 && e.bTot > 0;
+    const V = active !== 'Y' ? '' : e.type === 'METHOD' ? (H === 'METHOD REQUIRED' ? 'METHOD REQUIRED' : 'READY TO REVIEW') : e.type === 'ERP' ? (e.bTot > 0 ? 'READY TO REVIEW' : 'BLOCK - ZERO ERP AMOUNT') : (e.share > 0 || zeroCostPC ? 'READY TO REVIEW' : 'BLOCK - ZERO SHARE');
+    const note = zeroCostPC ? [e.note, 'PC-M Total Cost = 0; AMOUNT share = 0%; allocated adjustment = 0 (not a material-level QTY fallback)'].filter(Boolean).join(' · ') : e.note;
     const c = ctl.get(e.key); const X = c ? c.gate : '';
     const Y = active === 'Y' && X === 'READY TO POST' && (H === 'ACTUAL_USAGE' || H === 'ERP_AMOUNT') ? 'Y' : 'N';
     const AB = active !== 'Y' ? '' : X !== 'READY TO POST' ? 'NOT POSTED' : H === 'DIRECT_632' ? 'DIRECT_632 - BATCH5' : Y === 'Y' ? 'POSTED - W4' : 'NOT POSTED';
-    return { ...e, active, period: i ? i.period : '', F, G, H, Q, R, S, T, U, V, X, Y, Z: Y === 'Y' ? Q : 0, AA: Y === 'Y' ? R : 0, AB };
+    return { ...e, note, active, period: i ? i.period : '', F, G, H, Q, R, S, T, U, V, X, Y, Z: Y === 'Y' ? Q : 0, AA: Y === 'Y' ? R : 0, AB };
   });
 }
 
@@ -354,6 +361,8 @@ export function applyControl(control, step3, reason) {
   const rows = control.rows;
   const nApprove = rows.filter((r) => utxt(r.decision) === 'APPROVE').length;
   if (rows.length && nApprove === 0) {
+    const invalid = rows.filter((r) => utxt(r.status) !== 'PASS');
+    if (invalid.length) return { mode: 'STOPPED', message: `Không thể đóng STEP 3B với HOLD / NO ADJ: còn ${invalid.length} vật tư CONTROL chưa PASS (${invalid.slice(0, 5).map((r) => r.code).join(', ')}). Sửa DETAIL / BUILD rồi mới quyết định.` };
     if (!ttxt(reason)) return { mode: 'NEED_REASON' };
     let nHold = 0, nReview = 0, nBlank = 0;
     for (const r of rows) {
