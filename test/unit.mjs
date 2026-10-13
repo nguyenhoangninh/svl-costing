@@ -663,5 +663,22 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('sales import: unreadable text is kept for validation to flag', st.rows[1].unitPrice, 'abc');
 }
 
+// ---- v1.14.21 Price Master coverage per PC lot
+{
+  const { pcPriceCheck } = await import('../src/engine/step4.js');
+  const s2 = { runAt: '2026-10-13T02:00:00Z', pc: [
+    { erp: 'T', rowIdx: 0, pcNo: 'PC-1', prod: 'A', name: 'a', qty: 10 }, { erp: 'T', rowIdx: 1, pcNo: 'PC-2', prod: 'B', name: 'b', qty: 5 },
+    { erp: 'O', rowIdx: 0, pcNo: 'PC-3', prod: 'D', name: 'd', qty: 4 }, { erp: 'O', rowIdx: 1, pcNo: 'XX-9', prod: 'C', name: 'c', qty: 7 }] };
+  const pm = { period: P2, updatedAt: '2026-10-13T03:00:00Z', rows: [{ product: 'A', finalPrice: 2, finalSource: 'CURRENT MONTH ACTUAL' }, { product: 'B', finalPrice: null, finalSource: '' }] };
+  const c = pcPriceCheck(s2, pm, P2);
+  eq('PC price: status per lot', c.rows.map((r) => r.status), ['OK', 'MISSING PRICE', 'NOT IN PRICE MASTER', 'NOT COSTED (PC No. không bắt đầu PC-)']);
+  eq('PC price: coverage summary', [c.status, c.summary.lots, c.summary.lotsOK, c.summary.notCosted, c.summary.salesUSD, Math.round(c.summary.qtyCover * 1000) / 1000], ['BLOCK', 3, 1, 1, 20, 0.526]);
+  eq('PC price: by source', c.bySource.map((x) => [x.source, x.lots, x.salesUSD]), [['CURRENT MONTH ACTUAL', 1, 20]]);
+  const full = pcPriceCheck({ ...s2, pc: s2.pc.slice(0, 1) }, pm, P2);
+  eq('PC price: all lots priced → PASS', full.status, 'PASS');
+  eq('PC price: STEP 2 newer than Price Master → RERUN PRICE MASTER', pcPriceCheck({ ...s2, runAt: '2026-10-13T04:00:00Z' }, pm, P2).status, 'RERUN PRICE MASTER');
+  eq('PC price: Price Master of another period → RERUN', pcPriceCheck(s2, { ...pm, period: '2026-07' }, P2).status, 'RERUN PRICE MASTER');
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

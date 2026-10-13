@@ -240,14 +240,15 @@ export function viewSales(el) {
   const dup = A.dupStatus();
   const bk = splitBooks(db, d.returnsDB);
   const rb = revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions);
+  const pcc = d.step2 ? F.pcPriceCheck(d.step2, pm, S.period) : null;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 4.1 · Doanh thu bán hàng &amp; Price Master</h1><p class="lead">Chỉ doanh thu bán hàng (TK 511). Hàng bán bị trả lại (TK 5212) và giảm giá / credit note (TK 5213) import, lưu và xử lý riêng ở <a href="#salesreturn">màn hình 5R</a>. Import file doanh thu (MONTHLY hoặc YTD) → Validate &amp; Save → Update Price Master (giá tháng hiện tại → giá thực tế gần nhất → YTD → Sales Order; giá thủ công luôn được ưu tiên).</p></div>
-      <div class="result"><span>Price Master</span>${A.pill(pm ? pm.status : 'NOT RUN')}<small>${pm ? `${pm.rows.length} sản phẩm · thiếu giá ${missing}` : ''}</small></div></header>
+      <div class="result"><span>Price Master</span>${A.pill(pm ? pm.status : 'NOT RUN')}<small>${pm ? `${pm.rows.length} sản phẩm · thiếu giá ${missing}` : ''}${pcc && pm ? `<br>PC có giá ${pcc.summary.lotsOK}/${pcc.summary.lots}` : ''}</small></div></header>
     <div class="kpis">${A.kpi('Doanh thu 511 kỳ này', rb.a511)}${A.kpiN('Dòng staging', st ? st.rows.length : 0)}${A.kpiN('Sales Database', bk.sales.length)}${A.kpiN('SO fallback', (d.soPrice || []).length)}${A.kpiN('Giá thủ công', (d.manualPrice || []).length)}</div>
     ${bk.usingLegacy ? `<div class="alert review">Sales Database (dữ liệu cũ) còn <b>${bk.legacyCount}</b> dòng SALES RETURN / CREDIT NOTE. Chúng đang được đọc như file trả lại riêng và sẽ tự chuyển sang màn hình 5R ở lần Validate &amp; Save tiếp theo.</div>` : ''}
     ${rb.n5212 || rb.n5213 ? `<p class="muted">Giảm trừ doanh thu kỳ này (xem 5R): 5212 = ${A.fmtNum(rb.a5212)} VND (${rb.n5212} dòng) · 5213 = ${A.fmtNum(rb.a5213)} VND (${rb.n5213} dòng).</p>` : ''}
     ${dup.groups.length ? `<div class="alert ${dup.pending ? 'review' : 'pass'}">Kỳ ${esc(S.period)} có <b>${dup.groups.length}</b> nhóm dòng doanh thu giống hệt nhau (cùng ngày, hoá đơn, sản phẩm, số lượng, tiền – file không có Invoice Line No.). ${dup.pending ? `Còn <b>${dup.pending}</b> dòng lặp chưa xác nhận → <a href="#sales" data-tab-dup>xác nhận ở tab Nghi trùng</a>. Chưa xác nhận thì không đóng kỳ được.` : `Đã xác nhận hết (loại ${dup.excluded} dòng).`}</div>` : ''}
-    ${tabsHTML(tab, [['import', 'Import & Validate'], ['db', 'Sales Database'], ['dup', `Nghi trùng${dup.pending ? ' (' + dup.pending + ')' : ''}`], ['pm', 'Price Master'], ['so', 'Sales Order fallback'], ['manual', 'Giá thủ công']], 'data-tabs')}
+    ${tabsHTML(tab, [['import', 'Import & Validate'], ['db', 'Sales Database'], ['dup', `Nghi trùng${dup.pending ? ' (' + dup.pending + ')' : ''}`], ['pm', 'Price Master'], ['pcprice', `Kiểm tra giá PC${pcc && pcc.status !== 'PASS' && pcc.status !== 'NOT RUN' ? ' ⚠' : ''}`], ['so', 'Sales Order fallback'], ['manual', 'Giá thủ công']], 'data-tabs')}
     <div id="ts"></div></section>`;
   el.querySelectorAll('[data-tabs]').forEach((b) => b.addEventListener('click', () => { S.tabSales = b.dataset.tabs; A.render(); }));
   el.querySelectorAll('[data-tab-dup]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); S.tabSales = 'dup'; A.render(); }));
@@ -289,6 +290,19 @@ export function viewSales(el) {
       const c2 = F.PM_AUDIT_FIELDS.map((f, i) => ({ key: f, label: F.PM_AUDIT_HEADERS[i], type: f === 'refDate' ? 'date' : ['curP', 'latestP', 'ytdP', 'soP', 'sel'].includes(f) ? 'qty' : f === 'age' ? 'int' : f === 'review' ? 'status' : 'text', width: f === 'srcText' ? 200 : 120 }));
       A.mountTable(box.querySelector('#t-pma'), { columns: c2, rows: pm.audit, filterKey: 'review', height: 360, onExport: A.exportTable('04_PRICE_MASTER_AUDIT', c2) });
     }
+  } else if (tab === 'pcprice') {
+    if (!pcc) { box.innerHTML = A.emptyNote('Chưa chạy STEP 2 – chưa có danh sách lô PC của kỳ.', 'step2', 'Mở STEP 2'); return; }
+    const sm = pcc.summary, pct = (x) => `${(x * 100).toFixed(2).replace('.', ',')}%`;
+    box.innerHTML = `<p class="muted">Mỗi lô PC sản xuất trong kỳ (PC-P hệ T và O, theo STEP 2) phải có giá bán trong Price Master, vì STEP 4 phân bổ 622 / 627 theo <b>giá trị bán = SL hoàn thành × giá</b>. Bảng này cho biết lô nào đã có giá, giá lấy từ nguồn nào, và lô nào còn thiếu.</p>
+      ${pcc.stale ? `<div class="alert review"><b>${esc(pcc.stale)}.</b> Bấm Update Price Master (tab Price Master) để danh sách giá phủ đúng các lô hiện tại.</div>` : ''}
+      <div class="kpis">${A.kpiN('Trạng thái', pcc.status)}${A.kpiN('Lô PC có giá', `${sm.lotsOK} / ${sm.lots}`)}${A.kpiN('Sản phẩm có giá', `${sm.productsOK} / ${sm.products}`)}${A.kpiN('SL hoàn thành có giá', pct(sm.qtyCover))}${A.kpiN('Giá trị bán (USD)', A.fmtNum(sm.salesUSD, 2))}</div>
+      ${sm.lotsMissing ? `<div class="alert block"><b>${sm.lotsMissing} lô PC chưa có giá.</b> Lọc trạng thái MISSING PRICE / NOT IN PRICE MASTER ở bảng dưới; bổ sung giá ở tab Sales Order fallback hoặc Giá thủ công rồi Update Price Master.</div>` : sm.lots ? '<div class="alert pass">Mọi lô PC sản xuất trong kỳ đều có giá bán.</div>' : ''}
+      ${sm.notCosted ? `<p class="muted">${sm.notCosted} dòng PC-P có PC No. không bắt đầu bằng "PC-" – STEP 4 không tính giá thành cho các dòng này (giống workbook), nên không cần giá.</p>` : ''}
+      <h2>Theo nguồn giá</h2><div id="t-pcsrc"></div><h2>Chi tiết theo lô PC</h2><div id="t-pcp"></div>`;
+    const cs = [{ key: 'source', label: 'Nguồn giá', width: 260 }, { key: 'lots', label: 'Số lô PC', type: 'int', width: 100 }, { key: 'products', label: 'Số sản phẩm', type: 'int', width: 110 }, { key: 'qty', label: 'SL hoàn thành', type: 'qty', width: 130 }, { key: 'salesUSD', label: 'Giá trị bán (USD)', type: 'num', width: 160 }];
+    A.mountTable(box.querySelector('#t-pcsrc'), { columns: cs, rows: pcc.bySource, height: 220, totals: ['lots', 'qty', 'salesUSD'] });
+    const cp = F.PC_PRICE_FIELDS.map((f, i) => ({ key: f, label: F.PC_PRICE_HEADERS[i], type: f === 'qty' ? 'qty' : f === 'price' ? 'qty' : f === 'salesUSD' ? 'num' : f === 'status' ? 'status' : 'text', width: f === 'name' ? 260 : f === 'source' ? 200 : f === 'status' ? 220 : f === 'erp' ? 50 : 120 }));
+    A.mountTable(box.querySelector('#t-pcp'), { columns: cp, rows: pcc.rows, filterKey: 'status', height: 480, totals: ['qty', 'salesUSD'], onExport: A.exportTable('04_PC_PRICE_CHECK', cp) });
   } else if (tab === 'so') {
     box.innerHTML = `<div class="row"><label class="btn ghost">Import danh sách SO…<input type="file" id="f-so" accept=".xlsx,.xlsm,.xls" hidden></label><span class="muted">Cần cột Product Code và Unit Price USD (tuỳ chọn: Active, SO Date, SO No., Customer, Qty, Note). Import sẽ thay toàn bộ danh sách.</span></div><div id="t-so"></div>`;
     box.querySelector('#f-so').addEventListener('change', (e) => importSOFile(e.target.files[0]));
