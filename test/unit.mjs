@@ -1,7 +1,7 @@
 // Synthetic control tests (no private fixtures needed) — run in CI on every push / PR.
 import { parseUserNumber, cellDateSerial, num } from '../src/engine/util.js';
 import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.js';
-import { buildFingerprint } from '../src/engine/step3b.js';
+import { buildFingerprint, runBuild, setDecision, applyControl } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
 import { recheckRegisterRow } from '../src/engine/step2.js';
 import { splitBooks, bookOf } from '../src/engine/revenue.js';
@@ -549,6 +549,34 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('3B zero-value: listed for the control, OK material still by amount', [ez.zeroValue.map((x) => x.key), ez.rows.filter((r) => r.key === 'OK').map((r) => r.share)], [['Z1', 'Z2'], [0.4, 0.6]]);
   let errM = null; try { rebuildEngine([{ key: 'Z1', erp: 'T', desc: 'z1', basisAmt: 0, erpAmt: 0 }, { key: 'Z2', erp: 'T', desc: 'z2', basisAmt: -250000 }], s2, dsx, P2, 'AMOUNT'); } catch (e) { errM = e; }
   eq('3B zero-value: a zero-cost material that still carries WIP money stays BLOCKED', errM && errM.blocked.map((b) => b.key), ['Z2']);
+}
+
+// ---- STEP 3B AMOUNT: mixed zero-cost PC rows must not BLOCK material-level CONTROL.
+// Reproduction: material 322936, 58 PC-M detail lines, WIP Qty -690.84, amount 501,339.63 VND.
+{
+  const period = P2, code = '322936';
+  const H = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const pc = Array.from({ length: 58 }, (_, i) => ({ erp: 'O', pcNo: `PC-${i + 1}`, prod: `FG-${i + 1}`, name: 'Label', rmIncl: 1000, rowIdx: i }));
+  const ds = { 'PC-M-O': { header: H, rows: pc.map((p, i) => [p.pcNo, p.prod, p.name, code, 1 + i / 10, i % 13 === 0 ? 0 : i + 1]) } };
+  const input = [{ code, desc: 'Woven label', basisQty: -690.84, basisAmt: 501339.63, option: 'ERP_AMOUNT' }];
+  const erpMap = { rows: [{ code, erp: 'O', review: 'OK', override: '' }] };
+  const step2 = { period, runAt: '2026-08-31T00:00:00Z', pc };
+  const step3 = { period, runAt: '2026-08-31T01:00:00Z', rows: [{ code, name: 'Woven label', closingQty: -690.84, closingAmt: 501339.63, status: 'CHECK NEGATIVE' }] };
+  const r = runBuild({ erpMap, input, control: null, reg632: [], basis: 'AMOUNT' }, { period, step2, step3, datasets: ds });
+  const zero = r.detail.filter((d) => d.bLot === 0);
+  eq('3B 322936: BUILD retains 58 PC-M details, zero-cost PCs do not BLOCK', [r.detail.length, zero.length > 0, zero.every((d) => d.share === 0 && d.allocAmt === 0 && d.allocQty === 0 && d.status === 'READY TO REVIEW')], [58, true, true]);
+  eq('3B 322936: zero-cost PCs remain identifiable in DETAIL', zero.every((d) => /PC-M Total Cost = 0/.test(d.note)), true);
+  eq('3B 322936: CONTROL reconciles 100% and VND to allocated basis', [r.control.rows[0].status, Math.round(r.control.rows[0].share * 10000) / 10000, Math.round(r.control.rows[0].apc * 100) / 100, r.control.rows[0].blocks], ['PASS', 1, 501339.63, 0]);
+  eq('3B fingerprint: APPLY AMOUNT matches BUILD', r.control.fp, buildFingerprint(input, r.erpMap, step2, step3, 'AMOUNT'));
+  eq('3B fingerprint: switching basis to QTY requires rebuild', r.control.fp === buildFingerprint(input, r.erpMap, step2, step3, 'QTY'), false);
+  eq('3B fingerprint: changed INPUT requires rebuild', r.control.fp === buildFingerprint([{ ...input[0], basisAmt: 501340.63 }], r.erpMap, step2, step3, 'AMOUNT'), false);
+  eq('3B fingerprint: ERP override change requires rebuild', r.control.fp === buildFingerprint(input, { rows: [{ code, erp: 'O', override: 'T' }] }, step2, step3, 'AMOUNT'), false);
+  for (const x of r.control.rows) setDecision(x, 'HOLD');
+  eq('3B HOLD ALL without reason prompts reason', applyControl(r.control, step3, '').mode, 'NEED_REASON');
+  const applied = applyControl(r.control, step3, 'Không điều chỉnh WIP âm trong kỳ; chờ xác minh');
+  eq('3B HOLD ALL + reason closes without posting any adjustments', [applied.mode, applied.nHold, r.control.noAdj !== null, r.control.rows.every((x) => x.postCheck === 'NOT POSTED' && x.decision === 'HOLD')], ['NO_ADJ', 1, true, true]);
+  const bad = { rows: [{ ...r.control.rows[0], status: 'BLOCK - DETAIL', decision: 'HOLD' }] };
+  eq('3B HOLD must not bypass a real BLOCK', applyControl(bad, step3, 'reason').mode, 'STOPPED');
 }
 
 // ---- v1.14.18 PC-M gate at IMPORT: negative / zero-cost issue lines block the file (STEP 1), footers are ignored
