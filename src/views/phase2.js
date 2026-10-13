@@ -197,9 +197,10 @@ export function do3bBuild() {
   w.basis = B.basisOf(w);
   const r = B.runBuild({ erpMap: S.d.erpMap, input: w.input, control: w.control, reg632: w.reg632, basis: w.basis }, { step3: S.d.step3, step2: S.d.step2, datasets: S.d.datasets, period: S.period });
   S.d.erpMap = r.erpMap; Object.assign(w, { engine: r.engine, detail: r.detail, control: r.control, reg632: r.reg632 });
-  A.audit('STEP 3B - BUILD', `Basis=${w.basis}; Usage=${r.engine.nUse}; NoUsage=${r.engine.nNo}; Engine=${r.engine.rows.length}; Detail=${r.detail.length} · ${r.mapMsg}`);
+  A.audit('STEP 3B - BUILD', `Basis=${w.basis}; ZeroValue=${(r.engine.zeroValue || []).map((z) => z.key).join(',') || '-'}; Usage=${r.engine.nUse}; NoUsage=${r.engine.nNo}; Engine=${r.engine.rows.length}; Detail=${r.detail.length} · ${r.mapMsg}`);
   A.markDirty('wipadj', 'erpMap', 'audit');
-  A.toast(`BUILD xong: ${r.detail.length} dòng detail, ${r.control.rows.filter((x) => x.status === 'PASS').length}/${r.control.rows.length} vật tư PASS. ${r.mapMsg}`, 'pass');
+  const zv = r.engine.zeroValue || [];
+  A.toast(`BUILD xong: ${r.detail.length} dòng detail, ${r.control.rows.filter((x) => x.status === 'PASS').length}/${r.control.rows.length} vật tư PASS. ${r.mapMsg}${zv.length ? ` · ${zv.length} vật tư giá trị 0 (PC-M & WIP = 0 VND) chia theo SL, ghi sổ 0 VND: ${zv.map((z) => z.key).join(', ')}.` : ''}`, 'pass');
 }
 export function do3bApply() {
   const S = A.S; const w = S.d.wipadj;

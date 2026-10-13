@@ -535,12 +535,20 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
     ['PC-1', 'A', 'A', 'OK', 80, 40], ['PC-2', 'B', 'B', 'OK', 20, 60],  // OK: amount basis fine
     ['PC-1', 'A', 'A', 'Z2', 3, 0],                                       // Z2: zero cost → blocked
   ] } };
-  const inp = [{ key: 'Z1', erp: 'T', desc: 'z1' }, { key: 'OK', erp: 'T', desc: 'ok' }, { key: 'Z2', erp: 'T', desc: 'z2' }];
+  const inp = [{ key: 'Z1', erp: 'T', desc: 'z1', basisAmt: -50 }, { key: 'OK', erp: 'T', desc: 'ok', basisAmt: -10 }, { key: 'Z2', erp: 'T', desc: 'z2', erpAmt: -30 }];
   let err = null; try { rebuildEngine(inp, s2, dsx, P2, 'AMOUNT'); } catch (e) { err = e; }
   eq('3B AMOUNT: blocked list has all bad materials, not only the first', err && err.blocked.map((b) => b.key), ['Z1', 'Z2']);
   eq('3B AMOUNT: message names every blocked material', !!err && /Z1[\s\S]*Z2/.test(err.message) && !/OK \(/.test(err.message), true);
   eq('3B AMOUNT: message does not silently fall back to QTY', !!err && /Không tự fallback sang QTY/.test(err.message), true);
   eq('3B QTY basis still builds (legacy exception chosen on purpose)', rebuildEngine(inp, s2, dsx, P2, 'QTY').rows.length > 0, true);
+  // v1.14.24 zero-value material: PC-M cost 0 AND WIP amount 0 → quantity share, 0 VND, not blocked
+  const inpZ = [{ key: 'Z1', erp: 'T', desc: 'z1', basisAmt: 0, erpAmt: -3.7e-9 }, { key: 'OK', erp: 'T', desc: 'ok', basisAmt: -10 }, { key: 'Z2', erp: 'T', desc: 'z2', basisAmt: 0.4, erpAmt: 0 }];
+  const ez = rebuildEngine(inpZ, s2, dsx, P2, 'AMOUNT');
+  const z1 = ez.rows.filter((r) => r.key === 'Z1');
+  eq('3B zero-value: Z1 split by quantity 1.145 / 2, amount basis 0, noted', [z1.map((r) => Math.round(r.share * 10000) / 10000), z1.every((r) => r.bTot === 0 && /giá trị 0/.test(r.note))], [[Math.round(1.145 / 3.145 * 10000) / 10000, Math.round(2 / 3.145 * 10000) / 10000], true]);
+  eq('3B zero-value: listed for the control, OK material still by amount', [ez.zeroValue.map((x) => x.key), ez.rows.filter((r) => r.key === 'OK').map((r) => r.share)], [['Z1', 'Z2'], [0.4, 0.6]]);
+  let errM = null; try { rebuildEngine([{ key: 'Z1', erp: 'T', desc: 'z1', basisAmt: 0, erpAmt: 0 }, { key: 'Z2', erp: 'T', desc: 'z2', basisAmt: -250000 }], s2, dsx, P2, 'AMOUNT'); } catch (e) { errM = e; }
+  eq('3B zero-value: a zero-cost material that still carries WIP money stays BLOCKED', errM && errM.blocked.map((b) => b.key), ['Z2']);
 }
 
 // ---- v1.14.18 PC-M gate at IMPORT: negative / zero-cost issue lines block the file (STEP 1), footers are ignored

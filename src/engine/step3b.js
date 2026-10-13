@@ -152,12 +152,15 @@ export function deriveInput(input, map, step3, period) {
 /** STEP3B_V4_RebuildEngineCore — static basis rows (current-period PC-P / PC-M). */
 /** ACTUAL_USAGE basis: 'AMOUNT' (PC-M Total Cost share – owner decision 02/10/2026) or 'QTY' (legacy Excel). Builds made before the choice existed were QTY. */
 export const basisOf = (w) => (w && w.basis ? w.basis : w && w.control && w.control.builtAt ? 'QTY' : 'AMOUNT');
+/** v1.14.24: a material is 'zero value' when its WIP adjustment and ERP WIP amount are within this many VND of 0. */
+export const ZERO_VALUE_TOL = 1;
 export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AMOUNT') {
   if (!step2 || step2.period !== period) throw new Error(`STEP 2 chưa chạy cho kỳ ${period}. Chạy STEP 2 trước.`);
-  const inpErp = new Map(), inpDesc = new Map(), order = [];
+  const inpErp = new Map(), inpDesc = new Map(), inpAmt = new Map(), order = [];
+  const absAmt = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.abs(v) : isNumeric(v) && ttxt(v) !== '' ? Math.abs(num(v)) : 0);
   for (const r of inputDerived) {
     const key = r.key || k(r.code);
-    if (key && !inpErp.has(key)) { inpErp.set(key, utxt(r.erp)); inpDesc.set(key, txt(r.desc)); order.push(key); }
+    if (key && !inpErp.has(key)) { inpErp.set(key, utxt(r.erp)); inpDesc.set(key, txt(r.desc)); inpAmt.set(key, Math.max(absAmt(r.basisAmt), absAmt(r.erpAmt))); order.push(key); }
   }
   if (!order.length) throw new Error('03_WIP_DIRECT_ADJ_INPUT chưa có vật tư nào.');
   // PC-P basis = RM Cost incl. Stock Out (Step 2 output), lots with "PC-" prefix, sheet order
@@ -193,19 +196,25 @@ export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AM
   const rows = []; let nUse = 0, nNo = 0;
   const row = (key, erp, pc, prod, pname, qLot, qTot, bLot, bTot, share, note, type) => rows.push({ key, desc: inpDesc.get(key), erp, pc, prod, pname, qLot, qTot, bLot, bTot, share, note, type });
   // Gom TẤT CẢ vật tư lỗi (không dừng ở vật đầu tiên) để người dùng xử lý một lần.
-  const blocked = [];
+  const blocked = [], zeroValueMats = [];
   for (const key of order) {
     const erp = inpErp.get(key); const d = useD.get(key);
     let totQ = 0, totA = 0; if (d) for (const v of d.values()) { totQ += v[3]; totA += v[4]; }
     const amountValid = !!d && totA > 0 && [...d.values()].every((v) => v[4] >= 0);
-    if (basis === 'AMOUNT' && totQ > 0 && !amountValid) {
+    // v1.14.24 zero-value material: PC-M Total Cost = 0 on every line AND the WIP adjustment / ERP WIP amount ≈ 0.
+    // There is no money to allocate, so the quantity share is used for the 0 VND posting (AMOUNT policy unaffected).
+    const zeroValue = basis === 'AMOUNT' && totQ > 0 && !amountValid && !!d && [...d.values()].every((v) => v[4] === 0) && inpAmt.get(key) <= ZERO_VALUE_TOL;
+    if (basis === 'AMOUNT' && totQ > 0 && !amountValid && !zeroValue) {
       let zeroLines = 0; for (const v of d.values()) if (v[4] <= 0) zeroLines++;
       blocked.push({ key, erp, desc: inpDesc.get(key), qty: totQ, amt: totA, lines: d.size, zeroLines, pcs: [...new Set([...d.values()].map((v) => v[0]))] });
       continue;
     }
     if (blocked.length) continue;
     const byAmt = basis === 'AMOUNT' && amountValid;
-    if (byAmt) {
+    if (zeroValue) {
+      nUse++; zeroValueMats.push({ key, erp, desc: inpDesc.get(key), qty: totQ, lines: d.size });
+      for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, 0, 0, v[3] / totQ, 'Vật tư giá trị 0 (PC-M & WIP = 0 VND) – chia theo SL, ghi sổ 0 VND', 'USAGE');
+    } else if (byAmt) {
       nUse++;
       for (const v of d.values()) row(key, erp, v[0], v[1], v[2], v[3], totQ, v[4], totA, v[4] / totA, 'Actual PC-M amount ratio', 'USAGE');
     } else if (totQ > 0) {
@@ -225,7 +234,7 @@ export function rebuildEngine(inputDerived, step2, datasets, period, basis = 'AM
     throw err;
   }
   if (!rows.length) throw new Error('No ENGINE rows could be built.');
-  return { period, rows, nUse, nNo, basis, rebuiltAt: nowISO() };
+  return { period, rows, nUse, nNo, basis, zeroValue: zeroValueMats, rebuiltAt: nowISO() };
 }
 
 /** Engine formula columns (A, B, F, G, H, Q:V, X:AB) from current INPUT and CONTROL. */
