@@ -51,8 +51,14 @@ console.log('4.4 lot drill-down:', ((await txt('#tfp-ld')).match(/Lô .{0,120}/)
 await page.screenshot({ path: path.join(outDir, '62-fgprod-lot.png') });
 const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=fgp-next]')]);
 const f = path.join(outDir, dl.suggestedFilename()); await dl.saveAs(f);
-const back = XLSX.utils.sheet_to_json(XLSX.readFile(f).Sheets.FG_PRODUCTION, { header: 1 });
-console.log('next-month file:', dl.suggestedFilename(), 'rows', back.length - 4, 'months', [...new Set(back.slice(4).map((r) => r[0]))].join(','));
+const back = XLSX.utils.sheet_to_json(XLSX.readFile(f).Sheets.FG_DETAIL, { header: 1 }); // v1.14.27 detail layout (Carol "month detail")
+const body = back.slice(4).filter((r) => r && r[3]);
+console.log('next-month file:', dl.suggestedFilename(), 'rows', body.length, 'production months', [...new Set(body.map((r) => r[27]))].sort().join(','), '| cost months', [...new Set(body.map((r) => r[17] || 'TỒN'))].sort().join(','));
+await page.click('[data-tabfp="recon"]'); await page.waitForTimeout(300);
+console.log('4.4 recon tab:', ((await txt('#tfp')).match(/Kết quả.{0,20}/) || ['?'])[0], '|', ((await txt('main')).match(/Chênh lệch theo lô \(\d+\)/) || ['?'])[0]);
+await page.screenshot({ path: path.join(outDir, '63-fgprod-recon.png') });
+await page.click('[data-tabfp="detail"]'); await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(outDir, '64-fgprod-detail.png') });
 const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('[data-act=fgp-export]')]);
 console.log('export:', dl2.suggestedFilename());
 await page.goto(base + '#cc'); await page.waitForTimeout(300);

@@ -98,6 +98,49 @@ export const fgProductionGuide = (period) => guide('THÀNH PHẨM SẢN XUẤT L
   'Tháng 01 không cần file. Các tháng sau: dùng nút "Tải file đầu kỳ cho tháng sau" của kỳ trước để có file điền sẵn.',
 ], FG_PROD_COLS);
 
+/** Guide of the detail sheet (column, required, meaning, format, example 1 (still in stock), example 2 (sold in a month)). */
+export const DETAIL_GUIDE = [
+  ['PC No.', 'Bắt buộc', 'Số lô sản xuất (PC). Một lô có thể nằm trên nhiều dòng (tách theo tháng xuất).', 'Chữ, PC-YYMM-…', 'PC-2608-0040', 'PC-2608-0040'],
+  ['Date', 'Bắt buộc', 'Ngày hoàn thành lô. Tháng của ngày này = tháng sản xuất; phải TRƯỚC kỳ dùng file.', 'Ngày: 2026-08-20 hoặc 20/08/2026', '2026-08-20', '2026-08-20'],
+  ['MO No.', 'Nên có', 'Lệnh sản xuất.', 'Chữ', 'MO-2606-0015-001', 'MO-2606-0015-001'],
+  ['Product code', 'Bắt buộc', 'Mã thành phẩm đầy đủ như trên PC-P / Sales.', 'Chữ, không viết tắt', 'SP101-10-033-003', 'SP101-10-033-003'],
+  ['Product Name', 'Nên có', 'Tên thành phẩm.', 'Chữ', 'Doona Car Seat', 'Doona Car Seat'],
+  ['Location', 'Không', 'Location của lô.', 'Chữ', 'FG', 'FG'],
+  ['Unit', 'Nên có', 'Đơn vị tính.', 'PC / PCS', 'PC', 'PC'],
+  ['Complete Qty', 'Bắt buộc', 'Số lượng của DÒNG này (phần lô còn tồn, hoặc phần đã xuất trong Cost month).', 'Số', 12, 5],
+  ['RM cost', 'Không', 'Nguyên vật liệu (phần chính).', 'Số VND', 3000000, 1250000],
+  ['RM cost (ST)', 'Không', 'Nguyên vật liệu từ Stock Out.', 'Số VND', 0, 0],
+  ['Total cost(VND)', 'Bắt buộc', 'Tổng giá thành của dòng = RM cost (cột L) + Direct labors + Production cost.', 'Số VND', 4800000, 2000000],
+  ['RM cost', 'Có điều kiện', 'Tổng nguyên vật liệu (cột L) = RM cost + RM cost (ST).', 'Số VND', 3000000, 1250000],
+  ['Direct labors', 'Có điều kiện', 'Nhân công trực tiếp (622) của dòng.', 'Số VND', 900000, 375000],
+  ['Production cost', 'Có điều kiện', 'Chi phí sản xuất chung (627) của dòng.', 'Số VND', 900000, 375000],
+  ['Sales Price(USD)', 'Không', 'Giá bán (ghi nhớ).', 'Số USD', 137.78, 137.78],
+  ['UNIT COST RM ( vnd)', 'Không', 'App tự tính = RM / SL (không đọc).', 'Số', '', ''],
+  ['UNIT COST( vnd)', 'Không', 'App tự tính = Total / SL (không đọc).', 'Số', '', ''],
+  ['Cost month', 'Có điều kiện', 'Tháng ghi nhận giá vốn / xuất của dòng. ĐỂ TRỐNG = còn tồn. Phải trước kỳ dùng file.', 'YYYYMM (202608)', '', '202608'],
+  ['provision in 2512-usd', 'Không', 'Dự phòng USD (ghi nhớ).', 'Số', '', ''],
+  ['7% PL', 'Không', 'Ghi nhớ.', 'Số', '', ''],
+  ['UNIT COST ( vnd)', 'Không', 'Ghi nhớ.', 'Số', '', ''],
+  ['provision in 2512-vdn', 'Không', 'Dự phòng VND (ghi nhớ).', 'Số', '', ''],
+  ['net inventory', 'Không', 'Ghi nhớ.', 'Số', '', ''],
+  ['157-good on consignment', 'Không', 'Hàng gửi bán (ghi nhớ).', 'Số / chữ', '', ''],
+  ['Note', 'Không', 'Ghi chú.', 'Chữ', '', ''],
+  ['total FG stock end of 2025', 'Không', 'Ghi nhớ.', 'Số', '', ''],
+  ['Note 1', 'Không', 'Ghi chú.', 'Chữ', '', ''],
+  ['Kỳ sản xuất', 'Không', 'App ghi (tháng sản xuất theo Date) – không cần điền.', 'YYYY-MM', '2026-08', '2026-08'],
+  ['ERP', 'Không', 'Hệ ERP; bỏ trống thì app suy ra từ số PC (đuôi 4 chữ số = T).', 'T / O', 'T', 'T'],
+  ['Loại xuất', 'Không', 'App ghi: Bán hàng (COGS) / Xuất rework.', 'Chữ', '', 'Bán hàng (COGS)'],
+  ['Chứng từ xuất', 'Không', 'App ghi các số hoá đơn / phiếu rework đã lấy dòng này.', 'Chữ', '', 'SI-2608-031'],
+  ['Nguồn dòng', 'Không', 'App ghi nguồn của dòng.', 'Chữ', '', ''],
+];
+export const fgDetailGuide = (period) => guide('THÀNH PHẨM SX & TỒN KHO CHI TIẾT THEO DÒNG (STEP 4.4 · mẫu "month detail")', [
+  `Sheet cần điền: FG_DETAIL · Tiêu đề dòng 4 KHÔNG đổi (cột A → AA giống file "FG month detail") · Dữ liệu từ dòng 5 · Dùng cho kỳ ${period}.`,
+  'Mỗi dòng là một phần của lô (PC No. + Product code). Lô đã bán một phần được tách thành nhiều dòng: dòng đã ghi nhận giá vốn có Cost month (YYYYMM), dòng còn tồn để TRỐNG Cost month.',
+  `Tổng các dòng chưa có Cost month phải bằng FG đầu kỳ ${period} (= FG cuối kỳ trước, STEP 5.1). App đối chiếu và cảnh báo nếu lệch (không chặn).`,
+  'Gồm lô sản xuất trong năm và lô năm trước còn tồn. Lô của kỳ đang mở KHÔNG điền – app lấy từ STEP 4.3 và tự tách dòng theo FIFO (STEP 5.2).',
+  'Thường không cần điền tay: dùng nút "Tải file đầu kỳ cho kỳ sau" của kỳ trước, hoặc upload thẳng file month detail của kế toán.',
+], DETAIL_GUIDE);
+
 // ---------------------------------------------------------------- Sales revenue (STEP 4.1, TK 511) and returns (STEP 5R, TK 5212 / 5213)
 // Header names are the ones the reader accepts (src/engine/step4.js SALES_HEADERS + Bill Date / Original Invoice No.).
 const SALES_BASE = [

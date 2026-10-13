@@ -3,6 +3,7 @@
 // = YTD finished-goods production by lot, product and month. Rolled into the next month; January starts a new year.
 import { txt, ttxt, utxt, num, isNumeric, nowISO, fpRows, serialToYMD, cellDateSerial } from './util.js';
 import { FG_PROD_COLS } from './templates.js';
+import * as FD from './fgdetail.js'; // v1.14.27 detail (Carol) model – functions only used at call time (circular import is safe)
 
 export const FGP_FIELDS = ['period', 'erp', 'pc', 'date', 'mo', 'prod', 'name', 'fam', 'loc', 'unit', 'qty', 'baseRM', 'wipAdj', 'carryIn', 'totalRM', 'c622', 'c627', 'total', 'unitCost', 'source', 'note'];
 export const FGP_HEADERS = ['Kỳ', 'ERP', 'PC No.', 'PC Date', 'MO No.', 'Product Code', 'Product Name', 'Costing Family', 'Location', 'Unit', 'Complete Qty', 'RM gốc (PC + Stock Out)', 'Điều chỉnh WIP 3B', 'Rework chuyển vào', 'Total RM', '622', '627', 'Tổng giá thành', 'Giá thành / đv', 'Nguồn', 'Ghi chú'];
@@ -103,12 +104,29 @@ const stats = (rows, block = 0, review = 0) => ({ rows: rows.length, qty: rows.r
  * Opening of `newPeriod` from the previous month's table: its opening + its posted month. January starts a new year (empty).
  */
 export function rollOpening(prev, prevP, newPeriod) {
+  if (prev && prev.opening && prev.opening.period === prevP && prev.opening.model === 'DETAIL') return rollDetail(prev, prevP, newPeriod);
   if (yearOf(newPeriod) !== yearOf(prevP) || newPeriod.slice(5) === '01') return { kind: 'NEW YEAR', source: `Năm mới ${yearOf(newPeriod)}`, loadedAt: nowISO(), period: newPeriod, through: '', rows: [], status: 'VALIDATED', stats: stats([]) };
   if (!prev || !prev.current || prev.current.period !== prevP) throw new Error(`Kỳ ${prevP} chưa chuyển kết quả STEP 4.3 vào bảng Thành phẩm SX lũy kế (mở kỳ ${prevP} → 4.4 → Cập nhật từ STEP 4.3).`);
   const op = prev.opening && prev.opening.status !== 'BLOCKED' ? prev.opening.rows.filter((r) => r.period < prevP) : [];
   const rows = [...op, ...prev.current.rows].map((r) => ({ ...r, source: r.source === 'STEP 4.3' ? `STEP 4.3 ${r.period}` : r.source, check: undefined, msg: undefined }));
   const sales = [...((prev.opening && prev.opening.status !== 'BLOCKED' && prev.opening.sales) || []).filter((x) => x.month < prevP), ...(prev.current.sales || [])];
   return { kind: 'ROLL', source: `Roll forward từ ${prevP}`, loadedAt: nowISO(), period: newPeriod, through: prevP, rows, sales, status: 'VALIDATED', stats: stats(rows) };
+}
+
+/** v1.14.27 — detail model roll: every row of the previous month's detail table (its opening + its lots with its FIFO issues
+ * split off). January keeps only the rows still in stock (the sold history stays in the previous year). */
+export function rollDetail(prev, prevP, newPeriod) {
+  if (!prev.current || prev.current.period !== prevP) throw new Error(`Kỳ ${prevP} chưa chuyển kết quả STEP 4.3 vào bảng Thành phẩm SX lũy kế (mở kỳ ${prevP} → 4.4 → Cập nhật từ STEP 4.3).`);
+  const det = FD.buildDetail(prev, prevP);
+  const newYear = yearOf(newPeriod) !== yearOf(prevP);
+  const rows = FD.nextOpeningRows(det.rows, newPeriod).map((r) => ({ ...r, check: undefined, msg: undefined, fifoTot: undefined }));
+  const sales = newYear ? [] : [...((prev.opening.sales) || []).filter((x) => x.month < prevP), ...(prev.current.sales || [])];
+  return { model: 'DETAIL', kind: newYear ? 'NEW YEAR' : 'ROLL', source: `${newYear ? 'Năm mới – tồn kho ' : 'Roll forward '}từ ${prevP}`, loadedAt: nowISO(), period: newPeriod, through: prevP, rows, sales,
+    status: 'VALIDATED', stats: FD.detailStats(rows, newPeriod) };
+}
+/** Sales records to apply on the lot table: the detail model already holds earlier months in its rows (sold-before). */
+export function allocSales(fp, period) {
+  return FD.isDetail(fp, period) ? ytdSales(fp, period).filter((x) => x.month === period) : ytdSales(fp, period);
 }
 
 /**
@@ -169,6 +187,7 @@ export function allocate(rows, sales) {
 
 /** All rows of the YTD table for `period`: valid opening rows (earlier months of the year) + posted current month. */
 export function ytdRows(fp, period) {
+  if (FD.isDetail(fp, period)) return [...(fp.opening.status !== 'BLOCKED' ? FD.lotsFromRows(fp.opening.rows, period) : []), ...(fp.current && fp.current.period === period ? fp.current.rows : [])];
   const op = fp && fp.opening && fp.opening.period === period && fp.opening.status !== 'BLOCKED' ? fp.opening.rows.filter((r) => r.period < period && yearOf(r.period) === yearOf(period)) : [];
   const cur = fp && fp.current && fp.current.period === period ? fp.current.rows : [];
   return [...op, ...cur];

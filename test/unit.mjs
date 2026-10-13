@@ -840,5 +840,77 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('4.4: roll refuses when September was not posted from STEP 4.3', /chưa chuyển kết quả STEP 4.3/.test(rollErr), true);
 }
 
+
+// ---- v1.14.27 STEP 4.4 detail model (Carol "FG month detail"): rows split by Cost month, no Cost month = stock
+{
+  const FD = await import('../src/engine/fgdetail.js');
+  const FPx = await import('../src/engine/fgprod.js');
+  const T = await import('../src/engine/templates.js');
+  const H = FD.DET_HEADERS.slice(0, 27);
+  const R = (pc, d, prod, qty, total, cm = null, note = '') => { const r = Array(27).fill(null); Object.assign(r, { 0: pc, 1: d, 2: 'MO', 3: prod, 4: prod + ' name', 5: 'FG', 6: 'PC', 7: qty, 8: total * 0.6, 9: 0, 10: total, 11: total * 0.6, 12: total * 0.2, 13: total * 0.2, 17: cm, 24: note }); return r; };
+  const grid = [['Starry'], ['report'], [null], H,
+    R('PC-2601-001', ser(2026, 1, 10), 'A', 6, 600, '202603'), R('PC-2601-001', ser(2026, 1, 10), 'A', 4, 400),
+    R('PC-2512-009', ser(2025, 12, 20), 'Z', 3, 330, null, 'inventory end of 2025.12'), R('PC-2512-009', ser(2025, 12, 20), 'Z', 2, 220, 202601),
+    R('PC-2608-0040', ser(2026, 8, 20), 'B', 10, 1000, '202609'), // Cost month not before the period → stock (REVIEW)
+    [null, null, null, null, null, null, null, 'Complete Qty'], R('SCRATCH', ser(2026, 1, 1), 'X', 99, 9)];
+  const op = FD.importDetail({ 'FG2026 month detail': grid }, 'carol.xlsx', '2026-09');
+  eq('4.4 detail: rows read as they are, scratch block below the second header ignored', [op.rows.length, op.model, op.status], [5, 'DETAIL', 'VALIDATED WITH REVIEW']);
+  eq('4.4 detail: opening stock = rows without Cost month (incl. prior-year lot)', [op.stats.stockQty, op.stats.stockTot, op.stats.priorQty, op.stats.priorTot, op.stats.soldQty], [17, 1730, 3, 330, 8]);
+  eq('4.4 detail: Cost month 202609 in a 2026-09 opening is treated as stock + REVIEW', [op.rows[4].costMonth, op.rows[4].check], ['', 'REVIEW']);
+  const bad = FD.importDetail({ S: [H, R('PC-2609-001', ser(2026, 9, 2), 'C', 1, 1), R('PC-2601-002', ser(2026, 1, 2), 'C', 1, 1, 'xx')] }, 'b.xlsx', '2026-09');
+  eq('4.4 detail: lot of the open period / unreadable Cost month → BLOCK', [bad.status, bad.rows.map((r) => r.check)], ['BLOCKED', ['BLOCK', 'BLOCK']]);
+  // September: lot from STEP 4.3 + FIFO issues split off (two invoices on lot A, rework on B, unknown lot)
+  const current = { period: '2026-09', rows: [{ period: '2026-09', erp: 'O', pc: 'PC-2609-001', prod: 'C', qty: 100, totalRM: 700, c622: 200, c627: 100, total: 1000 }], sales: [
+    { month: '2026-09', kind: 'SALE', pc: 'PC-2601-001', prod: 'A', inv: 'I1', qty: 1, tot: 100 }, { month: '2026-09', kind: 'SALE', pc: 'PC-2601-001', prod: 'A', inv: 'I2', qty: 2, tot: 200 },
+    { month: '2026-09', kind: 'REWORK', pc: 'PC-2608-0040', prod: 'B', inv: 'RW-1', qty: 10, tot: 1000 },
+    { month: '2026-09', kind: 'SALE', pc: 'PC-2609-001', prod: 'C', inv: 'I3', qty: 40, tot: 400 },
+    { month: '2026-09', kind: 'SALE', pc: 'PC-2512-009', prod: 'Z', inv: 'I4', qty: 5, tot: 550 }, // only 3 left in 4.4
+    { month: '2026-09', kind: 'SALE', pc: 'PC-0000', prod: 'Q', inv: 'I5', qty: 1, tot: 7 }] };
+  const fp = { opening: op, current };
+  const det = FD.buildDetail(fp, '2026-09');
+  const a = det.rows.filter((r) => r.pc === 'PC-2601-001');
+  eq('4.4 detail: lot A → old sold row, 3 issued in 202609 (2 invoices on one row), 1 left; values pro rata', a.map((r) => [r.costMonth, r.qty, Math.round(r.total), r.kind, r.docs]), [['2026-03', 6, 600, 'PRIOR', ''], ['2026-09', 3, 300, 'SALE', 'I1, I2'], ['', 1, 100, '', '']]);
+  eq('4.4 detail: full rework issue leaves no stock row for lot B', det.rows.filter((r) => r.pc === 'PC-2608-0040').map((r) => [r.costMonth, r.kind, r.qty]), [['2026-09', 'REWORK', 10]]);
+  eq('4.4 detail: this month\'s lot split 40 sold / 60 in stock', det.rows.filter((r) => r.pc === 'PC-2609-001').map((r) => [r.costMonth, r.qty, r.total, r.c622]), [['2026-09', 40, 400, 80], ['', 60, 600, 120]]);
+  eq('4.4 detail: FIFO not found / not enough in 4.4 reported', det.unmatched.map((u) => [u.pc, u.qty, /không đủ/.test(u.why)]), [['PC-2512-009', 2, true], ['PC-0000', 1, false]]);
+  eq('4.4 detail: closing stock', [det.stats.stockQty, Math.round(det.stats.stockTot)], [61, 700]);
+  // reconciliation with STEP 5.1 / 5.2 (review only)
+  const fgOpen = { period: '2026-09', status: 'VALIDATED', rows: [{ pc: 'PC-2601-001', prod: 'A', qty: 4, tot: 400 }, { pc: 'PC-2512-009', prod: 'Z', qty: 3, tot: 330 }, { pc: 'PC-2608-0040', prod: 'B', qty: 10, tot: 990 }] };
+  const res = { period: '2026-09', detail: [{ lid: 'L1', qty: 3, tot: 300 }, { lid: 'L3', qty: 40, tot: 400 }, { lid: 'L4', qty: 5, tot: 550 }, { lid: 'L5', qty: 1, tot: 7 }], rework: { rows: [{ lid: 'L2', qty: 10, tot: 990 }] },
+    closing: [{ pc: 'PC-2601-001', prod: 'A', qty: 1, tot: 100 }, { pc: 'PC-2609-001', prod: 'C', qty: 60, tot: 600 }] };
+  const rc = FD.reconcile(det, fgOpen, res, '2026-09');
+  eq('4.4 recon: opening 17/1730 vs 5.1 17/1720 → LỆCH 10 VND (lot B)', [rc.rows[0].q44, rc.rows[0].q5, Math.round(rc.rows[0].da), rc.rows[0].status], [17, 17, 10, 'LỆCH']);
+  eq('4.4 recon: COGS 4.4 vs FIFO, rework, unmatched, closing', rc.rows.slice(1).map((r) => [r.q44, r.q5, r.status]), [[46, 49, 'LỆCH'], [10, 10, 'LỆCH'], [0, 3, 'LỆCH'], [61, 61, 'KHỚP']]);
+  eq('4.4 recon: lot differences (opening value, closing prior-year lot only in 4.4)', rc.lots.map((l) => [l.side, l.type, l.pc, Math.round(l.da)]), [['Đầu kỳ', 'LỆCH GIÁ TRỊ', 'PC-2608-0040', 10]]);
+  eq('4.4 recon status is REVIEW (never BLOCK)', rc.status, 'REVIEW');
+  const ok = FD.reconcile(FD.buildDetail({ opening: op, current: { period: '2026-09', rows: [], sales: [] } }, '2026-09'), { period: '2026-09', rows: [{ pc: 'PC-2601-001', prod: 'A', qty: 4, tot: 400 }, { pc: 'PC-2512-009', prod: 'Z', qty: 3, tot: 330 }, { pc: 'PC-2608-0040', prod: 'B', qty: 10, tot: 1000 }] }, null, '2026-09');
+  eq('4.4 recon: opening equal → KHỚP, no FIFO yet → PARTIAL', [ok.rows[0].status, ok.status, ok.lots.length], ['KHỚP', 'PARTIAL', 0]);
+  // lot tabs keep working: this year's lots with sold-before from the rows; only this month's FIFO applied
+  const lots = FPx.ytdRows(fp, '2026-09');
+  eq('4.4 detail → year lots (prior-year lot excluded)', lots.map((l) => [l.pc, l.qty, l.soldQty0]), [['PC-2601-001', 10, 6], ['PC-2608-0040', 10, 0], ['PC-2609-001', 100, undefined]]);
+  const al = FPx.allocate(lots, FPx.allocSales(fp, '2026-09'));
+  eq('4.4 detail: lot remaining = 4.4 stock', al.lots.map((l) => l.remQty), [1, 0, 60]);
+  // roll Sep → Oct (detail) and Dec → Jan (stock rows only)
+  const oct = FPx.rollOpening(fp, '2026-09', '2026-10');
+  eq('4.4 detail roll: all rows, stock = September closing', [oct.model, oct.kind, oct.rows.length, oct.stats.stockQty, Math.round(oct.stats.stockTot), oct.stats.costMonths.join(',')], ['DETAIL', 'ROLL', det.rows.length, 61, 700, '2026-01,2026-03,2026-09']);
+  const jan = FPx.rollOpening({ opening: { ...op, period: '2026-12' }, current: { period: '2026-12', rows: [], sales: [] } }, '2026-12', '2027-01');
+  eq('4.4 detail roll into January keeps only rows in stock', [jan.kind, jan.rows.length, jan.rows.every((r) => !r.costMonth), jan.stats.stockQty], ['NEW YEAR', 3, true, 17]);
+  // next-period file (Carol layout) reads back with the same reader
+  const sh = FD.detailSheets(FD.nextOpeningRows(det.rows, '2026-10'), '2026-10', 'test');
+  const flat = sh[0].aoa.map((r) => r.map((c) => (c && typeof c === 'object' && 'v' in c ? c.v : c)));
+  const back = FD.importDetail({ FG_DETAIL: flat }, 'next.xlsx', '2026-10');
+  eq('4.4 detail file round-trips (rows, stock, Cost months, kinds)', [back.status, back.rows.length, back.stats.stockQty, Math.round(back.stats.stockTot), back.rows.filter((r) => r.kind === 'REWORK').length], ['VALIDATED', det.rows.length, 61, 700, 1]);
+  eq('4.4 detail file: sheets', sh.map((x) => x.name), ['FG_DETAIL', 'TONG_HOP']);
+  // old lot opening → detail rows (sold-before kept as an issued row)
+  const legacy = { period: '2026-09', status: 'VALIDATED', through: '2026-08', rows: [{ period: '2026-02', pc: 'PC-2602-001', prod: 'L', qty: 10, totalRM: 600, c622: 200, c627: 200, total: 1000, soldQty0: 4 }] };
+  const ld = FD.buildDetail({ opening: legacy }, '2026-09');
+  eq('4.4 old lot opening converted (sold-before row + stock row)', ld.rows.map((r) => [r.costMonth, r.qty, r.total]), [['2026-08', 4, 400], ['', 6, 600]]);
+  // guide examples import with the real reader; the guide alone is not a table
+  const tpl = FD.detailSheets([], '2026-09')[0];
+  const gd = FD.importDetail({ FG_DETAIL: [...tpl.aoa, ...T.exampleRows(T.DETAIL_GUIDE)] }, 'ex.xlsx', '2026-09');
+  eq('template 4.4 detail: 2 example rows (one stock, one sold 202608), no BLOCK', [gd.rows.length, gd.stats.block, gd.stats.stockQty, gd.stats.soldQty], [2, 0, 12, 5]);
+  eq('template 4.4 detail: guide sheet alone is not a table', FD.findDetailSheet({ [T.GUIDE_SHEET]: T.fgDetailGuide('2026-09').aoa }), null);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
