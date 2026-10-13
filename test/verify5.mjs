@@ -1,7 +1,8 @@
 // Regression test STEP 5 (FIFO COGS, Rework FIFO, FG History, close controls) vs the Aug-2026 workbook.
 // Usage: node test/verify5.mjs <costing.xlsm> <erp-fixture-folder> <sales-fixture.xlsx>
 import fs from 'node:fs';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 import { loadWorkbook, loadDatasets, runBase, checker, PERIOD } from './load.mjs';
 import { sheetToGrid } from '../src/engine/grid.js';
 import { MAP_FIELDS, deriveInput, runBuild, engineDynamic, applyControl, postedByLot } from '../src/engine/step3b.js';

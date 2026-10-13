@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import XLSX from 'xlsx';
+import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
+import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { step2ReportSheets } = await import(path.join(root, 'src/engine/step2report.js'));
