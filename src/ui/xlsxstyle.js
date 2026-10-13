@@ -273,6 +273,33 @@ function renderAoaSheet(wb, s, meta) {
     if (isBody) ws.getRow(r).height = hgt;
   });
 
+  // v1.14.26 import template finish (s.tpl): title rows, required / conditional header colours, header notes, column number
+  // formats, freeze header + key columns, filter and drop-down lists. Cell values and positions are unchanged (keep).
+  if (s.keep && s.tpl) {
+    const T = s.tpl, H = T.headerRow, last = Math.max(rows.length, H + (T.minRows || 0));
+    const c1 = ws.getCell(1, 1); c1.font = { name: FONT, size: 8, color: { argb: C.muted } };
+    const c3 = ws.getCell(1, 3); if (!blank(c3.value)) { c3.font = { name: FONT, size: 14, bold: true, color: { argb: C.brand } }; ws.getRow(1).height = 26; }
+    if (T.mergeInfo) ws.mergeCells(2, 4, 2, 6); // months text spans D2:F2 (row 2 is informational)
+    for (let c = 1; c <= ncols; c += 2) { const lab = ws.getCell(2, c); if (!blank(lab.value)) lab.font = { name: FONT, size: 10, bold: true, color: { argb: C.muted } }; const v = ws.getCell(2, c + 1); if (!blank(v.value)) { v.font = { name: FONT, size: 11, bold: true, color: { argb: C.brand } }; v.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.band } }; } }
+    const req = new Set(T.required || []), cond = new Set(T.conditional || []);
+    for (let c = 0; c < ncols; c++) {
+      const h = ws.getCell(H, c + 1); if (blank(h.value)) continue;
+      if (req.has(c)) { h.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8A4B00' } }; h.value = `${h.value} *`; }
+      else if (cond.has(c)) h.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB06A00' } };
+      if (T.notes && T.notes[c]) h.note = { texts: [{ font: { size: 9, name: FONT }, text: T.notes[c] }], margins: { insetmode: 'auto' } };
+    }
+    for (const [c, fmt] of Object.entries(T.numFmt || {})) for (let r = H + 1; r <= rows.length; r++) { const cell = ws.getCell(r, +c + 1); if (typeof cell.value === 'number') cell.numFmt = fmt; }
+    const center = new Set(T.center || []);
+    for (let r = H + 1; r <= rows.length; r++) for (let c = 0; c < ncols; c++) { const cell = ws.getCell(r, c + 1); if (typeof cell.value === 'string') cell.alignment = { vertical: 'middle', horizontal: center.has(c) ? 'center' : 'left', indent: center.has(c) ? 0 : 1, wrapText: false }; }
+    ws.views = [{ showGridLines: false, state: 'frozen', xSplit: T.freezeCols || 0, ySplit: H, topLeftCell: `${colLetter((T.freezeCols || 0) + 1)}${H + 1}` }];
+    ws.autoFilter = `A${H}:${colLetter(ncols)}${Math.max(H + 1, rows.length)}`;
+    for (const [c, list] of Object.entries(T.lists || {})) {
+      const L = colLetter(+c + 1);
+      ws.dataValidations.add(`${L}${H + 1}:${L}${last}`, { type: 'list', allowBlank: true, formulae: [`"${list.join(',')}"`], showErrorMessage: true, errorStyle: 'warning', errorTitle: 'Giá trị không có trong danh sách', error: `Chọn một trong: ${list.join(', ')}` });
+    }
+    ws.pageSetup.printTitlesRow = `${H}:${H}`;
+    return ws;
+  }
   // freeze, filter and print titles for a single table sheet
   const single = tables.length === 1 ? tables[0] : null;
   if (single && single.e - single.h >= 10 && single.h < 14) {

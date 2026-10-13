@@ -182,13 +182,12 @@ export async function doRoll() {
 }
 export async function doTemplate(next) {
   const S = A.S; const x = state(S);
-  if (!next) { await A.exportBook(`SVL_TP_SX_DauKy_Template_${S.period}.xlsx`, [{ name: 'FG_PRODUCTION', keep: true, header: 4, aoa: FP.templateAOA([], S.period), cols: COLW }, TPL.fgProductionGuide(S.period)]); return; }
+  if (!next) { await A.exportBook(`SVL_TP_SX_DauKy_Template_${S.period}.xlsx`, [...FP.templateSheets([], S.period), TPL.fgProductionGuide(S.period)]); return; }
   const rows = FP.allocate(FP.ytdRows(x.fp, S.period), FP.ytdSales(x.fp, S.period)).lots;
   const np = nextP(S.period);
   if (np.slice(5) === '01') { A.toast(`Kỳ sau (${np}) là tháng 1 – bắt đầu năm mới, không cần file đầu kỳ.`, 'review'); return; }
-  await A.exportBook(`SVL_TP_SX_DauKy_${np}.xlsx`, [{ name: 'FG_PRODUCTION', keep: true, header: 4, aoa: FP.templateAOA(rows, np, `Lũy kế đến hết ${S.period}${x.outdated || !x.posted ? ' (CHÚ Ý: chưa cập nhật đủ từ STEP 4.3)' : ''}`), cols: COLW }, TPL.fgProductionGuide(np)]);
+  await A.exportBook(`SVL_TP_SX_DauKy_${np}.xlsx`, [...FP.templateSheets(rows, np, `Lũy kế đến hết ${S.period}${x.outdated || !x.posted ? ' (CHÚ Ý: chưa cập nhật đủ từ STEP 4.3)' : ''}`), TPL.fgProductionGuide(np)]);
 }
-const COLW = [12, 6, 18, 12, 18, 18, 30, 14, 12, 8, 12, 16, 16, 16, 18, 24];
 const nextP = (p) => { let y = +p.slice(0, 4), m = +p.slice(5, 7) + 1; if (m > 12) { m = 1; y++; } return `${y}-${String(m).padStart(2, '0')}`; };
 export async function doExport() {
   const S = A.S; const x = state(S); const rows = FP.ytdRows(x.fp, S.period); const sales = FP.ytdSales(x.fp, S.period); const sm = FP.summarize(rows, S.period, sales);

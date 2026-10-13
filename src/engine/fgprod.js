@@ -2,6 +2,7 @@
 // Opening (prior months of the year: upload file or roll forward) + current month (posted from STEP 4.3 final layer)
 // = YTD finished-goods production by lot, product and month. Rolled into the next month; January starts a new year.
 import { txt, ttxt, utxt, num, isNumeric, nowISO, fpRows, serialToYMD, cellDateSerial } from './util.js';
+import { FG_PROD_COLS } from './templates.js';
 
 export const FGP_FIELDS = ['period', 'erp', 'pc', 'date', 'mo', 'prod', 'name', 'fam', 'loc', 'unit', 'qty', 'baseRM', 'wipAdj', 'carryIn', 'totalRM', 'c622', 'c627', 'total', 'unitCost', 'source', 'note'];
 export const FGP_HEADERS = ['Kỳ', 'ERP', 'PC No.', 'PC Date', 'MO No.', 'Product Code', 'Product Name', 'Costing Family', 'Location', 'Unit', 'Complete Qty', 'RM gốc (PC + Stock Out)', 'Điều chỉnh WIP 3B', 'Rework chuyển vào', 'Total RM', '622', '627', 'Tổng giá thành', 'Giá thành / đv', 'Nguồn', 'Ghi chú'];
@@ -144,11 +145,16 @@ export function ytdSales(fp, period) {
  * Records whose lot is not in the table (opening FG from before the year / not uploaded) are returned as `unmatched`.
  */
 export function allocate(rows, sales) {
-  const idx = new Map(); const lots = rows.map((r) => ({ ...r, soldQty: num(r.soldQty0), soldTot: num(r.soldTot0), rwQty: 0, rwTot: 0, months: {}, invs: new Set() }));
-  lots.forEach((r) => { const k = lotKey(r.period, r.pc, r.prod); if (r.pc && !idx.has(k)) idx.set(k, r); });
+  const idx = new Map(), byPc = new Map(); const lots = rows.map((r) => ({ ...r, soldQty: num(r.soldQty0), soldTot: num(r.soldTot0), rwQty: 0, rwTot: 0, months: {}, invs: new Set() }));
+  lots.forEach((r) => {
+    const k = lotKey(r.period, r.pc, r.prod); if (r.pc && !idx.has(k)) idx.set(k, r);
+    // v1.14.26: PC numbers are unique (PC-YYMM-nnn), so a lot is also found by PC No. + product when the FG layer carries
+    // another source period (opening FG loaded from an Excel "month detail" file is stamped with the previous month).
+    const k2 = `${utxt(r.pc)}|${utxt(r.prod)}`; if (r.pc) byPc.set(k2, byPc.has(k2) ? null : r);
+  });
   const unmatched = [];
   for (const x of sales || []) {
-    const r = idx.get(lotKey(x.lotPeriod, x.pc, x.prod));
+    const r = idx.get(lotKey(x.lotPeriod, x.pc, x.prod)) || (x.pc ? byPc.get(`${utxt(x.pc)}|${utxt(x.prod)}`) : null);
     if (!r) { unmatched.push(x); continue; }
     if (x.kind === 'REWORK') { r.rwQty += num(x.qty); r.rwTot += num(x.tot); } else { r.soldQty += num(x.qty); r.soldTot += num(x.tot); r.invs.add(x.inv); }
     r.months[x.month] = num(r.months[x.month]) + num(x.qty);
@@ -199,13 +205,40 @@ export function summarize(rows, period, sales = []) {
 }
 
 /** Upload template (optionally pre-filled, e.g. the YTD through this month = opening file of next month). */
+const monthsText = (rows) => { const m = [...new Set(rows.map((r) => r.period))].sort(); return m.length > 2 ? `${m[0]} → ${m[m.length - 1]} (${m.length} tháng)` : m.join(', '); };
 export function templateAOA(rows, forPeriod, note = '') {
   return [
     [FGP_MARKER, 'v1', 'SVL - THÀNH PHẨM SẢN XUẤT LŨY KẾ TỪ ĐẦU NĂM (FILE ĐẦU KỲ CHO STEP 4.4)'],
-    ['Dùng cho kỳ', forPeriod, 'Gồm các tháng', rows.length ? [...new Set(rows.map((r) => r.period))].sort().join(', ') : `${yearOf(forPeriod)}-01 … tháng trước ${forPeriod}`, note],
+    ['Dùng cho kỳ', forPeriod, 'Gồm các tháng', rows.length ? monthsText(rows) : `${yearOf(forPeriod)}-01 … tháng trước ${forPeriod}`, '', '', note], // row 2 is informational only (not read)
     ['Mỗi dòng là một lô (hoặc một sản phẩm / tháng). Bắt buộc: Kỳ (YYYY-MM, cùng năm và trước kỳ dùng), Product Code, Complete Qty, Tổng giá thành (hoặc RM + 622 + 627). Không đổi tiêu đề dòng 4. Hướng dẫn chi tiết và ví dụ: sheet HUONG_DAN.'],
     TPL_COLS.map(([, h]) => h),
     ...rows.map((r) => TPL_COLS.map(([k]) => (k === 'date' && typeof r.date === 'number' ? isoDate(r.date) : k === 'soldQty0' ? num(r.soldQty) + num(r.rwQty) || num(r.soldQty0) || '' : k === 'soldTot0' ? num(r.soldTot) + num(r.rwTot) || num(r.soldTot0) || '' : r[k] ?? ''))),
   ];
+}
+/** v1.14.26 — the 4.4 upload template as styled sheets: FG_PRODUCTION (importable, rows 1–4 fixed) + TONG_HOP (by month). */
+export const TPL_WIDTHS = [11, 6, 16, 12, 18, 20, 34, 14, 12, 7, 13, 17, 16, 16, 19, 15, 20, 30];
+export function templateSheets(rows, forPeriod, note = '') {
+  const col = (k) => TPL_COLS.findIndex(([f]) => f === k);
+  const numFmt = {}; for (const k of ['qty', 'soldQty0']) numFmt[col(k)] = '#,##0.###'; for (const k of ['totalRM', 'c622', 'c627', 'total', 'soldTot0']) numFmt[col(k)] = '#,##0';
+  const notes = Object.fromEntries(FG_PROD_COLS.map((c, i) => [i, `${c[1]} – ${c[2]}\nĐịnh dạng: ${c[3]}${c[4] !== '' && c[4] !== undefined ? `\nVí dụ: ${c[4]}` : ''}`]));
+  // professional order: month → ERP → PC No. → product (the reader does not depend on the order)
+  rows = [...rows].sort((a, b) => String(a.period).localeCompare(String(b.period)) || String(a.erp).localeCompare(String(b.erp)) || String(a.pc).localeCompare(String(b.pc)) || String(a.prod).localeCompare(String(b.prod)));
+  const data = { name: 'FG_PRODUCTION', keep: true, header: 4, aoa: templateAOA(rows, forPeriod, note), cols: TPL_WIDTHS, footer: `Thành phẩm SX lũy kế – file đầu kỳ ${forPeriod}`,
+    tpl: { headerRow: 4, freezeCols: 3, required: ['period', 'prod', 'qty', 'total'].map(col), conditional: ['totalRM', 'c622', 'c627'].map(col), numFmt, notes,
+      lists: { [col('erp')]: ['T', 'O'], [col('fam')]: ['DOONA', 'MK', 'VETO', 'HAMA', 'O-OTHER'] }, center: [col('erp'), col('unit')], mergeInfo: true, minRows: Math.max(500, rows.length + 200) } };
+  if (!rows.length) return [data];
+  const by = new Map();
+  for (const r of rows) {
+    const m = by.get(r.period) || { lots: 0, prods: new Set(), qty: 0, rm: 0, c622: 0, c627: 0, total: 0, sold: 0, soldTot: 0 };
+    m.lots++; m.prods.add(utxt(r.prod)); m.qty += num(r.qty); m.rm += num(r.totalRM); m.c622 += num(r.c622); m.c627 += num(r.c627); m.total += num(r.total);
+    const sq = num(r.soldQty) + num(r.rwQty) || num(r.soldQty0), st = num(r.soldTot) + num(r.rwTot) || num(r.soldTot0); m.sold += sq; m.soldTot += st;
+    by.set(r.period, m);
+  }
+  const head = ['Tháng sản xuất', 'Số lô', 'Số mã thành phẩm', 'SL hoàn thành', 'RM (VND)', '622 (VND)', '627 (VND)', 'Tổng giá thành (VND)', 'SL đã xuất trước kỳ', 'Giá vốn đã xuất (VND)', 'SL còn lại', 'Giá trị còn lại (VND)'];
+  const body = [...by.entries()].sort().map(([p, m]) => [p, m.lots, m.prods.size, m.qty, m.rm, m.c622, m.c627, m.total, m.sold, m.soldTot, m.qty - m.sold, m.total - m.soldTot]);
+  const tot = body.reduce((a, r) => a.map((v, i) => (i < 1 ? v : i === 2 ? v : v + r[i])), ['Tổng', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  tot[2] = new Set(rows.map((r) => utxt(r.prod))).size;
+  const fmt = (r) => r.map((v, i) => (typeof v === 'number' ? { v, z: [3, 8, 10].includes(i) ? '#,##0.###;(#,##0.###);"-"' : '#,##0;(#,##0);"-"' } : v));
+  return [data, { name: 'TONG_HOP', title: `THÀNH PHẨM SẢN XUẤT LŨY KẾ – TỔNG HỢP THEO THÁNG (file đầu kỳ ${forPeriod})`, subtitle: note || `Số liệu của sheet FG_PRODUCTION · ${rows.length} dòng`, header: 4, aoa: [head, ...body.map(fmt), fmt(tot)], cols: [14, 8, 12, 14, 18, 17, 17, 19, 15, 19, 13, 19], footer: `Thành phẩm SX lũy kế – tổng hợp ${forPeriod}` }];
 }
 const isoDate = (s) => { const d = serialToYMD(s); return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`; };

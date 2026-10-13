@@ -767,5 +767,50 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('STEP 1: confirmed anomalies → PASS WITH REVIEW, next = STEP 2', [c2.status, c2.result, c2.next], ['PASS WITH REVIEW', 'PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG', 'Chạy STEP 2']);
 }
 
+// ---- v1.14.26 STEP 1: PC-P vs PC-M per system (T / S / O) is part of the confirmed data check
+{
+  const DQ = await import('../src/engine/dataquality.js');
+  const HP = ['PC No.', 'Product Code', 'Product Name', 'Current Complete Qty', 'Total Cost'];
+  const HM = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Material Name', 'Quantity', 'Total Cost'];
+  const P = (e, rows) => buildDataset([HP, ...rows], `PC-P-${e}-202608.xlsx`, P2);
+  const M = (e, rows) => buildDataset([['x'], HM, ...rows], `PC-M-${e}-202608.xlsx`, P2);
+  const ds = {
+    'PC-P-T': P('T', [['PC-1', 'SP1', 's', 10, 1000]]), 'PC-M-T': M('T', [['PC-1', 'SP1', 's', 'M1', 'm', 5, 600], ['PC-1', 'SP1', 's', 'M2', 'm', 5, 400]]),
+    'PC-P-O': P('O', [['PC-7', 'OLI-1', 'o', 4, 500], ['PC-8', 'OLI-2', 'o', 4, 300]]),
+    'PC-M-O': M('O', [['PC-7', 'OLI-1', 'o', 'X1', 'x', 4, 494.39], ['PC-9', 'OLI-3', 'o', 'X2', 'x', 1, 50]]),
+  };
+  const rc = DQ.pcpPcmRecon(ds);
+  eq('PC-P/PC-M: per system status', rc.bySys.map((x) => [x.erp, x.status, x.gaps, x.onlyM, x.onlyP]), [['T', 'PASS', 0, 0, 0], ['O', 'CHECK', 1, 1, 1]]);
+  eq('PC-P/PC-M: gap and one-sided PCs listed with amounts', rc.issues.map((x) => [x.type, x.pcNo, Math.round(x.diff * 100) / 100]), [['CHỈ CÓ Ở PC-P', 'PC-8', -300], ['CHỈ CÓ Ở PC-M', 'PC-9', 50], ['LỆCH', 'PC-7', -5.61]]);
+  const an = DQ.erpAnomalies(ds);
+  eq('PC-P/PC-M gap alone requires the STEP 1 confirmation', [an.lines.length, an.issues, DQ.anomalyStatus(an, null)], [0, 3, 'BLOCK - CONFIRM']);
+  const ack = { fp: an.fp };
+  const ds2 = { ...ds, 'PC-M-O': M('O', [['PC-7', 'OLI-1', 'o', 'X1', 'x', 4, 490], ['PC-9', 'OLI-3', 'o', 'X2', 'x', 1, 50]]) };
+  eq('PC-P/PC-M: confirmed list stays confirmed; changed amounts need a new confirmation', [DQ.anomalyStatus(an, ack), DQ.anomalyStatus(DQ.erpAnomalies(ds2), ack)], ['REVIEW - CONFIRMED', 'BLOCK - CONFIRM']);
+  const clean = { 'PC-P-T': ds['PC-P-T'], 'PC-M-T': ds['PC-M-T'] };
+  eq('PC-P/PC-M: all systems equal → PASS', DQ.anomalyStatus(DQ.erpAnomalies(clean), null), 'PASS');
+}
+
+// ---- v1.14.26 STEP 4.4: FIFO sales find the lot by PC No. + product when the FG layer carries another source period; Sep → Oct roll
+{
+  const FPx = await import('../src/engine/fgprod.js');
+  const lotR = (period, pc, prod, qty, total, sold = 0) => ({ period, erp: 'O', pc, prod, qty, totalRM: total, c622: 0, c627: 0, total, soldQty0: sold, soldTot0: sold ? total * sold / qty : 0 });
+  const opening = { period: '2026-09', status: 'VALIDATED', rows: [lotR('2026-01', 'PC-2601-102', 'A', 10, 1000, 4), lotR('2026-08', 'PC-2608-005', 'B', 6, 600)] };
+  const current = { period: '2026-09', rows: [lotR('2026-09', 'PC-2609-001', 'C', 100, 1000)], sales: [
+    { month: '2026-09', kind: 'SALE', lotPeriod: '2026-08', pc: 'PC-2601-102', prod: 'A', inv: 'I1', qty: 1, tot: 100 }, // layer from an Excel month-detail opening (stamped 2026-08)
+    { month: '2026-09', kind: 'SALE', lotPeriod: '2026-09', pc: 'PC-2609-001', prod: 'C', inv: 'I2', qty: 40, tot: 400 },
+    { month: '2026-09', kind: 'SALE', lotPeriod: '2025-12', pc: 'PC-2512-001', prod: 'Z', inv: 'I3', qty: 5, tot: 50 }] };
+  const fp = { opening, current };
+  const al = FPx.allocate(FPx.ytdRows(fp, '2026-09'), FPx.ytdSales(fp, '2026-09'));
+  const byPc = Object.fromEntries(al.lots.map((r) => [r.pc, r]));
+  eq('4.4: sale of an older lot matched by PC No. + product (period stamp differs)', [byPc['PC-2601-102'].soldQty, byPc['PC-2601-102'].remQty, byPc['PC-2609-001'].remQty], [5, 5, 60]);
+  eq('4.4: a lot of the previous year stays unmatched (not in the year table)', al.unmatched.map((x) => x.pc), ['PC-2512-001']);
+  const roll = FPx.rollOpening(fp, '2026-09', '2026-10');
+  const al10 = FPx.allocate(FPx.ytdRows({ opening: roll }, '2026-10'), FPx.ytdSales({ opening: roll }, '2026-10'));
+  eq('4.4: roll Sep → Oct keeps Jan–Sep lots and cumulative issues', [roll.kind, roll.rows.length, [...new Set(roll.rows.map((r) => r.period))].sort().join(','), al10.lots.find((r) => r.pc === 'PC-2601-102').soldQty, al10.lots.find((r) => r.pc === 'PC-2609-001').soldQty], ['ROLL', 3, '2026-01,2026-08,2026-09', 5, 40]);
+  let rollErr = ''; try { FPx.rollOpening({ opening }, '2026-09', '2026-10'); } catch (e) { rollErr = e.message; }
+  eq('4.4: roll refuses when September was not posted from STEP 4.3', /chưa chuyển kết quả STEP 4.3/.test(rollErr), true);
+}
+
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
