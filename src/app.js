@@ -530,21 +530,30 @@ function journal(st) {
 }
 
 // ---------- STEP 1 ----------
-/** v1.14.25: abnormal ERP material lines (PC-M / MI-M) – shown at STEP 1 until a user confirms the list. */
+/** v1.14.25–26: STEP 1 ERP data check – PC-P vs PC-M per system and abnormal material lines; confirmed by a user before STEP 2. */
 function dqSection(dq) {
   if (!dq) return '';
-  if (!dq.lines.length) return S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? '<div class="alert pass">Kiểm tra dữ liệu ERP: không có dòng bất thường ở PC-M / MI-M (SL ≠ 0 mà Total Cost = 0, số âm, giá trị dạng chữ).</div>' : '';
+  const rc = dq.recon || { bySys: [], issues: [] };
+  const nL = dq.lines.length, nR = rc.issues.length;
+  if (!nL && !nR) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
   const ack = S.d.importAck; const ok = dq.status === 'REVIEW - CONFIRMED';
   const changed = ack && !ok ? `<p><b>Danh sách đã thay đổi</b> sau lần xác nhận ${fmtTs(ack.at)} của ${esc(ack.by)} (dữ liệu ERP được import lại) – cần xác nhận lại.</p>` : '';
-  return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Dữ liệu ERP bất thường: ${fmtNum(dq.lines.length)} dòng · ${fmtNum(dq.materials)} vật tư ${pill(ok ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h2>
-    <p>Các dòng vật tư dưới đây có số liệu bất thường trên báo cáo ERP. STEP 3B không định giá được vật tư có SL nhưng Total Cost = 0 (ví dụ hàng khách cấp, hàng chưa có giá). Rà soát với ERP / kho: sửa và import lại, hoặc xác nhận là đúng thực tế. <b>STEP 2 chỉ chạy được sau khi danh sách đã được xác nhận.</b></p>
-    ${changed}
+  const recon = rc.bySys.length ? `<h3 style="margin:12px 0 6px">1 · Đối chiếu PC-P và PC-M theo hệ ${pill(nR ? 'CHECK' : 'PASS')}</h3>
+    <p class="muted">Total Cost của lô trên PC-P phải bằng tổng Total Cost vật tư của lô trên PC-M (theo PC No. và Product Code). Lệch nghĩa là hai báo cáo không được xuất cùng thời điểm hoặc có chứng từ chưa đủ.</p>
+    <table class="cp"><thead><tr><th>Hệ</th><th class="r">Total Cost PC-P</th><th class="r">Tổng PC-M</th><th class="r">Chênh PC-M − PC-P</th><th class="r">Số PC (P / M)</th><th class="r">PC lệch</th><th class="r">Chỉ có ở PC-M</th><th class="r">Chỉ có ở PC-P</th><th>Trạng thái</th></tr></thead><tbody>
+      ${rc.bySys.map((x) => `<tr><td><span class="erp erp-${x.erp}">${x.erp}</span></td><td class="r">${fmtNum(x.pcp)}</td><td class="r">${fmtNum(x.pcm)}</td><td class="r">${fmtNum(x.diff, Math.abs(x.diff) < 1000 && x.diff ? 2 : 0)}</td><td class="r">${fmtNum(x.pcsP)} / ${fmtNum(x.pcsM)}</td><td class="r">${fmtNum(x.gaps)}</td><td class="r">${fmtNum(x.onlyM)}</td><td class="r">${fmtNum(x.onlyP)}</td><td>${pill(x.status)}</td></tr>`).join('')}
+    </tbody></table>${nR ? '<div id="t-pcrec"></div><p class="muted">Cách xử lý: xuất lại PC-P và PC-M cùng lúc từ ERP rồi import lại. Nếu chênh lệch nhỏ đã được giải trình, STEP 3 có chức năng "Điều chỉnh PC-P theo PC-M" (có lưu số gốc để hoàn tác).</p>' : ''}` : '';
+  const lines = nL ? `<h3 style="margin:12px 0 6px">2 · Dòng vật tư bất thường (PC-M / MI-M / MR-M) ${pill('CHECK')}</h3>
+    <p class="muted">STEP 3B không định giá được vật tư có SL nhưng Total Cost = 0 (ví dụ hàng khách cấp, hàng chưa có giá). Rà soát với ERP / kho: sửa và import lại, hoặc xác nhận là đúng thực tế.</p>
     <table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
       ${dq.summary.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
-    </tbody></table>
+    </tbody></table><div id="t-dq"></div>` : '';
+  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', nL ? `${fmtNum(nL)} dòng vật tư bất thường (${fmtNum(dq.materials)} vật tư)` : ''].filter(Boolean).join(' · ');
+  return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Kiểm tra dữ liệu ERP: ${head} ${pill(ok ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h2>
+    <p><b>STEP 2 chỉ chạy được sau khi kết quả kiểm tra đã được rà soát và xác nhận.</b></p>${changed}
     ${ok ? `<p>Đã xác nhận bởi <b>${esc(ack.by)}</b> lúc ${fmtTs(ack.at)}: ${esc(ack.note)}</p>` : ''}
-    <div class="row"><button class="btn ${ok ? 'ghost' : ''}" type="button" data-act="dq-confirm">${ok ? 'Xác nhận lại' : 'Xác nhận đã rà soát danh sách'}</button><span class="muted">Danh sách chi tiết (lọc theo loại, Xuất Excel) ở bảng dưới.</span></div>
-    <div id="t-dq"></div></div>`;
+    <div class="row"><button class="btn ${ok ? 'ghost' : ''}" type="button" data-act="dq-confirm">${ok ? 'Xác nhận lại' : 'Xác nhận đã rà soát'}</button><span class="muted">Danh sách chi tiết có lọc và Xuất Excel ở từng mục bên dưới.</span></div>
+    ${recon}${lines}</div>`;
 }
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
@@ -568,6 +577,10 @@ VIEWS.step1 = (el) => {
     <div class="row end"><span class="muted">Dòng báo "access right" từ ERP: ${c.accessLimited}</span>
       <button class="btn danger ghost" data-act="reset-erp" type="button" ${isClosed() ? 'disabled title="Kỳ đã đóng – mở lại kỳ (5.3) nếu cần xoá"' : ''}>Xoá dữ liệu ERP…</button></div>
   </section>`;
+  if (c.dq && c.dq.recon && c.dq.recon.issues.length && $('#t-pcrec')) {
+    const pcols = DQ.PCR_FIELDS.map((f, i) => ({ key: f, label: DQ.PCR_HEADERS[i], type: ['pcp', 'pcm', 'diff'].includes(f) ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 260 : f === 'erp' ? 50 : ['pcp', 'pcm', 'diff'].includes(f) ? 170 : 130 }));
+    mountTable($('#t-pcrec'), { columns: pcols, rows: c.dq.recon.issues, filterKey: 'type', height: 300, totals: ['pcp', 'pcm', 'diff'], onExport: exportTable('01_DOI_CHIEU_PCP_PCM', pcols) });
+  }
   if (c.dq && c.dq.lines.length && $('#t-dq')) {
     const cols = DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
     mountTable($('#t-dq'), { columns: cols, rows: c.dq.lines, filterKey: 'type', height: 360, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_BAT_THUONG', cols) });
@@ -691,7 +704,7 @@ VIEWS.step2 = (el) => {
 function doStep2() {
   const dq = DQ.erpAnomalies(S.d.datasets);
   if (DQ.anomalyStatus(dq, S.d.importAck) === 'BLOCK - CONFIRM') {
-    toast(`STEP 2 bị chặn: STEP 1 có ${dq.lines.length} dòng dữ liệu ERP bất thường (${dq.materials} vật tư) chưa được xác nhận. Mở STEP 1 → "Dữ liệu ERP bất thường", rà soát danh sách rồi bấm Xác nhận.`, 'block');
+    toast(`STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận (${dq.recon.issues.length} PC lệch PC-P / PC-M, ${dq.lines.length} dòng vật tư bất thường). Mở STEP 1 → "Kiểm tra dữ liệu ERP", rà soát rồi bấm Xác nhận.`, 'block');
     location.hash = '#step1'; return;
   }
   const periodIssues = outOfPeriodRows(S.d.datasets, S.period);
@@ -1264,12 +1277,13 @@ document.addEventListener('click', async (e) => {
       exportBook(`SVL_WIP_Opening_Template_${S.period}.xlsx`, TPL.wipOpeningTemplate(S.period)); break;
     case 'dq-confirm': {
       if (!guardMutate()) break;
-      const dq = DQ.erpAnomalies(S.d.datasets); if (!dq.lines.length) break;
-      const note = (prompt(`Xác nhận đã rà soát ${dq.lines.length} dòng dữ liệu ERP bất thường (${dq.materials} vật tư)?\n${dq.summary.map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`).join('\n')}\n\nGhi chú / kết luận (bắt buộc), ví dụ: "Hàng khách cấp – ERP giá trị 0 là đúng":`, (S.d.importAck && S.d.importAck.note) || '') || '').trim();
+      const dq = DQ.erpAnomalies(S.d.datasets); if (DQ.anomalyStatus(dq, null) === 'PASS') break;
+      const rcTxt = dq.recon.bySys.filter((x) => x.status !== 'PASS').map((x) => `• PC-P vs PC-M hệ ${x.erp}: chênh ${fmtNum(x.diff, 2)} VND – ${x.gaps} PC lệch, ${x.onlyM} chỉ có ở PC-M, ${x.onlyP} chỉ có ở PC-P`);
+      const note = (prompt(`Xác nhận đã rà soát kết quả kiểm tra dữ liệu ERP?\n${[...rcTxt, ...dq.summary.map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`)].join('\n')}\n\nGhi chú / kết luận (bắt buộc), ví dụ: "Hàng khách cấp – ERP giá trị 0 là đúng; chênh PC-P/PC-M hệ O do làm tròn":`, (S.d.importAck && S.d.importAck.note) || '') || '').trim();
       if (!note) break;
       if (note.length < 5) { toast('Ghi chú cần ít nhất 5 ký tự.', 'review'); break; }
-      S.d.importAck = { fp: dq.fp, lines: dq.lines.length, materials: dq.materials, summary: dq.summary.map((g) => ({ report: g.report, type: g.type, lines: g.lines, materials: g.materials })), by: who(), at: nowISO(), note };
-      audit('ERP DATA ANOMALY CONFIRM', `${dq.lines.length} dòng · ${dq.materials} vật tư · ${dq.summary.map((g) => `${g.report} ${g.type} ${g.lines}`).join('; ')} · ${note}`);
+      S.d.importAck = { fp: dq.fp, lines: dq.lines.length, materials: dq.materials, summary: dq.summary.map((g) => ({ report: g.report, type: g.type, lines: g.lines, materials: g.materials })), pcRecon: dq.recon.bySys.map((x) => ({ erp: x.erp, diff: x.diff, gaps: x.gaps, onlyM: x.onlyM, onlyP: x.onlyP })), by: who(), at: nowISO(), note };
+      audit('ERP DATA ANOMALY CONFIRM', `${dq.recon.bySys.map((x) => `PC-P/PC-M ${x.erp} chênh ${x.diff.toFixed(2)} (${x.gaps} PC)`).join('; ')} · ${dq.lines.length} dòng vật tư · ${dq.materials} vật tư · ${dq.summary.map((g) => `${g.report} ${g.type} ${g.lines}`).join('; ')} · ${note}`);
       markDirty('importAck', 'audit'); toast('Đã xác nhận danh sách dữ liệu ERP bất thường. Có thể chạy STEP 2.', 'pass'); render(); break;
     }
     case 'sales-tpl': await exportBook(`SVL_Sales_Revenue_Import_Template_v2_${S.period}.xlsx`, TPL.salesTemplate(S.period)); break;

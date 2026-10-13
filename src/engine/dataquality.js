@@ -8,6 +8,7 @@
 //   NEGATIVE   – negative quantity or Total Cost
 //   TEXT       – quantity / Total Cost is text, not a number
 import { ttxt, headerCol, headerColAny, fpRows } from './util.js';
+import { pcBasisScan, PCB_TOL } from './pcbasis.js';
 
 // The material reports STEP 3A uses for WIP (src/engine/step3.js MOVES). PC-M-S is not used (system S has no PC lots).
 export const DQ_REPORTS = [
@@ -42,6 +43,29 @@ function scan(report, ds, docName, qtyNames) {
   return out;
 }
 
+// v1.14.26 — PC-P (lot Total Cost) must equal PC-M (sum of the lot's material Total Cost) per system, PC No. and product.
+export const PCR_FIELDS = ['erp', 'type', 'pcNo', 'prod', 'name', 'pcp', 'pcm', 'diff'];
+export const PCR_HEADERS = ['Hệ', 'Loại chênh lệch', 'PC No.', 'Product Code', 'Product Name', 'Total Cost PC-P (VND)', 'Tổng Total Cost PC-M (VND)', 'Chênh PC-M − PC-P (VND)'];
+let pcrCache = { refs: null, out: null };
+export function pcpPcmRecon(datasets) {
+  const sys = ['T', 'S', 'O'].filter((e) => (datasets[`PC-P-${e}`] && datasets[`PC-P-${e}`].rows && datasets[`PC-P-${e}`].rows.length) || (datasets[`PC-M-${e}`] && datasets[`PC-M-${e}`].rows && datasets[`PC-M-${e}`].rows.length));
+  const refs = sys.flatMap((e) => [datasets[`PC-P-${e}`], datasets[`PC-M-${e}`]]);
+  if (pcrCache.refs && pcrCache.refs.length === refs.length && pcrCache.refs.every((r, i) => r === refs[i])) return pcrCache.out;
+  const sc = pcBasisScan(datasets, sys);
+  const issues = [
+    ...sc.lines.map((l) => ({ erp: l.erp, type: 'LỆCH', pcNo: l.pcNo, prod: l.prod, name: l.name, pcp: l.pcp, pcm: l.pcm, diff: l.diff })),
+    ...sc.onlyPCM.map((l) => ({ erp: l.erp, type: 'CHỈ CÓ Ở PC-M', pcNo: l.pcNo, prod: l.prod, name: '', pcp: 0, pcm: l.cost, diff: l.cost })),
+    ...sc.onlyPCP.map((l) => ({ erp: l.erp, type: 'CHỈ CÓ Ở PC-P', pcNo: l.pcNo, prod: l.prod, name: '', pcp: l.cost, pcm: 0, diff: -l.cost })),
+  ].sort((a, b) => a.erp.localeCompare(b.erp) || Math.abs(b.diff) - Math.abs(a.diff));
+  const bySys = sys.map((e) => {
+    const v = sc.bySys[e] || { pcp: 0, pcm: 0, diff: 0, pcsP: 0, pcsM: 0 }; const mine = issues.filter((x) => x.erp === e);
+    return { erp: e, pcp: v.pcp, pcm: v.pcm, diff: v.diff, pcsP: v.pcsP, pcsM: v.pcsM, gaps: mine.filter((x) => x.type === 'LỆCH').length, onlyM: mine.filter((x) => x.type === 'CHỈ CÓ Ở PC-M').length, onlyP: mine.filter((x) => x.type === 'CHỈ CÓ Ở PC-P').length, status: mine.length ? 'CHECK' : 'PASS' };
+  });
+  const out = { bySys, issues, diff: sc.totals.diff, fp: issues.length ? fpRows(issues, (x) => [x.erp, x.type, x.pcNo, x.prod, Math.round(x.pcp * 100), Math.round(x.pcm * 100)].join('|')) : '', tol: PCB_TOL };
+  pcrCache = { refs, out };
+  return out;
+}
+
 /** All abnormal lines of the period's material reports + summary per report / type and a fingerprint of the list. */
 export function erpAnomalies(datasets) {
   const lines = [];
@@ -53,11 +77,14 @@ export function erpAnomalies(datasets) {
     g.lines++; g.mats.add(l.mat); groups.set(k, g);
   }
   const summary = [...groups.values()].map((g) => ({ report: g.report, type: g.type, label: g.label, lines: g.lines, materials: g.mats.size, sample: [...g.mats].slice(0, 12).join(', ') }));
-  return { lines, summary, materials: new Set(lines.map((l) => `${l.report.slice(-1)}|${l.mat}`)).size, fp: lines.length ? fpRows(lines, (l) => [l.report, l.type, l.row, l.mat, l.qty, l.amt].join('|')) : '' };
+  const recon = pcpPcmRecon(datasets || {});
+  const fpLines = lines.length ? fpRows(lines, (l) => [l.report, l.type, l.row, l.mat, l.qty, l.amt].join('|')) : '';
+  return { lines, summary, materials: new Set(lines.map((l) => `${l.report.slice(-1)}|${l.mat}`)).size, recon, issues: lines.length + recon.issues.length,
+    fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '' };
 }
 
-/** PASS (no abnormal line) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since). */
+/** PASS (no abnormal line and PC-P = PC-M) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since). */
 export function anomalyStatus(an, ack) {
-  if (!an || !an.lines.length) return 'PASS';
+  if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length))) return 'PASS';
   return ack && ack.fp === an.fp ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
 }

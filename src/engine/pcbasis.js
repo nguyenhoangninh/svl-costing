@@ -27,14 +27,17 @@ function sideMap(ds) {
   return m;
 }
 
-/** Compare PC-M with PC-P per (PC No., Product Code) for T and O. Same totals as checkpoint 08. */
-export function pcBasisScan(datasets) {
-  const lines = [], onlyPCM = [], onlyPCP = [];
+/** Compare PC-M with PC-P per (PC No., Product Code). Default systems T and O = same totals as checkpoint 08;
+ *  STEP 1 (v1.14.26) also passes S. bySys = totals per system. */
+export function pcBasisScan(datasets, systems = ['T', 'O']) {
+  const lines = [], onlyPCM = [], onlyPCP = [], bySys = {};
   let pcm = 0, pcp = 0;
-  for (const e of ['T', 'O']) {
+  for (const e of systems) {
     const M = sideMap(datasets[`PC-M-${e}`]), P = sideMap(datasets[`PC-P-${e}`]);
-    for (const o of M.values()) pcm += o.cost;
-    for (const o of P.values()) pcp += o.cost;
+    let sm = 0, sp = 0;
+    for (const o of M.values()) sm += o.cost;
+    for (const o of P.values()) sp += o.cost;
+    pcm += sm; pcp += sp; bySys[e] = { pcm: sm, pcp: sp, diff: sm - sp, pcsM: M.size, pcsP: P.size };
     for (const [k, mo] of M) if (!P.has(k)) onlyPCM.push({ erp: e, pcNo: mo.pc, prod: mo.prod, cost: mo.cost });
     for (const [k, po] of P) if (!M.has(k)) onlyPCP.push({ erp: e, pcNo: po.pc, prod: po.prod, cost: po.cost });
     for (const [k, po] of P) {
@@ -43,7 +46,7 @@ export function pcBasisScan(datasets) {
       if (Math.abs(diff) > PCB_TOL) lines.push({ erp: e, pcNo: po.pc, prod: po.prod, name: po.name, loc: po.loc, mo: po.mo, pcp: po.cost, pcm: mo.cost, diff, rows: po.rows });
     }
   }
-  return { lines, onlyPCM, onlyPCP, totals: { pcm, pcp, diff: pcm - pcp }, ok: Math.abs(pcm - pcp) <= PCB_TOL };
+  return { lines, onlyPCM, onlyPCP, bySys, totals: { pcm, pcp, diff: pcm - pcp }, ok: Math.abs(pcm - pcp) <= PCB_TOL };
 }
 
 const cloneDs = (ds, rows) => ({ ...ds, rows });

@@ -71,7 +71,7 @@ export function step1Controls(s1, accessLimited = 0, dateIssues = [], dq = null)
     coreReady: `${imported + noData} / 21`, sysReady: `${sysReady} / 3`,
     status: dateIssues.length || dqBlock ? 'BLOCK' : sysReady === 3 && imported + noData === 21 ? (dqConfirmed ? 'PASS WITH REVIEW' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
     imported, noData, missing, totalRows: s1.checklist.reduce((a, c) => a + c.dataRows, 0), accessLimited,
-    next: missing === 0 ? (dateIssues.length ? `Sửa / xuất lại ${dateIssues.length} báo cáo có lỗi ngày giao dịch trước khi chạy STEP 2` : dqBlock ? `Rà soát và xác nhận ${dq.lines.length} dòng dữ liệu ERP bất thường (STEP 1) trước khi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
+    next: missing === 0 ? (dateIssues.length ? `Sửa / xuất lại ${dateIssues.length} báo cáo có lỗi ngày giao dịch trước khi chạy STEP 2` : dqBlock ? `Rà soát và xác nhận ${dq.lines.length} dòng dữ liệu ERP bất thường${dq.recon && dq.recon.issues.length ? ` và ${dq.recon.issues.length} PC lệch PC-P / PC-M` : ''} (STEP 1) trước khi chạy STEP 2` : 'Chạy STEP 2') : 'Import các báo cáo còn thiếu',
     result: missing === 0 ? (dateIssues.length ? 'BLOCK - ERP DATE CONTROL' : dqBlock ? 'BLOCK - XÁC NHẬN DỮ LIỆU BẤT THƯỜNG' : dqConfirmed ? 'PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG' : 'PASS') : missing === 21 ? 'NOT RUN' : 'REVIEW',
     dateIssues, dq,
   };

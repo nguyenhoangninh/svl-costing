@@ -156,5 +156,28 @@ ok('full export keeps title / meta / table rows where they were', metaRead[0]?.[
 const wsMeta = (await loadBack(bufA)).getWorksheet('META');
 ok('full export: header fill stops at the last header column (no empty green cells)', wsMeta.getCell(4, 4).fill?.fgColor?.argb === 'FF2F6B5A' && wsMeta.getCell(4, 5).fill?.fgColor?.argb !== 'FF2F6B5A', `${wsMeta.getCell(4, 5).fill?.fgColor?.argb}`);
 
+// ---- v1.14.26 STEP 4.4 template: styled but still importable (rows 1–4 fixed, "*" on required headers, lists, freeze)
+{
+  const FP = await import(path.join(root, 'src/engine/fgprod.js'));
+  const TPL = await import(path.join(root, 'src/engine/templates.js'));
+  const lot = (period, pc, prod, qty, total, sold) => ({ period, erp: 'O', pc, date: '2026-01-05', mo: 'MO', prod, name: 'n', fam: 'MK', loc: 'MKX1', unit: 'PC', qty, totalRM: total * 0.7, c622: total * 0.2, c627: total * 0.1, total, soldQty0: sold, soldTot0: sold ? total * sold / qty : 0, note: '' });
+  const rows = [lot('2026-08', 'PC-2608-001', 'A', 10, 1000, 0), lot('2026-01', 'PC-2601-009', 'B', 4, 400, 4), lot('2026-01', 'PC-2601-002', 'A', 5, 500, 2)];
+  const sheets = [...FP.templateSheets(rows, '2026-09', 'test'), TPL.fgProductionGuide('2026-09')];
+  ok('4.4 template: FG_PRODUCTION + TONG_HOP + HUONG_DAN', sheets.map((x) => x.name).join(',') === 'FG_PRODUCTION,TONG_HOP,HUONG_DAN');
+  const buf = Buffer.from(await buildStyledWorkbook(ExcelJS, sheets, {}).xlsx.writeBuffer());
+  const wb = XLSX.read(buf); const grids = Object.fromEntries(wb.SheetNames.map((nm) => [nm, XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, raw: true, defval: null })]));
+  const op = FP.importOpening(grids, 't.xlsx', '2026-09');
+  ok('4.4 template: styled file is read back by the 4.4 reader (all PASS, totals equal)', op.status === 'VALIDATED' && op.rows.length === 3 && op.rows.reduce((a, r) => a + r.total, 0) === 1900 && op.rows.reduce((a, r) => a + r.soldQty0, 0) === 6, `${op.status} ${op.rows.length}`);
+  ok('4.4 template: rows sorted month → PC No.', op.rows.map((r) => r.pc).join(',') === 'PC-2601-002,PC-2601-009,PC-2608-001');
+  const ws = (await loadBack(buf)).getWorksheet('FG_PRODUCTION');
+  ok('4.4 template: required headers marked "*", amber fill', String(ws.getCell(4, 1).value).endsWith('*') && ws.getCell(4, 1).fill?.fgColor?.argb === 'FF8A4B00');
+  ok('4.4 template: header notes explain each column', /Bắt buộc/.test(JSON.stringify(ws.getCell(4, 1).note || '')));
+  ok('4.4 template: frozen header and key columns', ws.views[0].state === 'frozen' && ws.views[0].ySplit === 4 && ws.views[0].xSplit === 3);
+  const dvB = ws.getCell('B5').dataValidation || {}, dvH = ws.getCell('H5').dataValidation || {};
+  ok('4.4 template: drop-down lists for ERP and Costing Family', dvB.type === 'list' && dvB.formulae[0] === '"T,O"' && dvH.type === 'list' && /DOONA,MK,VETO,HAMA,O-OTHER/.test(dvH.formulae[0]), `${JSON.stringify(dvB)} ${JSON.stringify(dvH)}`);
+  const blank = FP.templateSheets([], '2026-09');
+  ok('4.4 template: empty template has only the data sheet (no summary)', blank.length === 1 && blank[0].aoa.length === 4);
+}
+
 console.log(`\n${n - bad}/${n} styled export checks passed`);
 if (bad) { console.error(`${bad} FAILED`); process.exit(1); }
