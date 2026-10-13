@@ -1,7 +1,7 @@
 // STEP 2 — Stock Out allocation to PC-P lots + 2B FG Rework register
 // Port of STEP2_Allocate_Stock_Out, STEP2_FGREWORK_Allocate_Stock_Out_v1_1 (FG exclusion),
 // RW_BuildInput, RW_CollectFGSource, RW_InputCheck, RW_UpdateStep2Control.
-import { txt, ttxt, utxt, num, headerCol, headerColAny, lastDataEnd, dateInPeriod, nowISO } from './util.js';
+import { txt, ttxt, utxt, num, headerCol, headerColAny, lastDataEnd, dateInPeriod, nowISO, cellDateSerial } from './util.js';
 
 export const TOL_QTY = 0.000001;
 export const TOL_AMT = 1;
@@ -69,7 +69,8 @@ function loadPCPool(ds, erp, pool) {
       erp, rowIdx: i, pcNo: txt(r[cPC]), mo: cMO >= 0 ? txt(r[cMO]) : '', prod: txt(r[cProd]),
       name: cName >= 0 ? txt(r[cName]) : '', loc: cLoc >= 0 ? txt(r[cLoc]) : '',
       qty: cQty >= 0 ? num(r[cQty]) : 0, cost: num(r[cCost]),
-      date: cDate >= 0 ? (typeof r[cDate] === 'number' ? r[cDate] : num(r[cDate])) : 0, sub: cSub >= 0 ? txt(r[cSub]) : '', unit: cUnit >= 0 ? txt(r[cUnit]) : '',
+      // v1.14.19 (audit P0-01): a text date ('05/10/2026') was read by num() as 0 → undated lot in STRICT_DATE.
+      date: cDate >= 0 ? (typeof r[cDate] === 'number' ? r[cDate] : cellDateSerial(r[cDate]) || 0) : 0, sub: cSub >= 0 ? txt(r[cSub]) : '', unit: cUnit >= 0 ? txt(r[cUnit]) : '',
       allocT: 0, allocS: 0, allocO: 0, alloc: 0, src: '',
     });
   }

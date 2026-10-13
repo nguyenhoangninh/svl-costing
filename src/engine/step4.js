@@ -30,6 +30,7 @@ function salesCol(header, canonical) {
 }
 
 /** STEP4_Import_Sales_Revenue: find the sales table in any sheet, return staging rows. */
+const SALES_NUM_FIELDS = ['qty', 'unitPrice', 'amtUSD', 'amtVND', 'fx'];
 export function importSales(sheets, fileName, mode, period) {
   if (mode !== 'MONTHLY' && mode !== 'YTD') throw new Error('Chế độ import phải là MONTHLY hoặc YTD.');
   let ws = null, hdr = -1;
@@ -52,6 +53,8 @@ export function importSales(sheets, fileName, mode, period) {
     if (!ttxt(r[col.product]) && !ttxt(r[col.invDate])) continue;
     const o = {};
     for (const f of SALES_FIELDS) o[f] = col[f] >= 0 ? (r[col[f]] ?? null) : null;
+    // v1.14.19: numbers typed as text are read with the decimal comma ('34,6' = 34.6; num() gave 346). Unreadable text stays as is → validation flags it.
+    for (const f of SALES_NUM_FIELDS) if (typeof o[f] === 'string') { const v = parseLocaleNum(o[f]); if (v !== null) o[f] = v; }
     const d = toSerial(o.invDate);
     if (d !== null && !ttxt(o.month)) o.month = serialToYMD(d).m;
     o.tranType = col.tranType >= 0 ? utxt(r[col.tranType]) : '';

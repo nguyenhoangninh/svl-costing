@@ -59,9 +59,11 @@ const pad = (n, w) => String(Math.round(n)).padStart(w, '0');
  *  1. Original Invoice No. (from the user's resolution in STEP 5R, else from the sales file) → that invoice's FIFO cost;
  *  2. no invoice: the only / most recent earlier invoice of the same customer + product that still has returnable qty
  *     (several candidates → AUTO match flagged REVIEW, never a hard stop);
- *  3. manual unit cost entered in STEP 5R (sales made before the web era, or no proven origin).
- * match = { origInv?, unitCost?, note?, by? } from the STEP 5R resolution blob.
+ *  3. manual unit cost entered in STEP 5R (sales made before the web era, or no proven origin) – used only after a
+ *     DIFFERENT user approved it (v1.14.19, audit P0-02), and never to return more than an original invoice still allows.
+ * match = { origInv?, unitCost?, note?, by?, approvedBy?, approvedAt? } from the STEP 5R resolution blob.
  */
+export const manualApproved = (m) => !!(m && ttxt(m.approvedBy) && utxt(m.approvedBy) !== utxt(m.by));
 export function processReturnEvent({ sale, candidates, returnedNow, period, sequence, tol = RETURN_TOL, match = null }) {
   const prod = utxt(sale && sale.prod), q = -num(sale && sale.qty);
   if (!prod || !(q > tol)) return { ok: false, message: 'Return: Product / return quantity invalid; ' };
@@ -70,12 +72,16 @@ export function processReturnEvent({ sale, candidates, returnedNow, period, sequ
   const wantInv = ttxt(match && match.origInv) || ttxt(sale.origInv);
   const manualUnit = num(match && match.unitCost);
   let origin = null, mode = 'ORIGIN', note = '';
+  const pending = `Return: đơn giá vốn nhập tay ${manualUnit} đang CHỜ DUYỆT – cần một người dùng khác người nhập (${ttxt(match && match.by)}) bấm Duyệt ở STEP 5R; `;
   if (wantInv) {
     origin = cand.find((o) => utxt(o.inv) === utxt(wantInv)) || null;
     if (!origin && !(manualUnit > 0)) return { ok: false, message: `Return: Original Invoice ${wantInv} not found for product ${prod} – chọn hoá đơn khác hoặc nhập đơn giá vốn ở STEP 5R; ` };
-    if (origin && q > left(origin) + tol && !(manualUnit > 0)) return { ok: false, message: `Return qty ${q} exceeds remaining returnable qty ${left(origin)} of ${origin.inv}; `, origin, available: left(origin) };
-    if (origin && q > left(origin) + tol) origin = null;
-  } else if (!(manualUnit > 0)) {
+    // over-return is a hard stop: a manual unit cost can no longer push more units back than the invoice sold
+    if (origin && q > left(origin) + tol) return { ok: false, message: `Return qty ${q} vượt số còn trả được ${left(origin)} của hoá đơn ${origin.inv} (vượt ${+(q - left(origin)).toFixed(4)}); không dùng đơn giá tay để vượt hoá đơn gốc; `, origin, available: left(origin) };
+    if (!origin && !manualApproved(match)) return { ok: false, message: pending };
+  } else if (manualUnit > 0) {
+    if (!manualApproved(match)) return { ok: false, message: pending };
+  } else {
     const same = cand.filter((o) => utxt(o.cust) === utxt(sale.cust) && left(o) >= q - tol).sort((a, b) => num(b.date) - num(a.date));
     if (same.length) { origin = same[0]; if (same.length > 1) { mode = 'AUTO'; note = `auto-matched to the latest of ${same.length} possible invoices`; } }
     else return { ok: false, message: 'Return: no earlier invoice of this customer/product with returnable quantity – chọn hoá đơn gốc hoặc nhập đơn giá vốn ở STEP 5R; ' };
