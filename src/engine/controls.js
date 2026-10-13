@@ -215,6 +215,9 @@ export function step3bControls(x) {
   ];
   // audit F-13: materials whose current-period movement points at another ERP than the map
   const erpChanged = ((x.erpMap && x.erpMap.rows) || []).filter((r) => String(r.review).startsWith('REVIEW - ERP CHANGED') && !ttxt(r.override)).length;
+  // v1.14.24: materials with 0 VND on PC-M and in WIP are split by quantity (0 VND posted) instead of blocking the BUILD
+  const zv = (engine && engine.zeroValue) || [];
+  if (engine) rows.push(cp('22', 'Vật tư giá trị 0 (PC-M & WIP = 0 VND) chia theo SL', 'INFO', zv.length, '', 'INFO', zv.length ? `Ghi sổ 0 VND: ${zv.map((z) => `${z.key} (${z.erp})`).join(', ')}` : 'Không có'));
   if (x.erpMap) rows.push(cp('21', 'ERP map: vật tư đổi hệ ERP cần xác nhận', 0, erpChanged, erpChanged, erpChanged ? 'REVIEW' : 'PASS', 'Refresh ERP MAP → cột Review = ERP CHANGED → đặt User ERP Override'));
   const o = overall(rows, '', '');
   const s = (i) => rows[i].status;
