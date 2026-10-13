@@ -1114,6 +1114,7 @@ async function exportAll() {
     if (D.d3b) { const wf = ['code', 'erp', 'erpSource', 'rule', 'adjQty', 'adjAmt', 'finalQty', 'finalAmt', 'postedPC', 'method', 'status']; tbl('03_WIP_FINAL', wf, wf, D.d3b.wf.rows); }
   }
   if (S.d.pm) tbl('04_PRICE_MASTER', P2.F.PM_FIELDS, P2.F.PM_HEADERS, S.d.pm.rows);
+  if (S.d.pm && S.d.step2) tbl('04_PC_PRICE_CHECK', P2.F.PC_PRICE_FIELDS, P2.F.PC_PRICE_HEADERS, P2.F.pcPriceCheck(S.d.step2, S.d.pm, S.period).rows);
   if (D.d4 && D.d4.fl) tbl('04_COST_ALLOCATION', P2.F.CA_FIELDS, P2.F.CA_HEADERS, D.d4.fl.rows.map((r) => ({ ...r, date: typeof r.date === 'number' ? serialToISO(r.date) : r.date })));
   if (S.d.step4 && S.d.step4.recon) tbl('04_RECONCILIATION', ['label', 'expected', 'result', 'diff', 'status', 'note'], ['Control', 'Expected', 'Result', 'Difference', 'Status', 'Note'], S.d.step4.recon.rows);
   const r5 = S.d.step5 && S.d.step5.period === S.period ? S.d.step5 : null;

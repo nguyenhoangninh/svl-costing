@@ -265,6 +265,42 @@ export const PM_AUDIT_HEADERS = ['Product Code', 'Current Month WAvg', 'Latest A
 export const MANUAL_FIELDS = ['product', 'price', 'effFrom', 'effTo', 'source', 'approvedBy', 'updatedAt'];
 export const SO_FIELDS = ['active', 'product', 'soDate', 'soNo', 'customer', 'qty', 'price', 'note', 'check'];
 
+/**
+ * v1.14.21 — Price Master coverage per production lot (PC) of the period: does every PC that STEP 4 costs have a selling price?
+ * One row per PC-P lot (T then O, sheet order). price = Price Master final price of the lot's product; salesUSD = qty × price
+ * (the 622 / 627 allocation weight of STEP 4). Status:
+ *  OK · MISSING PRICE (product in PM, no final price) · NOT IN PRICE MASTER (PM older than STEP 2 / product added since)
+ *  · NOT COSTED (PC No. does not start with "PC-", ignored by STEP 4 like the workbook).
+ * The summary also flags a Price Master that is older than the last STEP 2 run or belongs to another period.
+ */
+export const PC_PRICE_FIELDS = ['erp', 'pcNo', 'mo', 'prod', 'name', 'loc', 'qty', 'price', 'source', 'salesUSD', 'status'];
+export const PC_PRICE_HEADERS = ['ERP', 'PC No.', 'MO No.', 'Product Code', 'Product Name', 'Location', 'Complete Qty', 'Final Price (USD)', 'Price Source', 'Sales Value (USD) = Qty × Price', 'Status'];
+export function pcPriceCheck(step2, pm, period) {
+  const lots = [];
+  for (const e of ['T', 'O']) for (const p of ((step2 && step2.pc) || []).filter((x) => x.erp === e).sort((a, b) => a.rowIdx - b.rowIdx)) lots.push(p);
+  const pmRow = new Map(); for (const r of (pm && pm.rows) || []) { const k = utxt(r.product); if (k && !pmRow.has(k)) pmRow.set(k, r); }
+  const rows = lots.map((p) => {
+    const prod = utxt(p.prod), r = pmRow.get(prod), qty = num(p.qty);
+    const price = r && isNumeric(r.finalPrice) && num(r.finalPrice) > 0 ? num(r.finalPrice) : null;
+    const costed = ttxt(p.pcNo).toUpperCase().slice(0, 3) === 'PC-';
+    const status = !costed ? 'NOT COSTED (PC No. không bắt đầu PC-)' : !r ? 'NOT IN PRICE MASTER' : price === null ? 'MISSING PRICE' : 'OK';
+    return { erp: p.erp, pcNo: ttxt(p.pcNo), mo: ttxt(p.mo), prod, name: ttxt(p.name), loc: ttxt(p.loc), qty, price, source: r ? ttxt(r.finalSource) : '', salesUSD: price === null ? null : qty * price, status };
+  });
+  const costed = rows.filter((r) => !r.status.startsWith('NOT COSTED'));
+  const ok = costed.filter((r) => r.status === 'OK');
+  const prods = new Set(costed.map((r) => r.prod)), prodsOK = new Set(ok.map((r) => r.prod));
+  const qtyAll = costed.reduce((a, r) => a + r.qty, 0), qtyOK = ok.reduce((a, r) => a + r.qty, 0);
+  const bySource = new Map();
+  for (const r of ok) { const k = r.source || '(không rõ)'; const v = bySource.get(k) || { source: k, lots: 0, products: new Set(), qty: 0, salesUSD: 0 }; v.lots++; v.products.add(r.prod); v.qty += r.qty; v.salesUSD += r.salesUSD; bySource.set(k, v); }
+  const stale = !pm ? 'Chưa chạy Update Price Master' : pm.period && pm.period !== period ? `Price Master thuộc kỳ ${pm.period}` : step2 && step2.runAt && pm.updatedAt && step2.runAt > pm.updatedAt ? 'STEP 2 chạy lại sau lần Update Price Master gần nhất' : '';
+  const status = !step2 ? 'NOT RUN' : stale ? 'RERUN PRICE MASTER' : ok.length === costed.length ? 'PASS' : 'BLOCK';
+  return {
+    rows, status, stale,
+    summary: { lots: costed.length, lotsOK: ok.length, lotsMissing: costed.length - ok.length, notCosted: rows.length - costed.length, products: prods.size, productsOK: prodsOK.size, qty: qtyAll, qtyOK, qtyCover: qtyAll ? qtyOK / qtyAll : 0, salesUSD: ok.reduce((a, r) => a + r.salesUSD, 0) },
+    bySource: [...bySource.values()].map((v) => ({ ...v, products: v.products.size })).sort((a, b) => b.salesUSD - a.salesUSD),
+  };
+}
+
 export function requiredProducts(step2, salesDB = null, period = '') {
   const order = []; const set = new Set();
   const add = (code) => { code = utxt(code); if (code && !set.has(code)) { set.add(code); order.push(code); } };
