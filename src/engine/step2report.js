@@ -32,6 +32,10 @@ const P = (v, z = '0.00%') => ({ v: num(v), t: 'n', z }); // percent
 const D = { erp: 0, key: 1, type: 2, rows: 3, src: 4, fam: 5, tErp: 6, tKey: 7, pc: 8, mo: 9, prod: 10, name: 11, loc: 12, cost: 13, pct: 14, alloc: 15, status: 16, note: 17 };
 
 const RULE_ORDER = ['R1', 'R2', 'R3', 'R4', 'R4a', 'R4b', 'R4c', 'R5a', 'R5b', 'R5c', 'R6', 'R0', 'RX'];
+/** Detail rule code → priority row of the on-screen rule table (STEP2_RULES 1–9). R0 / RX are outside the table. */
+export const SCREEN_OF = { R1: 1, R2: 2, R3: 3, R4: 4, R4a: 5, R4b: 6, R4c: 7, R5a: 8, R5b: 8, R5c: 8, R6: 9 };
+/** v1.14.22: the full catalogue (first RULES label per code), so rules without data this period are listed with 0. */
+const RULE_CATALOG = RULE_ORDER.map((code) => { const r = RULES.find((x) => x[1] === code); return { code, label: r ? r[2] : code, kind: r ? r[3] : '' }; });
 /**
  * Số tiền theo từng rule STEP 2, lấy từ chi tiết phân bổ (không làm tròn trong engine).
  * src = Stock Out của các nhóm thuộc rule; alloc = số tiền thực sự đổ vào lô PC; share = alloc / tổng đã phân bổ.
@@ -52,8 +56,11 @@ export function ruleSummary(s2) {
     r.groups++; r.lines += g.lines; r.src += g.src; r.alloc += g.alloc; byCode.set(g.code, r);
   }
   const totalAlloc = [...byCode.values()].reduce((a, r) => a + r.alloc, 0);
-  return RULE_ORDER.filter((c) => byCode.has(c)).concat([...byCode.keys()].filter((c) => !RULE_ORDER.includes(c)))
-    .map((c) => { const r = byCode.get(c); return { ...r, share: totalAlloc ? r.alloc / totalAlloc : 0, totalAlloc }; });
+  // every rule of the catalogue (0 when unused this period), then any unexpected code found in the data
+  const all = RULE_CATALOG.map((c) => byCode.get(c.code) || { ...c, groups: 0, lines: 0, src: 0, alloc: 0 })
+    .concat([...byCode.values()].filter((r) => !RULE_ORDER.includes(r.code)));
+  const srcErp = (label) => { const m = /^([TOS])\b/.exec(String(label || '')); return m ? m[1] : ''; };
+  return all.map((r) => ({ ...r, screen: SCREEN_OF[r.code] ?? '', erp: srcErp(r.label), used: r.groups > 0, share: totalAlloc ? r.alloc / totalAlloc : 0, totalAlloc }));
 }
 
 /** Allocation views from a STEP 2 result. cls = step2Classification() (raw / FG / RM split) when available. */
@@ -95,7 +102,6 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
   const subtitle = `SVL – Starry Vietnam Co., Ltd.   ·   Chạy STEP 2 lúc ${when}   ·   ${ver}   ·   Đơn vị: VND`;
   const cnt = (e) => R.groups.filter((g) => g.erp === e);
   // Quy tắc theo bảng trên màn hình (STEP2_RULES, 9 dòng). Mỗi mã chi tiết (R1…R6) thuộc đúng một dòng màn hình.
-  const SCREEN_OF = { R1: 1, R2: 2, R3: 3, R4: 4, R4a: 5, R4b: 6, R4c: 7, R5a: 8, R5b: 8, R5c: 8, R6: 9 };
   const screenCodes = (n) => Object.keys(SCREEN_OF).filter((k) => SCREEN_OF[k] === n).join(', ');
   const acc = new Map();
   for (const g of R.groups) {

@@ -582,6 +582,8 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('ruleSummary: R4c and R6 amounts', [byCode.R4c.alloc, byCode.R6.alloc], [30, 10]);
   eq('ruleSummary: rule amounts add to total allocated', rs.reduce((a, r) => a + r.alloc, 0), 140);
   eq('ruleSummary: share of total allocated', Math.round(byCode.R1.share * 1000) / 1000, 0.714);
+  eq('ruleSummary v1.14.22: full catalogue in fixed order, also rules without data', rs.map((r) => r.code), ['R1', 'R2', 'R3', 'R4', 'R4a', 'R4b', 'R4c', 'R5a', 'R5b', 'R5c', 'R6', 'R0', 'RX']);
+  eq('ruleSummary v1.14.22: unused rule = 0 and flagged, priority row and source ERP set', [byCode.R2.alloc, byCode.R2.used, byCode.R2.screen, byCode.R2.erp, byCode.R5b.screen, byCode.R1.used], [0, false, 2, 'T', 8, true]);
   const c = step2Controls({ period: P9, step2: s2, register: null, latestImport: '' }).rows;
   const r11 = c.find((r) => r.no === '11');
   eq('CP11: expected = 5% threshold, actual = fallback, diff = excess, all whole VND', [r11.expected, r11.actual, r11.diff], [7, 40, 33]);
