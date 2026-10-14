@@ -12,7 +12,7 @@ export const SDK_URLS = {
 const EXPORTS = {
   app: ['initializeApp'],
   auth: ['getAuth', 'getRedirectResult', 'onAuthStateChanged', 'signOut', 'GoogleAuthProvider', 'signInWithPopup', 'signInWithRedirect'],
-  fs: ['getFirestore', 'collection', 'doc', 'getDoc', 'setDoc', 'deleteDoc', 'addDoc', 'getDocs', 'query', 'where', 'orderBy', 'limit', 'startAfter', 'documentId', 'runTransaction', 'serverTimestamp'],
+  fs: ['getFirestore', 'collection', 'doc', 'getDoc', 'setDoc', 'deleteDoc', 'addDoc', 'getDocs', 'onSnapshot', 'query', 'where', 'orderBy', 'limit', 'startAfter', 'documentId', 'runTransaction', 'serverTimestamp'],
 };
 
 /** Runs inside the page before any app script. */
@@ -23,6 +23,7 @@ function fakeMain() {
     fail: {}, // op → { count, msg, code }
     dropReplyAfterCommit: 0, // next N transactions commit but reject
     uid: 'uid-admin', email: 'admin.test@example.com', signedIn: true, listeners: [], seq: 0,
+    snapListeners: [], // onSnapshot subscriptions: { target, next, error, last }
   };
   window.__fake = S;
   const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
@@ -35,11 +36,13 @@ function fakeMain() {
   const DOCID = { __docId: true };
   class Ref { constructor(path) { this.path = path; this.id = path.split('/').pop(); } }
   class Col { constructor(path) { this.path = path; } }
-  const snap = (path) => { const d = S.docs.get(path); const id = path.split('/').pop(); return { id, ref: new Ref(path), exists: () => d !== undefined, data: () => clone(d), }; };
+  const metadata = { fromCache: false, hasPendingWrites: false };
+  const snap = (path) => { const d = S.docs.get(path); const id = path.split('/').pop(); return { id, ref: new Ref(path), exists: () => d !== undefined, data: () => clone(d), metadata }; };
   const apply = (w) => {
     if (w.op === 'set') { S.docs.set(w.path, clone(w.data)); }
     else if (w.op === 'delete') { S.docs.delete(w.path); }
     S.log.push({ op: w.op, path: w.path, data: w.op === 'set' ? clone(w.data) : undefined });
+    refreshSnapshots();
   };
   const runTransaction = async (_db, fn) => {
     failIf('runTransaction');
@@ -57,8 +60,7 @@ function fakeMain() {
     return out;
   };
   const isDirectChild = (path, base) => path.startsWith(base + '/') && path.slice(base.length + 1).split('/').length === 1;
-  const getDocs = async (q) => {
-    failIf('getDocs');
+  const runQuery = async (q) => {
     const cons = q instanceof Col ? [] : q.constraints;
     const base = q instanceof Col ? q.path : q.col.path;
     let rows = [...S.docs.keys()].filter((p) => isDirectChild(p, base)).map((p) => ({ id: p.split('/').pop(), path: p }));
@@ -71,7 +73,26 @@ function fakeMain() {
     const lim = cons.find((c) => c.type === 'limit');
     if (lim) rows = rows.slice(0, lim.n);
     const docs = rows.map((r) => snap(r.path));
-    return { docs, empty: docs.length === 0, size: docs.length };
+    return { docs, empty: docs.length === 0, size: docs.length, metadata };
+  };
+  const getDocs = async (q) => { failIf('getDocs'); return runQuery(q); };
+  // Realtime listeners: deliver the current state at subscribe time and after every write that changes it.
+  const evaluate = async (target) => (target instanceof Ref ? snap(target.path) : runQuery(target));
+  const refreshSnapshots = () => {
+    for (const l of S.snapListeners) {
+      if (l.closed) continue;
+      evaluate(l.target).then((res) => {
+        const key = JSON.stringify(res.docs ? res.docs.map((d) => [d.id, d.data()]) : [res.id, res.exists(), res.data()]);
+        if (key === l.last) return;
+        l.last = key; l.next(res);
+      }).catch((e) => { if (l.error) l.error(e); });
+    }
+  };
+  const onSnapshot = (target, next, error) => {
+    const l = { target, next, error, last: null, closed: false };
+    S.snapListeners.push(l);
+    evaluate(target).then((res) => { l.last = JSON.stringify(res.docs ? res.docs.map((d) => [d.id, d.data()]) : [res.id, res.exists(), res.data()]); next(res); }).catch((e) => { if (error) error(e); });
+    return () => { l.closed = true; };
   };
   const addDoc = async (col, data) => { failIf('addDoc'); const path = col.path + '/auto' + (++S.seq); apply({ op: 'set', path, data }); return new Ref(path); };
   window.__FBI = {
@@ -91,6 +112,7 @@ function fakeMain() {
     deleteDoc: async (ref) => { failIf('deleteDoc'); apply({ op: 'delete', path: ref.path }); },
     addDoc,
     getDocs,
+    onSnapshot,
     query: (col, ...constraints) => ({ col, constraints }),
     where: (field, op, value) => ({ type: 'where', field, op, value }),
     orderBy: (field, dir = 'asc') => ({ type: 'orderBy', field, dir }),
