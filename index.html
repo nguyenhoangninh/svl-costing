@@ -142,6 +142,14 @@ form.inline input { display: block; padding: 6px 8px; border: 1px solid var(--ru
 .s2-block { min-width: 0; }
 table.s2-rec th, table.s2-rec td { white-space: nowrap; padding-left: 8px; padding-right: 8px; }
 table.s2-rec td.r, table.s2-cls td.r { font-variant-numeric: tabular-nums; }
+/* v1.14.52: allocation-by-system columns — equal widths, badges right-aligned over the numbers, group header underlined, zero muted */
+table.s2-rec th.r, table.s2-rec td.r { text-align: right; }
+table.s2-rec th.grp { text-align: center; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+table.s2-rec .sys-col { min-width: 150px; width: 150px; }
+table.s2-rec th.sys-col .erp { margin-left: auto; }
+table.s2-rec td.sys-col.zero { color: var(--muted); }
+table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 1px solid var(--rule-2); }
+table.s2-rec tr.tot td { font-weight: 700; border-top: 2px solid var(--rule); }
 table.s2-cls { width: 100%; }
 table.s2-cls td:nth-child(1) { width: 32%; } table.s2-cls td:nth-child(3) { width: 22%; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
