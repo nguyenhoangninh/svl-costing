@@ -604,16 +604,7 @@ VIEWS.cc = (el) => {
     <header class="ph"><div><h1>Tổng quan kỳ ${esc(S.period)}</h1><p class="lead">Chạy lần lượt từng bước; mỗi bước chỉ đi tiếp khi các checkpoint không còn BLOCK.</p></div>
       <div class="next"><span>Việc tiếp theo</span><b>${next ? `<a href="#${next[6]}">${esc(next[1])}</a> — ${esc(next[5] || 'xem checkpoint')}` : (S.d.closed && S.d.closed.period === S.period ? `Kỳ đã đóng. Tạo kỳ ${esc(nextPeriod(S.period))} và roll forward.` : 'Tất cả các bước đã PASS – CLOSE MONTH.')}</b></div></header>
     ${driftHTML()}
-    <div class="kpis">
-      ${kpi('Opening WIP', S.d.opening && S.d.opening.stats ? S.d.opening.stats.totalAmt : null)}
-      ${kpi('WIP vào (MI + Stock Out)', s3 ? s3.summary.inAmt : null)}
-      ${kpi('WIP ra (PC + MR + Stock Out)', s3 ? s3.summary.outAmt : null)}
-      ${kpi('Closing WIP ERP', s3 ? s3.summary.closingAmt : null)}
-      ${kpi('Closing WIP cuối (sau 3B)', st.p2.d3b ? st.p2.d3b.wf.finalClosing : null, true)}
-      ${kpi('Giá thành SX (STEP 4)', st.p2.d4 && st.p2.d4.fl ? st.p2.d4.fl.totals.totalCost : null, true)}
-      ${kpi('Giá vốn FIFO (STEP 5)', st.d5 && st.d5.res ? st.d5.res.totals.cogsA : null, true)}
-      ${kpi('FG cuối kỳ', st.d5 && st.d5.res ? st.d5.res.totals.closeA : null)}
-    </div>
+    ${overviewKpis(st, s3)}
     <h2>Quy trình tháng</h2>
     <ol class="steplist">${steps.map((x) => `<li><a href="#${x[6]}"><span class="node ${statusClass(x[2])}">${esc(x[0])}</span><span class="sl-t"><b>${esc(x[1])}</b><small>${esc(x[3] || '')}${x[5] ? ` · ${esc(x[5])}` : ''}</small></span>${pill(x[2])}</a></li>`).join('')}</ol>
     <table class="cp steptable"><thead><tr><th>Bước</th><th>Quy trình</th><th>Trạng thái</th><th class="r">Giá trị</th><th>Cập nhật</th><th>Việc tiếp theo</th></tr></thead><tbody>
@@ -629,8 +620,47 @@ VIEWS.cc = (el) => {
     ${journal(st)}
   </section>`;
 };
-function kpi(label, val, strong) {
-  return `<div class="kpi ${strong ? 'strong' : ''}"><span>${esc(label)}</span><b>${val === null || val === undefined ? '—' : fmtNum(val)}</b><small>VND</small></div>`;
+/** v1.14.54: KPI tile with a meaning colour — in (nhập / vào), out (xuất / ra / giá vốn), result (cuối kỳ / kết quả), base (đầu kỳ, khác).
+ *  opts.tone overrides the guess from the label; opts.sub adds one context line (formula, check, comparison). */
+const KPI_TONE = [
+  [/cuối|closing|lãi gộp/i, 'res'],
+  [/đầu kỳ|opening|b\/f/i, 'base'],
+  [/giá vốn|\bra\b|xuất|chuyển rework|ra chi phí|giảm giá|trả lại|5212|5213/i, 'out'],
+  [/vào|nhập kho|giá thành|doanh thu|622|627|tổng rm|hoàn thành/i, 'in'],
+];
+function kpiTone(label, strong) { for (const [re, t] of KPI_TONE) if (re.test(label)) return t; return strong ? 'res' : 'base'; }
+function kpi(label, val, strong, opts = {}) {
+  const tone = opts.tone || kpiTone(String(label), strong);
+  const neg = typeof val === 'number' && val < -0.5;
+  const shown = val === null || val === undefined ? '—' : typeof val === 'number' && Math.abs(val) < 0.005 ? '0' : fmtNum(val);
+  return `<div class="kpi t-${tone} ${strong ? 'strong' : ''}"><span>${esc(label)}</span><b class="${neg ? 'bad' : ''}">${shown}</b><small>${opts.sub ? opts.sub : 'VND'}</small></div>`;
+}
+/** v1.14.54: overview figures in two groups (WIP, thành phẩm) with the check behind each figure. */
+function overviewKpis(st, s3) {
+  const f = (v) => fmtNum(v), has = (v) => typeof v === 'number' && isFinite(v);
+  const op = S.d.opening && S.d.opening.stats ? S.d.opening.stats.totalAmt : null;
+  const inA = s3 ? s3.summary.inAmt : null, outA = s3 ? s3.summary.outAmt : null, clERP = s3 ? s3.summary.closingAmt : null;
+  const fin = st.p2.d3b ? st.p2.d3b.wf.finalClosing : null;
+  const roll = has(op) && has(inA) && has(outA) && has(clERP) ? op + inA - outA - clERP : null;
+  const chk = (d, okText) => (d === null ? '' : Math.abs(d) < 1 ? `<i class="ok">✓ ${okText}</i>` : `<i class="warn">Lệch ${f(d)}</i>`);
+  const res = st.d5 && st.d5.res ? st.d5.res.totals : null;
+  const prodA = st.p2.d4 && st.p2.d4.fl ? st.p2.d4.fl.totals.totalCost : null;
+  const avail = res ? num(res.openA) + num(res.prodA) : null;
+  const pct = (a, b) => (has(a) && b ? `${(a / b * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} %` : '');
+  return `<div class="kpi-groups">
+    <section class="kpi-group"><h3>WIP · sản phẩm dở dang <small>Đầu kỳ + vào − ra = cuối kỳ ERP</small></h3><div class="kpis">
+      ${kpi('Opening WIP', op, false, { tone: 'base', sub: op === null ? 'Chưa nhập (3A)' : 'Số dư đầu kỳ' })}
+      ${kpi('WIP vào (MI + Stock Out)', inA, false, { tone: 'in', sub: s3 ? 'Xuất NVL vào sản xuất' : 'Chưa chạy STEP 3A' })}
+      ${kpi('WIP ra (PC + MR + Stock Out)', outA, false, { tone: 'out', sub: s3 ? 'Kết chuyển và nhập lại' : 'Chưa chạy STEP 3A' })}
+      ${kpi('Closing WIP ERP', clERP, false, { tone: 'base', sub: roll === null ? 'Chưa đủ số liệu' : chk(roll, 'khớp đầu kỳ + vào − ra') })}
+      ${kpi('Closing WIP cuối (sau 3B)', fin, true, { tone: 'res', sub: has(fin) && has(clERP) ? (Math.abs(fin - clERP) < 1 ? 'Không điều chỉnh 3B' : `Điều chỉnh 3B: ${fin - clERP > 0 ? '+' : ''}${f(fin - clERP)}`) : 'Chưa chạy STEP 3B' })}
+    </div></section>
+    <section class="kpi-group"><h3>Thành phẩm · giá vốn <small>FG đầu kỳ + nhập kho − giá vốn = FG cuối kỳ</small></h3><div class="kpis">
+      ${kpi('Giá thành SX (STEP 4)', prodA, true, { tone: 'in', sub: prodA === null ? 'Chưa chạy STEP 4' : 'Nhập kho thành phẩm (155)' })}
+      ${kpi('Giá vốn FIFO (STEP 5)', res ? res.cogsA : null, true, { tone: 'out', sub: res ? `${pct(res.cogsA, avail)} FG khả dụng` : 'Chưa chạy STEP 5' })}
+      ${kpi('FG cuối kỳ', res ? res.closeA : null, false, { tone: 'res', sub: res ? `FG đầu kỳ ${f(res.openA)}` : 'Chưa chạy STEP 5' })}
+    </div></section>
+  </div>`;
 }
 function emptyNote(msg, href, cta) { return `<div class="empty"><p>${esc(msg)}</p>${href ? `<a class="btn" href="#${href}">${esc(cta)}</a>` : ''}</div>`; }
 function journal(st) {
@@ -977,11 +1007,14 @@ VIEWS.step2 = (el) => {
     const rs = ruleSummary(s2);
     // v1.14.22: every rule is listed (0 when it has no Stock Out this period) so the whole rule book is visible
     const ruleCols = [
-      { key: 0, label: 'Ưu tiên', width: 70 }, { key: 1, label: 'Rule', width: 60 }, { key: 2, label: 'Hệ nguồn', width: 80 }, { key: 3, label: 'Mô tả', width: 380 },
-      { key: 4, label: 'Loại', width: 110 }, { key: 5, label: 'Phát sinh kỳ này', type: 'status', width: 150 }, { key: 6, label: 'Nhóm nguồn', type: 'int', width: 100 },
-      { key: 7, label: 'Số dòng PC', type: 'int', width: 100 }, { key: 8, label: 'Stock Out nguồn', type: 'num', width: 150 }, { key: 9, label: 'Đã phân bổ vào lô', type: 'num', width: 160 }, { key: 10, label: '% tổng phân bổ', type: 'pct', width: 120 },
+      { key: 0, label: 'Ưu tiên', width: 70 }, { key: 1, label: 'Rule', width: 60 }, { key: 2, label: 'Hệ nguồn', width: 80 }, { key: 3, label: 'Mô tả', width: 330 },
+      { key: 4, label: 'Loại', width: 100 }, { key: 5, label: 'Phát sinh kỳ này', type: 'status', width: 150 }, { key: 6, label: 'Nhóm nguồn', type: 'int', width: 95 },
+      { key: 7, label: 'Số dòng PC', type: 'int', width: 95 }, { key: 8, label: 'Stock Out nguồn', type: 'num', width: 145 },
+      // v1.14.54: allocated amount split by the system of the receiving PC lot
+      { key: 9, label: 'Vào lô hệ T', type: 'num', width: 140 }, { key: 10, label: 'Vào lô hệ S', type: 'num', width: 120 }, { key: 11, label: 'Vào lô hệ O', type: 'num', width: 140 },
+      { key: 12, label: 'Tổng đã phân bổ', type: 'num', width: 150 }, { key: 13, label: '% tổng phân bổ', type: 'pct', width: 120 },
     ];
-    mountTable($('#t-rule'), { columns: ruleCols, rows: rs.map((r) => [r.screen, r.code, r.erp, r.label, r.kind, r.used ? 'CÓ' : 'KHÔNG PHÁT SINH', r.groups, r.lines, r.src, r.alloc, r.share]), filterKey: 5, totals: [6, 7, 8, 9, 10], height: 470,
+    mountTable($('#t-rule'), { columns: ruleCols, rows: rs.map((r) => [r.screen, r.code, r.erp, r.label, r.kind, r.used ? 'CÓ' : 'KHÔNG PHÁT SINH', r.groups, r.lines, r.src, r.allocT, r.allocS, r.allocO, r.alloc, r.share]), filterKey: 5, totals: [6, 7, 8, 9, 10, 11, 12, 13], height: 470,
       onExport: exportTable('02_STEP2_SO_TIEN_THEO_RULE', ruleCols) });
     // Detail table: column 18 = rule code (derived from the note), filtered by the rule selector
     const dcRule = [...dc, { key: 18, label: 'Rule', width: 80 }];
