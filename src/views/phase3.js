@@ -1,6 +1,7 @@
 // Phase 3 views: STEP 5 — Opening FG, FIFO COGS + FG Rework FIFO (5B), FG History & month close.
 import * as F5 from '../engine/step5.js';
 import * as SP from '../engine/syncpolicy.js';
+import { ACTION_MANUAL_COST, approvalDocId, canonicalManualCost, isApprovedFor } from '../engine/approvals.js';
 import * as TPL from '../engine/templates.js';
 import * as F4 from '../engine/step4.js';
 import * as P2 from './phase2.js';
@@ -68,7 +69,20 @@ function snap(S, D4) {
 /** Rework dispositions entered by the user (status / scrap / expense account / completion) – a change needs RUN FIFO again. */
 export const rwKey = (S) => fpRows((S.d.register && S.d.register.rows) || [], (r) => [ttxt(r.rid), utxt(r.rwType), utxt(r.rwStatus), ttxt(r.pcNo), num(r.compQty), num(r.scrapQty), utxt(r.scrapTreat), ttxt(r.woAccount), ttxt(r.dispNote).length >= 5 ? 1 : 0].join('|'));
 /** STEP 5R resolutions (original invoice / manual unit cost per return line). */
-export const rmKey = (S) => fpRows(Object.entries(S.d.returnMatches || {}), ([k, v]) => `${k}=${ttxt(v.origInv)}|${num(v.unitCost)}|${ttxt(v.approvedBy)}`);
+export const rmKey = (S) => fpRows(Object.entries(effectiveReturnMatches(S)), ([k, v]) => `${k}=${ttxt(v.origInv)}|${num(v.unitCost)}|${ttxt(v.approvedBy)}`);
+/**
+ * v1.14.41 (maker–checker): a manual unit cost counts only with an APPROVED receipt by another user, for the exact values
+ * on this device (isApprovedFor). Any approvedBy written into the STEP 5R blob by an older client is ignored.
+ */
+export function effectiveReturnMatches(S) {
+  const out = {};
+  for (const [k, m] of Object.entries(S.d.returnMatches || {})) {
+    const r = (S.approvals || {})[approvalDocId(ACTION_MANUAL_COST, k)];
+    const ok = isApprovedFor(r, m);
+    out[k] = { ...m, by: ok ? r.requestedByEmail : (m.by || ''), approvedBy: ok ? r.approvedByEmail : '', approvedAt: ok ? (r.approvedAt || '') : '' };
+  }
+  return out;
+}
 /** Audit F-03: final STEP 4 cost per lot (3B / rework carry-in can move between lots with an unchanged total) and the FIFO overrides. */
 export const flKey = (fl) => fpRows(fl ? fl.rows : [], (r) => [r.erp, utxt(r.pc), utxt(r.prod), num(r.qty), num(r.totalRM).toFixed(0), num(r.t622).toFixed(0), num(r.t627).toFixed(0), num(r.totalCost).toFixed(0)].join('|'));
 export const ovKey = (S) => fpRows(Object.entries(S.d.fifoOverrides || {}).filter(([, v]) => v), ([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`);
@@ -503,12 +517,17 @@ export function doReturnsSave() {
     S.tab5r = 'run';
   } catch (e) { A.toast('Validate & Save hàng trả lại lỗi: ' + e.message, 'block'); }
 }
-/** v1.14.19 (audit P0-02): a manual unit cost needs a second person (maker-checker) before STEP 5R uses it. */
-function approvalCell(m, edit) {
+/** v1.14.19 (audit P0-02) / v1.14.41: a manual unit cost needs a second person; the receipt in approvals decides. */
+function approvalCell(key, m, edit, approvals) {
   if (!m || !(num(m.unitCost) > 0)) return '';
-  if (m.approvedBy && utxt(m.approvedBy) !== utxt(m.by)) return `<div class="muted">Đã duyệt: ${esc(m.approvedBy)}</div>`;
-  if (!edit) return '<div class="muted">Chờ duyệt</div>';
-  return utxt(m.by) === utxt(A.who()) ? '<div class="muted">Chờ người khác duyệt</div>' : ' <button class="btn sm" type="button" data-5r-approve>Duyệt</button>';
+  const r = (approvals || {})[approvalDocId(ACTION_MANUAL_COST, key)];
+  if (isApprovedFor(r, m)) return `<div class="muted">Đã duyệt: ${esc(r.approvedByEmail)}</div>`;
+  if (!A.cloudOn()) return '<div class="muted">Cần đăng nhập Google để gửi / duyệt</div>';
+  if (r && r.status === 'REQUESTED' && r.canonical === canonicalManualCost(m)) {
+    if (utxt(r.requestedByEmail) === utxt(A.who())) return '<div class="muted">Chờ người khác duyệt</div>';
+    return edit ? ' <button class="btn sm" type="button" data-5r-approve>Duyệt</button>' : '<div class="muted">Chờ duyệt</div>';
+  }
+  return '<div class="muted">Chưa có duyệt hợp lệ – bấm Lưu để gửi duyệt</div>';
 }
 /** STEP 5R resolution: original invoice or manual unit cost per return line (stored in returnMatches, rerun FIFO to apply). */
 function resolvePanel(el, S, res, rc) {
@@ -526,33 +545,47 @@ function resolvePanel(el, S, res, rc) {
       <td><input name="origInv" list="${dl}" value="${esc(m.origInv || (r.status === 'AUTO-MATCHED' ? r.originalInv : ''))}" ${edit ? '' : 'disabled'} style="min-width:150px"><datalist id="${dl}">${[...(inv.get(utxt(r.product)) || [])].map((x) => `<option value="${esc(x)}">`).join('')}</datalist></td>
       <td><input name="unitCost" inputmode="decimal" value="${m.unitCost ? A.fmtNum(m.unitCost) : ''}" ${edit ? '' : 'disabled'} style="width:130px;text-align:right"></td>
       <td><input name="note" value="${esc(m.note || '')}" ${edit ? '' : 'disabled'} placeholder="Căn cứ / chứng từ" style="min-width:180px"></td>
-      <td>${edit ? `<button class="btn sm" type="button" data-5r-save>Lưu</button>${M[r.key] ? ' <button class="btn ghost sm" type="button" data-5r-del>Xoá</button>' : ''}` : ''}${approvalCell(m, edit)}</td></tr>`; }).join('')}
+      <td>${edit ? `<button class="btn sm" type="button" data-5r-save>Lưu</button>${M[r.key] ? ' <button class="btn ghost sm" type="button" data-5r-del>Xoá</button>' : ''}` : ''}${approvalCell(r.key, m, edit, A.approvals())}</td></tr>`; }).join('')}
     </tbody></table></div>`);
   if (!edit) return;
-  el.querySelectorAll('#t5r-fix [data-5r-save]').forEach((b) => b.addEventListener('click', () => {
+  el.querySelectorAll('#t5r-fix [data-5r-save]').forEach((b) => b.addEventListener('click', async () => {
     const tr = b.closest('tr'); const key = tr.dataset.k;
     const origInv = tr.querySelector('[name=origInv]').value.trim(), rawU = tr.querySelector('[name=unitCost]').value.trim(), note = tr.querySelector('[name=note]').value.trim();
     let unitCost = 0; if (rawU) { const v = A.parseNum(rawU, 'Đơn giá vốn'); if (v === undefined) return; unitCost = v; }
     if (!origInv && !(unitCost > 0)) { A.toast('Nhập hoá đơn gốc hoặc đơn giá vốn.', 'review'); return; }
+    // the engine uses the original invoice first and ignores the manual cost: refuse the ambiguous entry instead of asking for an approval that cannot apply
+    if (origInv && unitCost > 0) { A.toast('Đang có cả hoá đơn gốc và đơn giá: hệ thống dùng hoá đơn gốc, đơn giá bị bỏ qua. Xoá hoá đơn gốc nếu muốn dùng đơn giá nhập tay.', 'block'); return; }
     if (note.length < 3) { A.toast('Nhập ghi chú / căn cứ.', 'review'); return; }
     if (!A.guardEdit()) return;
     (d.returnMatches || (d.returnMatches = {}))[key] = { origInv, unitCost, note, by: A.who(), at: nowISO() };
     A.audit('STEP 5R RESOLVE', `${key}: ${origInv ? 'HĐ gốc ' + origInv : ''}${unitCost ? ' đơn giá ' + unitCost : ''} – ${note}`);
-    A.markDirty('returnMatches', 'audit'); A.toast('Đã lưu. Bấm RUN STEP 5R để áp dụng.', 'review'); A.render();
+    A.markDirty('returnMatches', 'audit');
+    if (unitCost > 0) { // a manual cost waits for another person; any earlier approval no longer matches these values
+      const entry = d.returnMatches[key];
+      const w = await A.approvalWrite('request', { id: approvalDocId(ACTION_MANUAL_COST, key), key, values: { origInv, unitCost, note }, canonical: canonicalManualCost(entry) });
+      A.toast(w.ok ? 'Đã lưu và gửi duyệt đơn giá. Bấm RUN STEP 5R sau khi được duyệt.' : 'Đã lưu nhưng CHƯA gửi duyệt được: ' + w.error, w.ok ? 'review' : 'block');
+    } else A.toast('Đã lưu. Bấm RUN STEP 5R để áp dụng.', 'review');
+    A.render();
   }));
-  el.querySelectorAll('#t5r-fix [data-5r-approve]').forEach((b) => b.addEventListener('click', () => {
+  el.querySelectorAll('#t5r-fix [data-5r-approve]').forEach((b) => b.addEventListener('click', async () => {
     if (!A.guardEdit()) return;
     const key = b.closest('tr').dataset.k; const m = d.returnMatches && d.returnMatches[key];
-    if (!m || !(num(m.unitCost) > 0)) return;
-    if (utxt(m.by) === utxt(A.who())) { A.toast('Người nhập đơn giá không được tự duyệt. Cần một người dùng khác.', 'block'); return; }
-    if (!confirm(`Duyệt đơn giá vốn ${A.fmtNum(m.unitCost)} VND/sp cho dòng trả lại này?\nCăn cứ: ${m.note || ''}\nNgười nhập: ${m.by || ''}`)) return;
-    Object.assign(m, { approvedBy: A.who(), approvedAt: nowISO() });
-    A.audit('STEP 5R APPROVE MANUAL COST', `${key}: đơn giá ${m.unitCost} (nhập bởi ${m.by}) – ${m.note}`);
-    A.markDirty('returnMatches', 'audit'); A.toast('Đã duyệt. Bấm RUN STEP 5R để áp dụng.', 'review'); A.render();
+    const r = (A.approvals() || {})[approvalDocId(ACTION_MANUAL_COST, key)];
+    if (!m || !r || r.status !== 'REQUESTED' || r.canonical !== canonicalManualCost(m)) { A.toast('Chưa có yêu cầu duyệt khớp với đơn giá hiện tại. Bấm Lưu để gửi lại.', 'review'); return; }
+    if (!confirm(`Duyệt đơn giá vốn ${A.fmtNum(r.values.unitCost)} VND/sp cho dòng trả lại này?\nCăn cứ: ${r.values.note || ''}\nNgười gửi duyệt: ${r.requestedByEmail || ''}`)) return;
+    const w = await A.approvalWrite('approve', { id: approvalDocId(ACTION_MANUAL_COST, key), key, canonical: canonicalManualCost(m) }); // rules + client refuse self-approval and changed values
+    if (!w.ok) { A.toast('Không duyệt được: ' + w.error, 'block'); A.render(); return; }
+    A.audit('STEP 5R APPROVE MANUAL COST', `${key}: đơn giá ${r.values.unitCost} (gửi bởi ${r.requestedByEmail}) – ${r.values.note || ''}`);
+    A.toast('Đã duyệt. Bấm RUN STEP 5R để áp dụng.', 'review'); A.render();
   }));
-  el.querySelectorAll('#t5r-fix [data-5r-del]').forEach((b) => b.addEventListener('click', () => {
+  el.querySelectorAll('#t5r-fix [data-5r-del]').forEach((b) => b.addEventListener('click', async () => {
     if (!A.guardEdit()) return;
-    const key = b.closest('tr').dataset.k; delete d.returnMatches[key];
+    const key = b.closest('tr').dataset.k;
+    if (A.cloudOn()) { // the receipt goes first: if the requester rule refuses, the line stays on this device too
+      const w = await A.approvalWrite('delete', { id: approvalDocId(ACTION_MANUAL_COST, key), key });
+      if (!w.ok) { A.toast('Không xoá được: ' + w.error, 'block'); return; }
+    }
+    delete d.returnMatches[key];
     A.audit('STEP 5R RESOLVE', `${key}: xoá`); A.markDirty('returnMatches', 'audit'); A.render();
   }));
 }
@@ -614,7 +647,7 @@ export async function doRunFIFO(withReturns = false) {
   const before = snap(S, D4);
   const priorSales = withReturns ? await priorSalesFor(S) : [];
   try {
-    const res = F5.runFIFO({ priorSales, returnMatches: d.returnMatches || {}, sellCostRate: sellRate(S), period: S.period, opening: d.fgOpen, caRows: fl.rows, salesRows: bk.sales, returnRows: withReturns ? bk.returns : [], pmRows: d.pm ? d.pm.rows : [], fx: d.gl ? d.gl.fx : 0, register: d.register, overrides: d.fifoOverrides || {}, dupDecisions: d.dupDecisions || {}, mode: conf.mode, tol: conf.tol,
+    const res = F5.runFIFO({ priorSales, returnMatches: effectiveReturnMatches(S), sellCostRate: sellRate(S), period: S.period, opening: d.fgOpen, caRows: fl.rows, salesRows: bk.sales, returnRows: withReturns ? bk.returns : [], pmRows: d.pm ? d.pm.rows : [], fx: d.gl ? d.gl.fx : 0, register: d.register, overrides: d.fifoOverrides || {}, dupDecisions: d.dupDecisions || {}, mode: conf.mode, tol: conf.tol,
       step4: { current: D4.freshness, overall: fl.overall, finalCost: fl.totals.totalCost, qty: d.step4.totalQty } });
     let rwMsg = '';
     if (F5.reworkCount(d.register)) {

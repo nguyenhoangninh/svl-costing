@@ -79,6 +79,33 @@ service cloud.firestore {
           && request.resource.data.summary == getAfter(periodPath(period)).data.summary;
         allow update, delete: if false;
       }
+      // v1.14.41 (maker–checker, STEP 5R manual unit cost): one receipt per line. Any editor may request, and the request
+      // is stamped with the signed-in requester. Only a DIFFERENT signed-in user may approve, and an approval may not change
+      // the requested values. The requester or an admin may delete. Closed periods are immutable.
+      match /approvals/{approval} {
+        function requestOk() {
+          return request.resource.data.status == 'REQUESTED'
+            && request.resource.data.requestedByEmail == myEmail()
+            && request.resource.data.requestedByUid == request.auth.uid
+            && request.resource.data.get('approvedByEmail', '') == '';
+        }
+        allow read: if canRead();
+        allow create: if canWrite() && periodOpen(period) && requestOk();
+        allow update: if canWrite() && periodOpen(period) && (
+          requestOk()
+          ||
+          (resource.data.status == 'REQUESTED'
+            && request.resource.data.status == 'APPROVED'
+            && request.resource.data.requestedByEmail == resource.data.requestedByEmail
+            && request.resource.data.requestedByUid == resource.data.requestedByUid
+            && request.resource.data.canonical == resource.data.canonical
+            && request.resource.data.values == resource.data.values
+            && request.resource.data.approvedByEmail == myEmail()
+            && request.resource.data.approvedByUid == request.auth.uid
+            && myEmail() != resource.data.requestedByEmail)
+        );
+        allow delete: if canWrite() && periodOpen(period) && (resource.data.requestedByEmail == myEmail() || isAdmin());
+      }
     }
     // Append-only audit trail: anyone who can write data can add own events; nobody can change or delete them.
     match /svl_costing_audit/{id} {

@@ -57,5 +57,17 @@ ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes
 ok('lost reply does not delete chunks of a committed revision (pointer checked first)', store.includes('const now = await F.getDoc(pdoc(period));') && store.includes('if (!landed && isAdmin())'));
 ok('cloud save keeps chunks when the pointer cannot be read', store.includes('} catch { landed = true; }'));
 
+// v1.14.41 (maker–checker for STEP 5R manual unit costs, rules-based; no Cloud Functions on the Spark plan)
+const sw = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+ok('approval receipts: any editor requests, stamped with the signed-in requester', /match \/approvals\/\{approval\}[\s\S]*requestedByEmail == myEmail\(\)[\s\S]*requestedByUid == request\.auth\.uid/.test(rules));
+ok('approval receipts: only a DIFFERENT signed-in user approves, and values cannot change', rules.includes('myEmail() != resource.data.requestedByEmail') && rules.includes('request.resource.data.values == resource.data.values') && rules.includes('request.resource.data.approvedByUid == request.auth.uid'));
+ok('approval receipts are frozen once the period is CLOSED', /match \/approvals\/\{approval\}[\s\S]*allow create: if canWrite\(\) && periodOpen\(period\)/.test(rules));
+ok('approval receipts: only the requester or an admin may delete', rules.includes('resource.data.requestedByEmail == myEmail() || isAdmin()'));
+ok('approval writes go through one transaction helper with the same identity rules', store.includes('export async function cloudWriteApproval') && store.includes('decideApprovalWrite(') && store.includes('runTransaction(fb.fs'));
+ok('STEP 5R counts only approved receipts (effective matches feed RUN FIFO and the stale key)', phase3.includes('export function effectiveReturnMatches') && phase3.includes('returnMatches: effectiveReturnMatches(S)') && phase3.includes('Object.entries(effectiveReturnMatches(S))'));
+ok('an entry with both an invoice and a manual cost is refused before a request goes out', phase3.includes('Đang có cả hoá đơn gốc và đơn giá'));
+ok('no Cloud Functions / callable code remains (Spark plan)', !store.includes('httpsCallable') && !app.includes('callFn') && !phase3.includes('httpsCallable') && !fs.existsSync(new URL('../functions', import.meta.url)));
+ok('approval module is precached for offline use', sw.includes("'./src/engine/approvals.js'"));
+
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

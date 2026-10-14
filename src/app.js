@@ -177,6 +177,19 @@ function summaryForCloud() {
   return { step1: st.s1c.result, step2: st.s2c.status, step3: st.s3c.status, step4: st.s4c.status, step5: st.s5c.status, closingWIP: S.d.step3 ? S.d.step3.summary.closingAmt : null, cogs: r5 ? r5.cogsA : null, closingFG: r5 ? r5.closeA : null, closed: S.d.closed && S.d.closed.period === S.period ? S.d.closed.closedAt : null, everClosed: !!S.d.closedEver || !!(S.d.closed && S.d.closed.period === S.period) };
 }
 
+/** v1.14.41 (maker–checker): receipts of a period; empty when signed out or unreadable. */
+async function loadApprovals(p) {
+  if (!store.cloud.user) return {};
+  return store.cloudApprovals(p).catch(() => ({}));
+}
+/** Write one receipt for the open period, then reload them. Returns { ok, error } for the view. */
+async function approvalWrite(op, payload) {
+  try {
+    await store.cloudWriteApproval(S.period, op, payload);
+    S.approvals = await loadApprovals(S.period);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+}
 async function openPeriod(p, { preferCloud = false } = {}) {
   await saveChain;
   // ENH-07: push the period being left while its data is still loaded; if the cloud refuses, the user decides
@@ -185,6 +198,7 @@ async function openPeriod(p, { preferCloud = false } = {}) {
     if (!r.ok && !r.skipped && !confirm(`Kỳ ${S.period} CHƯA lên được cloud: ${r.error}\n\nOK = chuyển sang kỳ ${p}; thay đổi của kỳ ${S.period} vẫn được giữ trên máy và đẩy lên khi mở lại kỳ này.\nHuỷ = ở lại kỳ ${S.period}.`)) { render(); return; }
   }
   S.period = p; S.d = await loadLocal(p);
+  S.approvals = await loadApprovals(p);
   localStorage.setItem('svl.period', p);
   if (S.sync === 'conflict') { S.sync = 'local'; S.syncMsg = ''; }
   if (store.cloud.user) {
@@ -1741,7 +1755,7 @@ P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, 
 TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
 RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render });
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
-P3.install({ refreshPrevDrift: () => checkPrevDrift(), cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
 // ======================= boot =======================
 (async function boot() {
