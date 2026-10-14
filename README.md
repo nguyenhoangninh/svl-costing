@@ -1,6 +1,7 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.41 (14/10/2026):** Duyệt đơn giá vốn nhập tay STEP 5R bằng **biên nhận Firestore** thay vì Cloud Functions (gói Spark). Biên nhận nằm ở `svl_costing_periods/{kỳ}/approvals`. Firestore rules kiểm tra định danh: người gửi yêu cầu được ghi vào biên nhận; chỉ một người dùng khác (đăng nhập Google, email đã xác minh) mới duyệt được; giá trị đã gửi không đổi được sau khi duyệt; người gửi hoặc quản trị viên mới xoá được; kỳ CLOSED không ghi được. Trình duyệt vẫn đối chiếu đơn giá với bản đã gửi, nên duyệt chỉ có hiệu lực cho đúng giá trị đó. Đơn giá nhập tay chỉ được dùng khi dòng không có hoá đơn gốc; nếu có cả hai, hệ thống từ chối lưu. Phê duyệt cũ không còn được tính: cần duyệt lại. Kiểm thử: `test/approvals-logic.mjs` (25/25), `test/e2e-approvals.mjs` (16/16, trình duyệt với Firebase giả lập). Firestore rules KHÔNG được kiểm thử thực thi trong môi trường này: cần publish và kiểm tra trên Firebase thật.
 > **v1.14.40 (14/10/2026):** Rà soát toàn bộ sau khi hoàn tác ENH-06 (gói Spark, không Cloud Functions). Mã nguồn sau revert khớp đúng trạng thái trước ENH-06. Sửa tài liệu: mục Governance và Bảo mật trước đây ghi kiểm soát maker-checker như được thực thi nghiêm ngặt, thực tế chỉ kiểm tra trên trình duyệt; nay ghi rõ là giới hạn đã biết. Thêm ghi chú gói Spark: hạn mức Firestore và rủi ro tạm ngưng khi vượt hạn mức. Không đổi logic nghiệp vụ.
 > **v1.14.39 (14/10/2026):** Hoàn tác ENH-06 (v1.14.38, PR #23) theo quyết định của anh: không nâng Firebase lên Blaze nên Cloud Functions không được dùng. Duyệt đơn giá nhập tay STEP 5R quay về phía máy khách như trước. Giữ nguyên các sửa lỗi của v1.14.37 và đợt 2, 3 audit. Quyết định: không dùng Blaze và không dùng Cloud Functions; ENH-06 không làm lại theo hướng máy chủ.
 > **v1.14.37 (14/10/2026):** Kiểm thử thật trên trình duyệt (Chromium, Firebase giả lập trong bộ nhớ, dữ liệu từ file Costing) phát hiện **một lỗi mất dữ liệu**: khi CLOSE đã được cloud ghi nhưng phản hồi bị mất, bước dọn dẹp ghi lỗi xoá các chunk của revision vừa commit, khiến kỳ đã đóng không tải lại được. Đã sửa: chỉ xoá chunk khi con trỏ kỳ xác nhận commit chưa thành công; không đọc được con trỏ thì giữ chunk. Thêm kiểm thử trình duyệt: `test/e2e-authgate.mjs` (ENH-05: không hiện dữ liệu khi chưa xác thực) và `test/e2e-cloud.mjs` (ENH-04/07/08/09).
@@ -195,6 +196,7 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 - **Manual Price:** chỉnh sửa reset approval; `Approved By` lấy từ tài khoản đang đăng nhập trên trình duyệt, không nhập tay; việc chặn maker tự approve chỉ có trên giao diện (xem *Bảo mật dữ liệu*).
 - **Direct 622/627:** dòng Active bắt buộc Reason / Evidence và maker-checker approval (kiểm tra trên trình duyệt); thay đổi allocation reset approval.
 - **FAST difference:** Admin approver phải khác người nhập FAST (kiểm tra trên trình duyệt).
+- **Đơn giá vốn nhập tay (STEP 5R):** biên nhận trong `svl_costing_periods/{kỳ}/approvals`; Firestore rules chặn người gửi tự duyệt, định danh lấy từ tài khoản đăng nhập; giá trị đã duyệt phải khớp đúng bản hiện tại (kiểm tra trên trình duyệt).
 - **Cloud revision:** mỗi cloud commit tạo manifest hash + immutable revision document; superseded content-addressed chunks được giữ để phục vụ trace/retention.
 - **CLOSED period:** không xoá trực tiếp; phải REOPEN trước và để lại revision/audit trail.
 - **NRV:** period có provision proposed phải có accounting decision trước Close.
@@ -204,7 +206,7 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 - Repo này chỉ chứa **code**. Không commit file ERP, file Costing Master hay dữ liệu xuất ra (`.gitignore` đã chặn `*.xlsx`, `*.xlsm`, `*.xls`).
 - File ERP được đọc ngay trong trình duyệt; dữ liệu lên cloud được nén gzip, chia khối ≤700 KB trong `svl_costing_periods/{kỳ}/chunks`.
 - API key Firebase trong `src/config.js` là định danh công khai, không phải mật khẩu; quyền truy cập do Firestore rules quyết định.
-- **Giới hạn đã biết (gói Spark, không Cloud Functions):** các kiểm soát maker-checker (duyệt đơn giá nhập tay, duyệt chênh lệch FAST, duyệt 3B, duyệt dòng Direct 622/627) chỉ được kiểm tra trong trình duyệt; người có quyền ghi có thể bỏ qua. Firestore rules chỉ chặn ghi trái vai trò (viewer / editor / admin) và mọi thay đổi trên kỳ đã CLOSED.
+- **Giới hạn đã biết (gói Spark, không Cloud Functions):** duyệt đơn giá nhập tay STEP 5R có biên nhận trong Firestore; rules kiểm tra người duyệt khác người gửi, nhưng giá trị đơn giá do trình duyệt đối chiếu. Các kiểm soát khác (duyệt chênh lệch FAST, duyệt 3B, duyệt dòng Direct 622/627) vẫn chỉ được kiểm tra trong trình duyệt; người có quyền ghi có thể bỏ qua. Firestore rules chỉ chặn ghi trái vai trò (viewer / editor / admin) và mọi thay đổi trên kỳ đã CLOSED.
 
 ## Cấu trúc
 

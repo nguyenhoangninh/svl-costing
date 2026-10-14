@@ -2,6 +2,7 @@
 // Large objects are gzip-compressed and split into ≤700 KB chunks for Firestore.
 import { FIREBASE_CONFIG, ALLOWED_EMAILS, CLOUD_COLLECTION } from './config.js';
 import * as AQ from './engine/auditqueue.js';
+import { decideApprovalWrite } from './engine/approvals.js';
 
 // ---------------- IndexedDB ----------------
 /** ?sandbox=1 → separate local database, cloud disabled (training / testing; never mixed with production data). */
@@ -96,6 +97,30 @@ export async function initCloud(onUser) {
 }
 const allowed = (email) => !ALLOWED_EMAILS.length || ALLOWED_EMAILS.map((x) => x.toLowerCase()).includes(String(email || '').toLowerCase());
 /** Popup first (works on desktop, Android and installed iOS apps); falls back to a full-page redirect where popups are not allowed. */
+/** STEP 5R maker–checker receipts of one period (svl_costing_periods/{period}/approvals). */
+export async function cloudApprovals(period) {
+  if (!cloud.user || !fb) return {};
+  const q = await fb.F.getDocs(fb.F.collection(fb.fs, CLOUD_COLLECTION, period, 'approvals'));
+  const out = {};
+  for (const d of q.docs) out[d.id] = d.data();
+  return out;
+}
+/**
+ * Write one receipt in a transaction: op = 'request' | 'approve' | 'delete'. The rules check the identity again on the
+ * server; decideApprovalWrite checks the same rules here so the user gets a clear message first.
+ */
+export async function cloudWriteApproval(period, op, payload) {
+  if (!cloud.user || !fb) throw new Error('Cần đăng nhập Google để gửi hoặc duyệt đơn giá nhập tay.');
+  const ref = fb.F.doc(fb.fs, CLOUD_COLLECTION, period, 'approvals', payload.id);
+  await fb.F.runTransaction(fb.fs, async (t) => {
+    const cur = await t.get(ref);
+    const data = decideApprovalWrite(cur.exists() ? cur.data() : null, {
+      ...payload, op, email: cloud.user.email, uid: cloud.user.uid, isAdmin: isAdmin(), now: new Date().toISOString(),
+    });
+    if (data === null) return;
+    if (data === 'delete') t.delete(ref); else t.set(ref, data);
+  });
+}
 export async function signIn() {
   const provider = new fb.A.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
