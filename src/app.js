@@ -680,23 +680,103 @@ async function importERP(files) {
 // ---------- STEP 2 ----------
 /** v1.14.29: Stock Out LINES marked "tiêu hao" (keys from soLineKeys) – posted Nợ 632 / Có 152 and kept out of PC-P lots. */
 const consumeLineKeys = () => (S.d.consumeCfg && Array.isArray(S.d.consumeCfg.lines) ? S.d.consumeCfg.lines : []);
+/* v1.14.32: khối tiêu hao NVL – lọc theo phân hệ, dòng đã chọn được tô màu, thống kê theo phân hệ, tiêu đề cố định khi cuộn.
+   Tick là lưu ngay và cập nhật tại chỗ (không dựng lại màn hình, nên không mất vị trí cuộn / bộ lọc). */
+let consLines = [];                 // dòng Stock Out NVL của lần render gần nhất
+const CONS_ERPS = ['T', 'S', 'O'];
+const consStale = (s2, sel) => !!s2 && JSON.stringify([...(s2.consumeLines || [])].sort()) !== JSON.stringify([...sel].sort());
+const consStaleHtml = (stale) => (stale ? '<div class="alert review">Danh sách tiêu hao đã thay đổi sau lần chạy STEP 2 gần nhất – bấm <b>Chạy STEP 2</b> để cập nhật số liệu.</div>' : '');
+const consSumTxt = (lines, sel) => `Chọn dòng tiêu hao · ${fmtNum(lines.length)} dòng Stock Out NVL kỳ này · đã chọn ${fmtNum(sel.size)} dòng`;
+function consStatBody(lines, sel, s2) {
+  const rows = CONS_ERPS.map((erp) => {
+    const L = lines.filter((c) => c.erp === erp), P = L.filter((c) => sel.has(c.key));
+    const hit = s2 && s2.summary ? s2.summary.find((x) => x.erp === erp) : null;
+    return { erp, n: L.length, nSel: P.length, amt: L.reduce((a, c) => a + c.amt, 0), selAmt: P.reduce((a, c) => a + c.amt, 0), posted: s2 ? (hit ? hit.cons || 0 : 0) : null };
+  });
+  const sumOf = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+  rows.push({ erp: 'TOTAL', n: sumOf('n'), nSel: sumOf('nSel'), amt: sumOf('amt'), selAmt: sumOf('selAmt'), posted: s2 ? sumOf('posted') : null });
+  return rows.map((r) => {
+    const tot = r.erp === 'TOTAL', pct = r.amt ? r.selAmt / r.amt : 0;
+    return `<tr class="${tot ? 'tot' : ''}"><td>${tot ? 'Tổng' : `<span class="erp erp-${r.erp}">${r.erp}</span>`}</td><td class="r">${fmtNum(r.n)}</td><td class="r">${fmtNum(r.nSel)}</td><td class="r">${fmtNum(r.amt)}</td><td class="r"><b>${fmtNum(r.selAmt)}</b></td><td class="r">${fmtNum(pct * 100, 2)} %</td><td class="r">${r.posted === null ? '<span class="muted">chưa chạy STEP 2</span>' : fmtNum(r.posted)}</td></tr>`;
+  }).join('');
+}
 function consumptionSection(s2) {
   const hasSO = ['T', 'O', 'S'].some((e) => S.d.datasets[`STOCK OUT-${e}`]);
   if (!hasSO) return '';
-  const lines = stockOutLines(S.d.datasets, S.period);
+  const lines = stockOutLines(S.d.datasets, S.period); consLines = lines;
   const sel = new Set(consumeLineKeys());
-  const selAmt = lines.filter((c) => sel.has(c.key)).reduce((a, c) => a + c.amt, 0);
-  const stale = s2 && JSON.stringify([...(s2.consumeLines || [])].sort()) !== JSON.stringify([...sel].sort());
-  return `<h2>Tiêu hao NVL (consumption)</h2>
-    <p class="muted">Từng dòng Stock Out được đánh dấu <b>tiêu hao</b> sẽ không phân bổ vào lô PC-P; số tiền ghi thẳng <b>Nợ 632 / Có 152</b>. Lựa chọn chỉ có hiệu lực trong kỳ này. Đổi lựa chọn rồi <b>chạy lại STEP 2</b> để áp dụng.</p>
-    ${stale ? '<div class="alert review">Danh sách tiêu hao đã thay đổi sau lần chạy STEP 2 gần nhất – chạy lại STEP 2 để cập nhật số liệu.</div>' : ''}
-    ${s2 && s2.consumption ? `<div class="kpis">${kpi('Tiêu hao → 632 (Có 152)', s2.total.cons || 0)}${kpiN('Số dòng tiêu hao', s2.consRows || 0)}${kpi('Đã chọn (kỳ này)', selAmt)}</div>` : ''}
-    <details ${sel.size ? 'open' : ''}><summary>Chọn dòng tiêu hao · ${fmtNum(lines.length)} dòng Stock Out NVL kỳ này · đã chọn ${fmtNum(sel.size)} dòng</summary>
-    ${lines.length ? `<p><label>Lọc: <input type="search" id="cons-q" placeholder="Chứng từ, mã vật tư, tên…" style="min-width:260px"></label></p>
-    <table class="cp s2-cons"><thead><tr><th>Tiêu hao</th><th>Hệ</th><th>Chứng từ</th><th class="r">Dòng</th><th>Item Code</th><th>Tên vật tư</th><th>Location</th><th class="r">Stock Out (VND)</th></tr></thead><tbody>
-      ${lines.map((c) => `<tr data-q="${esc((c.doc + ' ' + c.item + ' ' + c.name).toLowerCase())}"><td><input type="checkbox" data-cons="${esc(c.key)}" ${sel.has(c.key) ? 'checked' : ''} aria-label="Tiêu hao ${esc(c.doc)} dòng ${esc(c.line)}"></td><td><span class="erp erp-${c.erp}">${c.erp}</span></td><td>${esc(c.doc)}</td><td class="r">${esc(c.line)}</td><td>${esc(c.item)}</td><td>${esc(c.name)}</td><td>${esc(c.loc)}</td><td class="r">${fmtNum(c.amt)}</td></tr>`).join('')}
-    </tbody></table>` : emptyNote('Chưa có dòng Stock Out vật tư (non-FG) trong kỳ.')}
-    </details>`;
+  const rowsHtml = lines.map((c) => {
+    const on = sel.has(c.key);
+    return `<tr class="${on ? 'is-cons' : ''}" data-q="${esc((c.doc + ' ' + c.item + ' ' + c.name).toLowerCase())}" data-erp="${esc(c.erp)}">
+      <td class="c"><input type="checkbox" data-cons="${esc(c.key)}" ${on ? 'checked' : ''} aria-label="Tiêu hao ${esc(c.doc)} dòng ${esc(c.line)}"></td>
+      <td><span class="erp erp-${c.erp}">${c.erp}</span></td><td>${esc(c.doc)}</td><td class="r">${esc(c.line)}</td><td>${esc(c.item)}</td><td>${esc(c.name)}</td><td>${esc(c.loc)}</td><td class="r">${fmtNum(c.amt)}</td></tr>`;
+  }).join('');
+  return `<section class="cons-card">
+    <h2>Tiêu hao NVL (consumption)</h2>
+    <p class="muted">Dòng Stock Out được đánh dấu <b>tiêu hao</b> không phân bổ vào lô PC-P; số tiền ghi thẳng <b>Nợ 632 / Có 152</b>. Tick là lưu ngay, chỉ có hiệu lực trong kỳ này. Sau khi đổi lựa chọn, <b>chạy lại STEP 2</b> để áp dụng.</p>
+    <div id="cons-stale">${consStaleHtml(consStale(s2, sel))}</div>
+    <div class="cons-wrap-stats"><table class="cp cons-stats" id="cons-stats"><thead><tr><th>Phân hệ</th><th class="r">Dòng Stock Out NVL</th><th class="r">Dòng tiêu hao</th><th class="r">Giá trị Stock Out NVL</th><th class="r">Giá trị tiêu hao (đang chọn)</th><th class="r">% tiêu hao</th><th class="r">Đã ghi 632 / 152 (STEP 2 gần nhất)</th></tr></thead><tbody>${consStatBody(lines, sel, s2)}</tbody></table></div>
+    <details class="cons-pick" ${sel.size ? 'open' : ''}>
+      <summary id="cons-sum-txt">${consSumTxt(lines, sel)}</summary>
+      ${lines.length ? `<div class="cons-bar">
+        <label>Phân hệ<select id="cons-erp"><option value="ALL">Tất cả (T, S, O)</option>${CONS_ERPS.map((e) => `<option value="${e}">Hệ ${e}</option>`).join('')}</select></label>
+        <label class="grow">Tìm kiếm<input type="search" id="cons-q" placeholder="Chứng từ, mã vật tư, tên…"></label>
+        <button class="btn ghost" type="button" id="cons-all">Chọn tất cả đang hiện</button>
+        <button class="btn ghost" type="button" id="cons-none">Bỏ chọn đang hiện</button>
+        <span class="muted cons-vis" id="cons-vis"></span></div>
+        <div class="cons-wrap"><table class="cp s2-cons"><thead><tr><th class="c">Tiêu hao</th><th>Hệ</th><th>Chứng từ</th><th class="r">Dòng</th><th>Item Code</th><th>Tên vật tư</th><th>Location</th><th class="r">Stock Out (VND)</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`
+      : emptyNote('Chưa có dòng Stock Out vật tư (non-FG) trong kỳ.')}
+    </details>
+  </section>`;
+}
+function bindConsSection(el) {
+  const root = el.querySelector('.cons-card'); if (!root) return;
+  const apply = () => {
+    const erp = root.querySelector('#cons-erp').value, q = root.querySelector('#cons-q').value.trim().toLowerCase();
+    let n = 0;
+    root.querySelectorAll('.s2-cons tbody tr[data-q]').forEach((tr) => {
+      const show = (erp === 'ALL' || tr.dataset.erp === erp) && (!q || tr.dataset.q.includes(q));
+      tr.style.display = show ? '' : 'none'; if (show) n++;
+    });
+    root.querySelector('#cons-vis').textContent = `Đang hiện ${fmtNum(n)} dòng`;
+  };
+  const refresh = () => {
+    const sel = new Set(consumeLineKeys());
+    root.querySelector('#cons-stats tbody').innerHTML = consStatBody(consLines, sel, S.d.step2);
+    root.querySelector('#cons-sum-txt').textContent = consSumTxt(consLines, sel);
+    root.querySelector('#cons-stale').innerHTML = consStaleHtml(consStale(S.d.step2, sel));
+  };
+  const save = (set, why) => {
+    S.d.consumeCfg = { lines: [...set].sort(), by: who(), at: nowISO() };
+    audit('STEP 2 - TIÊU HAO NVL', `${why} · ${who()}`);
+    markDirty('consumeCfg', 'audit');
+  };
+  root.querySelectorAll('input[data-cons]').forEach((cb) => cb.addEventListener('change', () => {
+    if (!guardMutate()) { cb.checked = !cb.checked; return; }
+    const key = cb.dataset.cons, on = cb.checked;
+    const set = new Set(consumeLineKeys()); if (on) set.add(key); else set.delete(key);
+    save(set, `${key} · ${on ? 'BẬT tiêu hao (Nợ 632 / Có 152)' : 'TẮT tiêu hao (phân bổ vào lô PC)'}`);
+    cb.closest('tr').classList.toggle('is-cons', on);
+    refresh();
+  }));
+  const bulk = (on) => {
+    if (!guardMutate()) return;
+    const set = new Set(consumeLineKeys()); let n = 0;
+    root.querySelectorAll('.s2-cons tbody tr[data-q]').forEach((tr) => {
+      if (tr.style.display === 'none') return;
+      const cb = tr.querySelector('input[data-cons]'); if (cb.checked === on) return;
+      cb.checked = on; tr.classList.toggle('is-cons', on); if (on) set.add(cb.dataset.cons); else set.delete(cb.dataset.cons); n++;
+    });
+    if (!n) { toast('Không có dòng nào cần đổi trong danh sách đang hiện.', 'review'); return; }
+    const hs = root.querySelector('#cons-erp').value;
+    save(set, `${on ? 'BẬT' : 'TẮT'} hàng loạt ${n} dòng (${hs === 'ALL' ? 'tất cả hệ' : 'hệ ' + hs})`);
+    refresh(); toast(`${on ? 'Đã chọn' : 'Đã bỏ chọn'} ${n} dòng tiêu hao. Chạy lại STEP 2 để áp dụng.`, 'review');
+  };
+  root.querySelector('#cons-all')?.addEventListener('click', () => bulk(true));
+  root.querySelector('#cons-none')?.addEventListener('click', () => bulk(false));
+  root.querySelector('#cons-erp')?.addEventListener('change', apply);
+  root.querySelector('#cons-q')?.addEventListener('input', apply);
+  apply();
 }
 VIEWS.step2 = (el) => {
   const st = statusAll(); const s2 = S.d.step2;
@@ -733,21 +813,7 @@ VIEWS.step2 = (el) => {
     <h2>Chi tiết phân bổ</h2><p class="muted"><label>Lọc theo rule: <select id="s2-rule"><option value="">Tất cả rule</option>${ruleSummary(s2).map((r) => `<option value="${esc(r.code)}">${esc(r.code)} · ${esc(r.label)}${r.used ? '' : ' (không phát sinh)'}</option>`).join('')}</select></label></p><div id="t-detail"></div>
     <h2>Kết quả theo lô PC-P (T và O)</h2><div id="t-pc"></div>` : emptyNote('Chưa có kết quả. Cần đủ PC-P-T, PC-P-O và STOCK OUT T/S/O rồi bấm Chạy STEP 2.')}
   </section>`;
-  el.querySelectorAll('[data-cons]').forEach((cb) => cb.addEventListener('change', (e) => {
-    if (!guardMutate()) { e.target.checked = !e.target.checked; return; }
-    const key = e.target.dataset.cons, on = e.target.checked;
-    const set = new Set(consumeLineKeys()); if (on) set.add(key); else set.delete(key);
-    S.d.consumeCfg = { lines: [...set].sort(), by: who(), at: nowISO() };
-    audit('STEP 2 - TIÊU HAO NVL', `${key} · ${on ? 'BẬT tiêu hao (Nợ 632 / Có 152)' : 'TẮT tiêu hao (phân bổ vào lô PC)'} · ${who()}`);
-    markDirty('consumeCfg', 'audit');
-    toast('Đã lưu lựa chọn tiêu hao. Chạy lại STEP 2 để áp dụng.', 'review');
-    render();
-  }));
-  const cq = el.querySelector('#cons-q');
-  if (cq) cq.addEventListener('input', () => {
-    const q = cq.value.trim().toLowerCase();
-    el.querySelectorAll('.s2-cons tbody tr[data-q]').forEach((tr) => { tr.style.display = !q || tr.dataset.q.includes(q) ? '' : 'none'; });
-  });
+  bindConsSection(el);
   if (s2) {
     const dc = STEP2_DETAIL_HEADERS.map((h, i) => ({ key: i, label: h, type: [4, 13, 15].includes(i) ? 'num' : i === 14 ? 'pct' : i === 3 ? 'int' : i === 16 ? 'status' : 'text', width: [11].includes(i) ? 260 : [17].includes(i) ? 180 : [4, 13, 15].includes(i) ? 140 : 110 }));
     const rs = ruleSummary(s2);
@@ -811,7 +877,7 @@ function bfFromRow(r) {
 }
 
 // ---------- 2B register ----------
-/** v1.14.31: khối tiêu dùng nội bộ (CONSUMPTION) – chọn dòng, lưu nháp, xác nhận, hoàn tác. Tách khỏi bảng rework. */
+/** v1.14.31 / v1.14.32: khối tiêu dùng nội bộ (CONSUMPTION) – tick, lưu nháp, xác nhận, hoàn tác. Dòng được tick / đã xác nhận được tô màu. */
 const cfgChecked = () => [...document.querySelectorAll('input[data-cfg-fg]:checked')].map((i) => i.dataset.cfgFg);
 function cfgSumText(root) {
   const boxes = [...root.querySelectorAll('input[data-cfg-fg]:checked')];
@@ -827,34 +893,37 @@ function consFgPanel(reg) {
   const fifoSum = confirmed.filter((r) => utxt(r.fifoStatus) === 'PASS').reduce((a, r) => a + num(r.fifoCost), 0);
   const dis = canEdit ? '' : 'disabled';
   const tr = (r) => {
-    const conf = consFgConfirmed(r);
-    const chk = conf ? '<span class="pill s-pass">ĐÃ XÁC NHẬN</span>' : `<input type="checkbox" data-cfg-fg="${esc(r.rid)}" data-qty="${num(r.issueQty)}" ${draftSet.has(r.rid) ? 'checked' : ''} ${dis} aria-label="Chọn ${esc(r.rid)}">`;
+    const conf = consFgConfirmed(r), on = draftSet.has(r.rid);
+    const chk = conf ? '<span class="pill s-pass">ĐÃ XÁC NHẬN</span>' : `<input type="checkbox" data-cfg-fg="${esc(r.rid)}" data-qty="${num(r.issueQty)}" ${on ? 'checked' : ''} ${dis} aria-label="Chọn ${esc(r.rid)}">`;
     const undo = conf && canEdit ? `<button class="btn ghost" type="button" data-act="cfg-fg-undo" data-rid="${esc(r.rid)}">Hoàn tác</button>` : '';
-    return `<tr data-q="${esc(`${r.rid} ${r.fg} ${r.fgName || ''}`.toLowerCase())}"><td>${chk}</td><td>${esc(r.rid)}</td><td>${fmtCell(r.issueDate, 'date')}</td><td>${esc(r.fg)}</td><td>${esc(r.fgName || '')}</td><td class="r">${fmtNum(num(r.issueQty))}</td><td class="r">${fmtNum(num(r.erpRef))}</td><td class="r">${conf ? fmtNum(num(r.fifoCost)) : '–'}</td><td>${conf ? pill(r.fifoStatus) : ''}</td><td>${undo}</td></tr>`;
+    return `<tr class="${conf ? 'is-done' : on ? 'is-cons' : ''}" data-q="${esc(`${r.rid} ${r.fg} ${r.fgName || ''}`.toLowerCase())}"><td class="c">${chk}</td><td>${esc(r.rid)}</td><td>${fmtCell(r.issueDate, 'date')}</td><td>${esc(r.fg)}</td><td>${esc(r.fgName || '')}</td><td class="r">${fmtNum(num(r.issueQty))}</td><td class="r">${fmtNum(num(r.erpRef))}</td><td class="r">${conf ? fmtNum(num(r.fifoCost)) : '–'}</td><td>${conf ? pill(r.fifoStatus) : ''}</td><td>${undo}</td></tr>`;
   };
-  return `<section class="cfg-fg" style="margin:8px 0 16px">
+  return `<section class="cons-card cfg-fg">
     <h2>Tiêu dùng nội bộ (632 / 155)</h2>
-    <p class="muted">FG xuất ra dùng nội bộ: không bán và không đi qua rework WIP (154). Tick dòng → nhập lý do → <b>Lưu nháp</b> (chỉ lưu danh sách, chưa đổi số liệu) hoặc <b>Xác nhận tiêu dùng nội bộ</b> (chuyển các dòng sang CONSUMPTION). Sau đó chạy <b>RUN FIFO (STEP 5.2)</b> để tính giá theo ngày xuất.</p>
+    <p class="muted">FG xuất ra dùng nội bộ: không bán và không đi qua rework WIP (154). Tick dòng → nhập lý do → <b>Lưu nháp</b> (chỉ lưu danh sách) hoặc <b>Xác nhận tiêu dùng nội bộ</b> (chuyển các dòng sang CONSUMPTION). Sau đó chạy <b>RUN FIFO (STEP 5.2)</b> để tính giá theo ngày xuất.</p>
     ${pending ? `<div class="alert review">${fmtNum(pending)} dòng tiêu dùng nội bộ chưa được tính giá – chạy RUN FIFO (STEP 5.2) để ghi Nợ 632 / Có 155.</div>` : ''}
     ${canEdit ? '' : '<div class="alert review">Kỳ đã đóng hoặc bạn không có quyền sửa – chỉ xem.</div>'}
-    <div class="kpis">${kpiN('Đã xác nhận (dòng)', confirmed.length)}${kpi('Giá FIFO đã tính (632 / 155)', fifoSum)}${kpiN('Đang tick (chưa xác nhận)', draftSet.size)}</div>
-    ${rows.length ? `<p><label>Lọc: <input type="search" id="cfg-q" placeholder="Rework ID, mã FG, tên…" style="min-width:260px"></label></p>
-    <div style="overflow:auto;max-height:440px;border:1px solid var(--rule)"><table class="cp"><thead><tr><th>Chọn</th><th>Rework ID</th><th>Ngày xuất</th><th>FG Code</th><th>Tên FG</th><th class="r">SL xuất</th><th class="r">ERP memo</th><th class="r">Giá FIFO (VND)</th><th>Trạng thái FIFO</th><th></th></tr></thead>
-    <tbody>${rows.map(tr).join('')}</tbody></table></div>` : emptyNote('Chưa có dòng FG nào đang hoạt động trong kỳ này để chọn tiêu dùng nội bộ.')}
-    <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px">
-      <label style="flex:1;min-width:260px">Lý do <input id="cfg-reason" value="${esc(draft.reason || '')}" ${dis} placeholder="Bắt buộc khi xác nhận (≥ 5 ký tự), ví dụ: Dùng làm mẫu thử nội bộ" style="width:100%"></label>
-      <span id="cfg-sum" class="muted"></span>
-      <button class="btn ghost" type="button" data-act="cfg-fg-save" ${dis}>Lưu nháp</button>
-      <button class="btn" type="button" data-act="cfg-fg-confirm" ${dis}>Xác nhận tiêu dùng nội bộ</button>
-    </div></section>`;
+    <div class="kpis">${kpiN('Đã xác nhận (dòng)', confirmed.length)}${kpi('Giá FIFO đã tính (632 / 155)', fifoSum)}</div>
+    ${rows.length ? `<div class="cons-bar">
+        <label class="grow">Tìm kiếm<input type="search" id="cfg-q" placeholder="Rework ID, mã FG, tên…"></label>
+        <span class="muted cons-vis" id="cfg-sum"></span></div>
+      <div class="cons-wrap"><table class="cp"><thead><tr><th class="c">Chọn</th><th>Rework ID</th><th>Ngày xuất</th><th>FG Code</th><th>Tên FG</th><th class="r">SL xuất</th><th class="r">ERP memo</th><th class="r">Giá FIFO (VND)</th><th>Trạng thái FIFO</th><th></th></tr></thead>
+      <tbody>${rows.map(tr).join('')}</tbody></table></div>
+      <div class="cons-bar cfg-act">
+        <label class="grow">Lý do<input id="cfg-reason" class="cfg-reason-in" value="${esc(draft.reason || '')}" ${dis} placeholder="Bắt buộc khi xác nhận (≥ 5 ký tự), ví dụ: Dùng làm mẫu thử nội bộ"></label>
+        <button class="btn ghost" type="button" data-act="cfg-fg-save" ${dis}>Lưu nháp</button>
+        <button class="btn" type="button" data-act="cfg-fg-confirm" ${dis}>Xác nhận tiêu dùng nội bộ</button>
+      </div>` : emptyNote('Chưa có dòng FG nào đang hoạt động trong kỳ này để chọn tiêu dùng nội bộ.')}
+  </section>`;
 }
 function bindConsFg(el) {
-  const sum = () => { const t = el.querySelector('#cfg-sum'); if (t) t.textContent = cfgSumText(el); };
-  el.querySelectorAll('input[data-cfg-fg]').forEach((cb) => cb.addEventListener('change', sum));
-  const q = el.querySelector('#cfg-q');
+  const root = el.querySelector('.cfg-fg'); if (!root) return;
+  const sum = () => { const t = root.querySelector('#cfg-sum'); if (t) t.textContent = cfgSumText(root); };
+  root.querySelectorAll('input[data-cfg-fg]').forEach((cb) => cb.addEventListener('change', () => { cb.closest('tr').classList.toggle('is-cons', cb.checked); sum(); }));
+  const q = root.querySelector('#cfg-q');
   if (q) q.addEventListener('input', () => {
     const t = q.value.trim().toLowerCase();
-    el.querySelectorAll('.cfg-fg tbody tr').forEach((row) => { row.style.display = !t || row.dataset.q.includes(t) ? '' : 'none'; });
+    root.querySelectorAll('tbody tr[data-q]').forEach((row) => { row.style.display = !t || row.dataset.q.includes(t) ? '' : 'none'; });
   });
   sum();
 }

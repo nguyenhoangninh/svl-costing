@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.32 (14/10/2026):** (1) STEP 2 · Tiêu hao NVL: dòng đã tick được **tô màu**; có ô **Phân hệ** (T / S / O), tìm kiếm, nút chọn / bỏ chọn tất cả dòng đang hiện; tick vẫn lưu ngay và cập nhật tại chỗ (không mất vị trí cuộn). (2) Bảng **thống kê theo phân hệ**: số dòng Stock Out NVL, dòng tiêu hao, giá trị, % tiêu hao, và số đã ghi 632 / 152 ở lần chạy STEP 2 gần nhất. (3) Tiêu đề bảng cố định khi cuộn. (4) STEP 2B · Khối tiêu dùng nội bộ: dòng tick / đã xác nhận được tô màu, tiêu đề cố định, thanh lý do và nút đặt phía trên bảng.
+
 > **v1.14.31 (14/10/2026):** (1) STEP 2B · Tiêu dùng nội bộ (632 / 155) có **khối riêng** phía trên bảng: tick dòng FG, nhập lý do, **Lưu nháp** (chỉ lưu danh sách) hoặc **Xác nhận tiêu dùng nội bộ** (chuyển sang CONSUMPTION, ghi người / giờ, audit). Dòng đã xác nhận có **Hoàn tác**. Không cần PC rework, FG đầu ra, ngày hoàn thành hay SL hoàn thành / hỏng. (2) Dropdown Rework Status ở bảng 2B và form 5B không còn nhận CONSUMPTION; mọi thao tác tiêu dùng nội bộ đi qua khối trên. (3) Khối báo số dòng đang chờ RUN FIFO (STEP 5.2) để ghi giá.
 
 > **v1.14.30 (14/10/2026):** (1) STEP 1 · Xác nhận bất thường tách **theo từng phần**: A (PC-P vs PC-M), B (SL ≠ 0 nhưng Total Cost = 0), C (số âm / sai kiểu). Mỗi phần có nút **Xác nhận** và **Xóa xác nhận** riêng; phần đổi danh sách sau khi xác nhận sẽ chuyển sang CHANGED và phải xác nhận lại. STEP 2 chỉ chạy khi cả ba phần đã xác nhận hoặc không còn bất thường. Bản xác nhận của v1.14.29 vẫn được nhận cho đúng danh sách cũ.
