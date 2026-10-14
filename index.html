@@ -576,6 +576,25 @@ details.cpd[open] > summary h2::before { transform: rotate(90deg); }
   .notice-head { padding: 14px; }
   .notice-tools { padding: 0 14px 10px; }
 }
+/* v1.14.49: responsive pass — phone forms wrap, wide screens scale the whole UI instead of stopping at 1480px */
+@media (max-width: 699px) {
+  form.inline { flex-wrap: wrap; align-items: stretch; }
+  form.inline input, form.inline select { min-width: 0 !important; max-width: 100%; width: 100%; box-sizing: border-box; }
+  form.inline label { flex: 1 1 100%; min-width: 0; }
+  form.inline .btn { width: 100%; justify-content: center; }
+  .row .btn { max-width: 100%; white-space: normal; }
+  .page { padding: 18px 16px 56px; }
+}
+@media (min-width: 1800px) {
+  .page { max-width: min(1900px, 100%); }
+}
+@media (min-width: 2200px) {
+  body { zoom: 1.35; }
+  .page { max-width: none; }
+}
+@media (min-width: 3000px) {
+  body { zoom: 1.7; }
+}
 </style>
 </head>
 <body>
