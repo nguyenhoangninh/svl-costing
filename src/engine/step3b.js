@@ -293,10 +293,20 @@ export function buildDetail(engDyn, inputDerived) {
 }
 
 /** STEP3B_BuildControl + reviewer snapshot restore + await-apply gates (STEP3B_V21_BUILD). */
+/** v1.14.34: FNV-1a 32-bit (hex, 8 ký tự). Dấu vân tay ngắn để so sánh thay đổi, không dùng cho bảo mật. */
+export function hashStr(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+
 export function buildControl(detail, inputDerived, oldControl) {
   const old = new Map();
   for (const r of (oldControl && oldControl.rows) || []) { const c = k(r.code); if (c) old.set(txt(r.period) + '|' + c, r); }
   const ag = new Map();
+  // v1.14.34 (ENH-01): dấu vân tay phân bổ theo từng PC của mỗi vật tư (PC, sản phẩm, ERP, tỷ lệ, SL, tiền).
+  // Quyết định cũ chỉ được giữ khi basis và phân bổ theo PC không đổi.
+  const fpm = new Map();
   for (const d of detail) {
     const key = k(d.code); if (!key) continue;
     const v = ag.get(key) || { n: 0, share: 0, qpc: 0, apc: 0, qdir: 0, adir: 0, blocks: 0, method: '' };
@@ -304,14 +314,18 @@ export function buildControl(detail, inputDerived, oldControl) {
     if (utxt(d.status).slice(0, 5) === 'BLOCK') v.blocks++;
     if (utxt(d.method) === 'ACTUAL_USAGE') v.method = 'ACTUAL_USAGE'; else if (!v.method) v.method = utxt(d.method);
     ag.set(key, v);
+    if (!fpm.has(key)) fpm.set(key, []);
+    fpm.get(key).push([txt(d.pc), txt(d.prod), txt(d.erp), num(d.share).toFixed(10), num(d.allocQty).toFixed(4), num(d.allocAmt).toFixed(2)].join('|'));
   }
   const rows = [];
+  let allocResets = 0;
   for (const r of inputDerived) {
     const key = r.key; if (!key) continue;
     const tq = num(r.basisQty), ta = num(r.basisAmt);
     const v = ag.get(key) || { n: 0, share: 0, qpc: 0, apc: 0, qdir: 0, adir: 0, blocks: 0, method: '' };
     let method = v.method || utxt(r.option) || 'METHOD REQUIRED';
     const dq = tq - v.qpc - v.qdir, da = ta - v.apc - v.adir;
+    const allocFp = hashStr((fpm.get(key) || []).slice().sort().join('#'));
     let stat = 'PASS';
     if (utxt(r.check) !== 'PASS') stat = 'BLOCK - INPUT';
     else if (method === 'METHOD REQUIRED') stat = 'BLOCK - METHOD';
@@ -321,12 +335,18 @@ export function buildControl(detail, inputDerived, oldControl) {
     else if (method !== 'DIRECT_632' && Math.abs(v.share - 1) > 0.000000001) stat = 'BLOCK - SHARE';
     let dec = '', note = '';
     const o = old.get(txt(r.period) + '|' + key);
-    if (o && Math.abs(num(o.basisQty) - tq) <= TOL_Q && Math.abs(num(o.basisAmt) - ta) <= TOL_A && utxt(o.method) === method) { dec = txt(o.decision); note = txt(o.note); }
+    const sameBasis = !!o && Math.abs(num(o.basisQty) - tq) <= TOL_Q && Math.abs(num(o.basisAmt) - ta) <= TOL_A && utxt(o.method) === method;
+    if (sameBasis && o.allocFp !== undefined && o.allocFp === allocFp) { dec = txt(o.decision); note = txt(o.note); }
+    else if (sameBasis && utxt(o.decision)) {
+      // Quyết định cũ không còn áp dụng: phân bổ theo PC đã đổi, hoặc lần BUILD trước chưa có dấu vân tay → duyệt lại
+      allocResets++;
+      note = 'Quyết định trước không còn áp dụng: phân bổ theo PC đã đổi (hoặc chưa có dấu vân tay) – duyệt lại';
+    }
     const D = utxt(dec);
     const gate = stat !== 'PASS' ? stat : D === 'APPROVE' ? 'APPROVED - AWAIT APPLY' : D === 'HOLD' ? 'HOLD' : D === 'REVIEW' ? 'REVIEW' : 'REVIEW REQUIRED';
-    rows.push({ active: 'Y', period: r.period, code: key, desc: r.desc, erp: r.erp, basisQty: tq, basisAmt: ta, method, nDetail: v.n, share: v.share, qpc: v.qpc, apc: v.apc, qdir: v.qdir, adir: v.adir, qRouted: v.qpc + v.qdir, aRouted: v.apc + v.adir, dq, da, methodReq: method === 'METHOD REQUIRED' ? 1 : 0, blocks: v.blocks, status: stat, decision: dec, note, gate, wipPostQty: null, wipPostAmt: null, pcPostQty: null, pcPostAmt: null, postCheck: 'NOT POSTED' });
+    rows.push({ active: 'Y', period: r.period, code: key, desc: r.desc, erp: r.erp, basisQty: tq, basisAmt: ta, method, nDetail: v.n, share: v.share, qpc: v.qpc, apc: v.apc, qdir: v.qdir, adir: v.adir, qRouted: v.qpc + v.qdir, aRouted: v.apc + v.adir, dq, da, methodReq: method === 'METHOD REQUIRED' ? 1 : 0, blocks: v.blocks, status: stat, decision: dec, note, gate, allocFp, wipPostQty: null, wipPostAmt: null, pcPostQty: null, pcPostAmt: null, postCheck: 'NOT POSTED' });
   }
-  return { rows, builtAt: nowISO(), appliedAt: oldControl ? oldControl.appliedAt || '' : '', noAdj: oldControl ? oldControl.noAdj || null : null };
+  return { rows, builtAt: nowISO(), appliedAt: oldControl ? oldControl.appliedAt || '' : '', noAdj: oldControl ? oldControl.noAdj || null : null, allocResets };
 }
 
 /** Reviewer edit: keep gate text in sync like the sheet does between BUILD and APPLY. */
@@ -371,6 +391,7 @@ export function applyControl(control, step3, reason) {
       if (!ttxt(r.note)) r.note = 'NO ADJ: ' + reason;
       if (utxt(r.status) === 'PASS') r.gate = dec === 'HOLD' ? 'HOLD' : 'REVIEW';
       r.wipPostQty = r.wipPostAmt = r.pcPostQty = r.pcPostAmt = null; r.postCheck = 'NOT POSTED';
+      r.appliedDecision = utxt(r.decision); // v1.14.34 (ENH-03): quyết định đã được APPLY
     }
     control.appliedAt = nowISO(); control.noAdj = { at: control.appliedAt, reason };
     return { mode: 'NO_ADJ', nHold: nHold + nBlank, nReview, nBlank };
@@ -398,8 +419,34 @@ export function applyControl(control, step3, reason) {
       r.postCheck = Math.abs(r.wipPostQty + r.pcPostQty) <= TOL_Q && Math.abs(r.wipPostAmt + r.pcPostAmt) <= TOL_A ? 'POSTED PASS' : 'POST CHECK';
     }
   }
+  for (const r of rows) r.appliedDecision = utxt(r.decision); // v1.14.34 (ENH-03): quyết định đã được APPLY
   control.appliedAt = nowISO(); control.noAdj = null;
   return { mode: 'APPLIED', applied: toApply.length, direct632 };
+}
+
+/**
+ * v1.14.34 (ENH-03): cổng STEP 3B dùng chung cho STEP 4, STEP 5 và CLOSE. Trả về '' khi đạt, hoặc lý do đầu tiên.
+ * Quy tắc: HOLD không gỡ được BLOCK; mọi dòng phải có quyết định; APPROVE phải đã APPLY;
+ * quyết định không được đổi sau lần APPLY gần nhất; đóng không điều chỉnh cần lý do đủ dài.
+ */
+export function step3BGateReason(control, { forClose = false, reg632 = [] } = {}) {
+  if (!control || !control.builtAt) return 'STEP 3B chưa BUILD.';
+  const rows = control.rows || [];
+  const bad = rows.filter((r) => utxt(r.status) !== 'PASS');
+  if (bad.length) return `STEP 3B còn ${bad.length} vật tư CONTROL chưa PASS (${bad.slice(0, 5).map((r) => r.code).join(', ')}). HOLD không gỡ được BLOCK: sửa nguyên nhân rồi BUILD lại.`;
+  const blank = rows.filter((r) => !utxt(r.decision)).length;
+  if (blank) return `STEP 3B còn ${blank} dòng chưa có quyết định (APPROVE / HOLD / REVIEW).`;
+  const wait = rows.filter((r) => r.gate === 'APPROVED - AWAIT APPLY').length;
+  if (wait) return `STEP 3B có ${wait} dòng đã APPROVE nhưng chưa APPLY.`;
+  if (!control.appliedAt || control.appliedAt < control.builtAt) return 'STEP 3B chưa APPLY sau lần BUILD gần nhất (2 - APPLY & SYNC).';
+  const changed = rows.filter((r) => utxt(r.decision) !== utxt(r.appliedDecision)).length;
+  if (changed) return `STEP 3B: ${changed} dòng đổi quyết định sau lần APPLY – bấm 2 - APPLY & SYNC lại.`;
+  if (control.noAdj && ttxt(control.noAdj.reason).length < 5) return 'STEP 3B đóng không điều chỉnh: lý do quá ngắn (tối thiểu 5 ký tự).';
+  if (forClose) {
+    const p632 = (reg632 || []).filter((r) => r.record === 'READY FOR ACCOUNTING' || r.record === 'PENDING RECORD INFO').length;
+    if (p632) return `STEP 3B còn ${p632} bút toán DIRECT_632 chưa ghi FAST (cột Record phải là RECORDED).`;
+  }
+  return '';
 }
 
 /** B2_Build632 — DIRECT_632 accounting register (record fields kept when the source is unchanged). */

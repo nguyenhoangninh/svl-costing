@@ -73,8 +73,10 @@ function step4Freshness(S, d3b) {
   const same = c.period === p.period && c.latestImport === p.latestImport && c.step2RunAt === p.step2RunAt && c.step3RunAt === p.step3RunAt && c.dbSavedAt === p.dbSavedAt && c.pmUpdatedAt === p.pmUpdatedAt
     && c.glPeriod === p.glPeriod && c.fx === p.fx && c.gl622 === p.gl622 && c.gl627 === p.gl627 && Math.abs(c.direct622 - p.direct622) <= 1 && Math.abs(c.direct627 - p.direct627) <= 1 && c.activeDirect === p.activeDirect && Math.abs(c.posted3B - p.posted3B) <= 1
     && (p.directKey === undefined || c.directKey === p.directKey); // snapshots saved before v1.7 have no key
-  return same ? 'CURRENT' : 'OUTDATED - RERUN REQUIRED';
+  return same && posted3BFresh(c, p) ? 'CURRENT' : 'OUTDATED - RERUN REQUIRED';
 }
+/** v1.14.34 (ENH-02): khóa phân bổ 3B theo từng PC phải khớp lúc RUN; snapshot cũ (không có khóa) = OUTDATED. */
+export const posted3BFresh = (c, p) => p.posted3BKey !== undefined && c.posted3BKey === p.posted3BKey;
 
 // ======================= small editable list =======================
 function editList(el, cfg) {
@@ -197,10 +199,10 @@ export function do3bBuild() {
   w.basis = B.basisOf(w);
   const r = B.runBuild({ erpMap: S.d.erpMap, input: w.input, control: w.control, reg632: w.reg632, basis: w.basis }, { step3: S.d.step3, step2: S.d.step2, datasets: S.d.datasets, period: S.period });
   S.d.erpMap = r.erpMap; Object.assign(w, { engine: r.engine, detail: r.detail, control: r.control, reg632: r.reg632 });
-  A.audit('STEP 3B - BUILD', `Basis=${w.basis}; ZeroValue=${(r.engine.zeroValue || []).map((z) => z.key).join(',') || '-'}; Usage=${r.engine.nUse}; NoUsage=${r.engine.nNo}; Engine=${r.engine.rows.length}; Detail=${r.detail.length} · ${r.mapMsg}`);
+  A.audit('STEP 3B - BUILD', `Basis=${w.basis}; ZeroValue=${(r.engine.zeroValue || []).map((z) => z.key).join(',') || '-'}; Usage=${r.engine.nUse}; NoUsage=${r.engine.nNo}; Engine=${r.engine.rows.length}; Detail=${r.detail.length}; AllocReset=${r.control.allocResets || 0} · ${r.mapMsg}`);
   A.markDirty('wipadj', 'erpMap', 'audit');
   const zv = r.engine.zeroValue || [];
-  A.toast(`BUILD xong: ${r.detail.length} dòng detail, ${r.control.rows.filter((x) => x.status === 'PASS').length}/${r.control.rows.length} vật tư PASS. ${r.mapMsg}${zv.length ? ` · ${zv.length} vật tư giá trị 0 (PC-M & WIP = 0 VND) chia theo SL, ghi sổ 0 VND: ${zv.map((z) => z.key).join(', ')}.` : ''}`, 'pass');
+  A.toast(`${r.control.allocResets ? `[${r.control.allocResets} quyết định cũ đã đặt lại – phân bổ theo PC đã đổi] ` : ''}BUILD xong: ${r.detail.length} dòng detail,${r.control.rows.filter((x) => x.status === 'PASS').length}/${r.control.rows.length} vật tư PASS. ${r.mapMsg}${zv.length ? ` · ${zv.length} vật tư giá trị 0 (PC-M & WIP = 0 VND) chia theo SL, ghi sổ 0 VND: ${zv.map((z) => z.key).join(', ')}.` : ''}`, 'pass');
 }
 export function do3bApply() {
   const S = A.S; const w = S.d.wipadj;
@@ -217,12 +219,9 @@ export function do3bApply() {
   if (res.mode === 'STOPPED') { A.toast(res.message, 'block'); A.render(); return; }
   const inD = B.deriveInput(w.input, S.d.erpMap, S.d.step3, S.period);
   w.reg632 = B.build632(w.control, inD, w.reg632);
-  // V3_RefreshPCAndStep4: final layer is live; refresh the Step 4 3B snapshot so Step 4 stays CURRENT.
+  // v1.14.34 (ENH-02): KHÔNG đồng bộ snapshot Step 4 sau APPLY. Nếu phân bổ 3B đổi (kể cả khi tổng không đổi)
+  // thì posted3BKey khác snapshot → Step 4, Step 5 và FG History chuyển OUTDATED và phải chạy lại.
   const D = derive(S).d3b;
-  if (S.d.step4 && S.d.step4.snap) {
-    const before = S.d.step4.snap.posted3B; S.d.step4.snap.posted3B = D.engPosted; S.d.step4.syncAt = nowISO();
-    S.d.step4.finalChanged = Math.abs(before - D.engPosted) > 1;
-  }
   A.audit(res.mode === 'NO_ADJ' ? 'STEP 3B - CLOSED WITH NO ADJUSTMENT' : 'STEP 3B - APPLY & SYNC', res.mode === 'NO_ADJ' ? `HOLD=${res.nHold}; REVIEW=${res.nReview}; lý do: ${w.control.noAdj.reason}` : `Applied=${res.applied}; DIRECT_632=${res.direct632}; PC adj=${A.fmtNum(D.engPosted)}`);
   A.markDirty('wipadj', 'step4', 'audit');
   A.toast(res.mode === 'NO_ADJ' ? 'STEP 3B đã đóng kỳ, không điều chỉnh WIP.' : `APPLY xong: ${res.applied} vật tư, điều chỉnh vào PC ${A.fmtNum(D.engPosted)} VND.`, 'pass');
@@ -520,16 +519,8 @@ export function threeBBlock(S, d3b, { forClose = false } = {}) {
   const ctl = w.control;
   if (!ctl || !ctl.builtAt) return 'STEP 3B chưa BUILD.';
   if ((d3b && d3b.buildStale) || ctl.builtAt < d.step3.runAt) return 'STEP 3B: INPUT / ERP map / STEP 3A đổi sau BUILD – BUILD lại.';
-  const rows = ctl.rows || [];
-  const blank = rows.filter((r) => !ttxt(r.decision)).length;
-  if (blank) return `STEP 3B còn ${blank} dòng chưa có quyết định (APPROVE / HOLD / REVIEW).`;
-  const wait = rows.filter((r) => r.gate === 'APPROVED - AWAIT APPLY').length;
-  if (wait) return `STEP 3B có ${wait} dòng đã APPROVE nhưng chưa APPLY.`;
-  if (forClose) {
-    const p632 = (w.reg632 || []).filter((r) => r.record === 'READY FOR ACCOUNTING' || r.record === 'PENDING RECORD INFO').length;
-    if (p632) return `STEP 3B còn ${p632} bút toán DIRECT_632 chưa ghi FAST (cột Record phải là RECORDED).`;
-  }
-  return '';
+  // v1.14.34 (ENH-03): một cổng dùng chung cho STEP 4, STEP 5 và CLOSE (xem B.step3BGateReason)
+  return B.step3BGateReason(ctl, { forClose, reg632: w.reg632 });
 }
 export function directApprovalBlock(S) {
   const d = S.d, active = (d.directAdj || []).filter((r) => utxt(r.active) === 'Y');

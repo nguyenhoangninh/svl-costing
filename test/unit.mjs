@@ -589,6 +589,59 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('3B HOLD must not bypass a real BLOCK', applyControl(bad, step3, 'reason').mode, 'STOPPED');
 }
 
+// ---- v1.14.34 Wave 1 (audit ENH-01/02/03): approval bound to the PC allocation; Step 4 freshness key; one STEP 3B gate
+{
+  const B3 = await import('../src/engine/step3b.js');
+  const PH = await import('../src/views/phase2.js');
+  const period = P2, code = '322936';
+  const H = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
+  const pc = Array.from({ length: 58 }, (_, i) => ({ erp: 'O', pcNo: `PC-${i + 1}`, prod: `FG-${i + 1}`, name: 'Label', rmIncl: 1000, rowIdx: i }));
+  const ds = { 'PC-M-O': { header: H, rows: pc.map((p, i) => [p.pcNo, p.prod, p.name, code, 1 + i / 10, i % 13 === 0 ? 0 : i + 1]) } };
+  const input = [{ code, desc: 'Woven label', basisQty: -690.84, basisAmt: 501339.63, option: 'ERP_AMOUNT' }];
+  const erpMap = { rows: [{ code, erp: 'O', review: 'OK', override: '' }] };
+  const step2 = { period, runAt: '2026-08-31T00:00:00Z', pc };
+  const step3 = { period, runAt: '2026-08-31T01:00:00Z', rows: [{ code, name: 'Woven label', closingQty: -690.84, closingAmt: 501339.63, status: 'CHECK NEGATIVE' }] };
+  const r = runBuild({ erpMap, input, control: null, reg632: [], basis: 'AMOUNT' }, { period, step2, step3, datasets: ds });
+  const inD = () => B3.deriveInput(input, r.erpMap, step3, period);
+  const ctl0 = r.control; const row0 = () => ctl0.rows.find((x) => x.code === code);
+  const alloc = r.detail.filter((d) => d.code === code && Number(d.allocAmt) > 0);
+  eq('ENH-01 precondition: 322936 PASS with at least two allocated PC lines', [row0().status, alloc.length >= 2], ['PASS', true]);
+  B3.setDecision(row0(), 'APPROVE');
+  const again = B3.buildControl(r.detail, inD(), ctl0);
+  eq('ENH-01: re-BUILD with identical allocation keeps APPROVE', [again.rows.find((x) => x.code === code).decision, again.allocResets], ['APPROVE', 0]);
+  const moved = r.detail.map((d) => ({ ...d }));
+  const ia = moved.findIndex((d) => d.code === code && d.pc === alloc[0].pc), ib = moved.findIndex((d) => d.code === code && d.pc === alloc[1].pc);
+  moved[ia].allocAmt = Number(moved[ia].allocAmt) + 100; moved[ib].allocAmt = Number(moved[ib].allocAmt) - 100;
+  const after = B3.buildControl(moved, inD(), ctl0);
+  const ra = after.rows.find((x) => x.code === code);
+  eq('ENH-01: moving 100 VND between PC lines (total unchanged) resets APPROVE', [ra.status, ra.decision, after.allocResets, /không còn áp dụng/.test(ra.note)], ['PASS', '', 1, true]);
+  const legacy = { ...ctl0, rows: ctl0.rows.map(({ allocFp, ...rest }) => rest) };
+  const lg = B3.buildControl(r.detail, inD(), legacy);
+  eq('ENH-01: a control saved before the fingerprint is re-reviewed once', [lg.rows.find((x) => x.code === code).decision, lg.allocResets], ['', 1]);
+
+  eq('ENH-02: same per-PC posting key stays CURRENT', PH.posted3BFresh({ posted3BKey: 'k1' }, { posted3BKey: 'k1' }), true);
+  eq('ENH-02: a re-allocation between PCs is OUTDATED even with the same total', PH.posted3BFresh({ posted3BKey: 'k2' }, { posted3BKey: 'k1' }), false);
+  eq('ENH-02: a Step 4 snapshot without the key is OUTDATED', PH.posted3BFresh({ posted3BKey: 'k1' }, {}), false);
+
+  const okCtl = (over = {}) => ({ builtAt: '2026-10-14T10:00:00Z', appliedAt: '2026-10-14T10:05:00Z', noAdj: null, rows: [{ code: 'A', status: 'PASS', decision: 'APPROVE', appliedDecision: 'APPROVE', gate: 'READY TO POST' }], ...over });
+  eq('ENH-03 gate: applied, all PASS → no reason to stop', B3.step3BGateReason(okCtl()), '');
+  eq('ENH-03 gate: a BLOCK row held is still BLOCK', /HOLD không gỡ được BLOCK/.test(B3.step3BGateReason(okCtl({ rows: [{ code: 'B', status: 'BLOCK - DETAIL', decision: 'HOLD', appliedDecision: 'HOLD', gate: 'BLOCK - DETAIL' }] }))), true);
+  eq('ENH-03 gate: HOLD everything but no APPLY after BUILD → blocked', /chưa APPLY/.test(B3.step3BGateReason(okCtl({ appliedAt: '2026-10-14T09:00:00Z', rows: [{ code: 'A', status: 'PASS', decision: 'HOLD', gate: 'HOLD' }] }))), true);
+  eq('ENH-03 gate: decision changed after APPLY → blocked', /đổi quyết định sau lần APPLY/.test(B3.step3BGateReason(okCtl({ rows: [{ code: 'A', status: 'PASS', decision: 'HOLD', appliedDecision: 'APPROVE', gate: 'HOLD' }] }))), true);
+  eq('ENH-03 gate: no-adjustment reason shorter than 5 characters → blocked', /tối thiểu 5/.test(B3.step3BGateReason(okCtl({ noAdj: { reason: 'abc' } }))), true);
+  eq('ENH-03 gate: DIRECT_632 not recorded blocks CLOSE only', [B3.step3BGateReason(okCtl(), { forClose: true, reg632: [{ record: 'READY FOR ACCOUNTING' }] }) !== '', B3.step3BGateReason(okCtl(), { reg632: [{ record: 'READY FOR ACCOUNTING' }] })], [true, '']);
+
+  const ap = B3.applyControl(ctl0, step3, '');
+  eq('ENH-03: APPLY records the applied decision on every row', [ap.mode, ctl0.rows.every((x) => x.appliedDecision === x.decision)], ['APPLIED', true]);
+  eq('ENH-03: after APPLY the gate passes for an approved PASS row', B3.step3BGateReason(ctl0), '');
+  B3.setDecision(row0(), 'HOLD');
+  eq('ENH-03: switching APPROVE → HOLD after APPLY is caught by the gate', /đổi quyết định sau lần APPLY/.test(B3.step3BGateReason(ctl0)), true);
+
+  const mkS = (control) => ({ d: { step3: { period, runAt: '2026-08-31T00:30:00Z', rows: [] }, wipadj: { input: [{ code }], control } } });
+  eq('ENH-03 STEP 4 gate: CONTROL BLOCK cannot be bypassed by HOLD', /HOLD không gỡ được BLOCK/.test(PH.threeBBlock(mkS({ builtAt: '2026-08-31T01:00:00Z', appliedAt: '2026-08-31T02:00:00Z', rows: [{ code, status: 'BLOCK - DETAIL', decision: 'HOLD', appliedDecision: 'HOLD', gate: 'BLOCK - DETAIL' }] }), null)), true);
+  eq('ENH-03 STEP 4 gate: applied PASS control → open', PH.threeBBlock(mkS({ builtAt: '2026-08-31T01:00:00Z', appliedAt: '2026-08-31T02:00:00Z', noAdj: null, rows: [{ code, status: 'PASS', decision: 'HOLD', appliedDecision: 'HOLD', gate: 'HOLD' }] }), null), '');
+}
+
 // ---- v1.14.18 PC-M gate at IMPORT: negative / zero-cost issue lines block the file (STEP 1), footers are ignored
 {
   const HP = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Quantity', 'Total Cost'];
