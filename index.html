@@ -576,6 +576,11 @@ details.cpd[open] > summary h2::before { transform: rotate(90deg); }
   .notice-head { padding: 14px; }
   .notice-tools { padding: 0 14px 10px; }
 }
+/* v1.14.50: STEP 5 checkpoint detail panels (07, 08) — wide tables scroll inside the panel */
+.cp-detail { margin: 10px 0 4px; }
+.cp-detail > summary { font-weight: 600; font-size: 13.5px; padding: 4px 0; }
+.cp-scroll { overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--rule-2); border-radius: var(--radius); }
+.cp-scroll table.cp { margin: 0; }
 /* v1.14.49: responsive pass — phone forms wrap, wide screens scale the whole UI instead of stopping at 1480px */
 @media (max-width: 699px) {
   form.inline { flex-wrap: wrap; align-items: stretch; }

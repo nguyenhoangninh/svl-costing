@@ -164,6 +164,42 @@ export function derive(S, p2) {
   return { res, fresh, stale, dups, hg, recon, controls, closeReason, tie, retStale: rStale };
 }
 
+/** v1.14.50: chi tiết checkpoint 07 (SL FIFO = SL bán đủ điều kiện) và 08 (sản phẩm thiếu FG), để đối chiếu từng dòng. */
+function step5Detail(res, rows) {
+  if (!res) return '';
+  const T = res.totals || {}, EPS = 0.0005;
+  const r07 = rows.find((r) => r.no === '07'), r08 = rows.find((r) => r.no === '08');
+  const dateOf = (v) => (typeof v === 'number' && v > 0 ? serialToISO(v) : '');
+  const nf = (n) => Number(n || 0).toLocaleString('vi-VN'); // counts show 0, not the dash used for empty amounts
+  const qty = (v) => A.fmtNum(num(v), 3);
+  // 07 — sale lines whose FIFO quantity differs from the quantity that must be covered
+  const bad = (res.sales || []).filter((s) => s.fin === 'FIFO COGS' && Math.abs(num(s.qty) - num(s.fq)) > EPS);
+  const sumGap = bad.reduce((a, s) => a + (num(s.qty) - num(s.fq)), 0);
+  const cap = (n) => (n > 500 ? `<p class="muted">Hiển thị 500 / ${A.fmtNum(n)} dòng đầu, sắp theo chênh lệch.</p>` : '');
+  const d07 = bad.slice().sort((a, b) => (num(b.qty) - num(b.fq)) - (num(a.qty) - num(a.fq))).slice(0, 500);
+  const part07 = `<details class="cp-detail"><summary>Chi tiết 07 · ${nf(bad.length)} dòng bán có SL FIFO ≠ SL cần</summary>
+    <p class="muted">Kỳ vọng = Σ SL bán đủ điều kiện (${qty(T.eligQ)}) − hàng trả lại (${qty(T.retQ)}) = <b>${qty(num(T.eligQ) - num(T.retQ))}</b>.
+      Thực tế = Σ SL FIFO đã xuất (${qty(num(T.cogsQ) - num(T.consQ))}) = SL FIFO − tiêu dùng nội bộ (${qty(T.consQ)}).
+      Tổng chênh các dòng bán bên dưới: <b>${qty(sumGap)}</b>. Chênh checkpoint = hàng trả lại − tổng chênh dòng = ${qty(num(T.retQ) - sumGap)}.</p>
+    ${cap(bad.length)}
+    <div class="cp-scroll"><table class="cp"><thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Khách hàng</th><th>Mã SP</th><th class="r">SL bán (đủ điều kiện)</th><th class="r">SL FIFO đã xuất</th><th class="r">Chênh</th><th>Loại</th></tr></thead><tbody>
+      ${d07.map((s) => `<tr><td>${esc(s.inv || '')}</td><td>${esc(dateOf(s.date))}</td><td>${esc(s.cust || '')}</td><td>${esc(s.prod || '')}</td><td class="r">${qty(s.qty)}</td><td class="r">${qty(s.fq)}</td><td class="r">${qty(num(s.qty) - num(s.fq))}</td><td>${esc(s.book || '')}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Không có dòng lệch.</td></tr>'}
+    </tbody></table></div></details>`;
+  // 08 — shortages recorded by the FIFO run (sale lines, FG consumption, or whole products in PRORATA mode)
+  const list = res.shortList || [];
+  const prods = new Set(list.map((x) => x.prod)).size;
+  const kindLbl = { SALE: 'Dòng bán', CONS: 'Tiêu dùng nội bộ', PRODUCT: 'Cả sản phẩm' };
+  const stale = r08 && num(r08.actual) > 0 && list.length === 0;
+  const part08 = `<details class="cp-detail" ${r08 && num(r08.actual) > 0 ? 'open' : ''}><summary>Chi tiết 08 · ${nf(prods)} sản phẩm thiếu FG (${nf(list.length)} dòng)</summary>
+    ${stale ? '<p class="alert review">Kết quả này chưa có chi tiết. Bấm RUN FIFO COGS để tạo lại.</p>' : ''}
+    <p class="muted">Thiếu = SL cần − SL FIFO được. Mỗi dòng là một lần FIFO không đủ lớp FG dated trước hoặc bằng ngày của dòng bán / phiếu xuất.</p>
+    ${cap(list.length)}
+    <div class="cp-scroll"><table class="cp"><thead><tr><th>Loại</th><th>Mã SP</th><th>Hóa đơn / phiếu</th><th>Ngày</th><th>Khách hàng</th><th class="r">SL cần</th><th class="r">SL FIFO được</th><th class="r">Thiếu</th><th>Ghi chú</th></tr></thead><tbody>
+      ${list.slice(0, 500).map((x) => `<tr><td>${esc(kindLbl[x.kind] || x.kind)}</td><td>${esc(x.prod || '')}</td><td>${esc(x.kind === 'SALE' ? x.inv || '' : x.ref || '')}</td><td>${esc(dateOf(x.date))}</td><td>${esc(x.cust || '')}</td><td class="r">${qty(x.need)}</td><td class="r">${qty(x.fifo)}</td><td class="r">${qty(x.short)}</td><td class="muted">${esc(x.note || '')}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">Không có sản phẩm thiếu FG.</td></tr>'}
+    </tbody></table></div></details>`;
+  return (r07 ? part07 : '') + (r08 ? part08 : '');
+}
+
 /** 00_CONTROL_CENTER rows 119..136 — STEP 5 checkpoints. */
 function step5Controls(S, x) {
   const d = S.d; const { res, recon, hg, fl } = x;
@@ -366,7 +402,7 @@ export function viewFIFO(el) {
     ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn bán ra (FIFO)', T.cogsA + num(T.retA), true)}${res.withReturns ? A.kpi('Giảm giá vốn hàng trả lại (5R)', -num(T.retA)) + A.kpi('Giá vốn thuần (632)', T.cogsA, true) : ''}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
     ${res && D5.fresh === 'CURRENT' && D5.retStale ? `<div class="alert review"><b>Bước tiếp: STEP 5R.</b> Kết quả 5.2 chỉ gồm bán hàng. Kỳ có ${salesReturnsInPeriod(S).length} dòng hàng bán bị trả lại – chạy riêng ở <a href="#salesreturn">màn hình 5R</a> (${esc(D5.retStale)}).</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
-    <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}</details>
+    <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}${step5Detail(res, c.rows)}</details>
     ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
     <div id="t5"></div></section>`;
   const modeSel = el.querySelector('#s5-mode');
