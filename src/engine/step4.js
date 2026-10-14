@@ -19,10 +19,13 @@ const yyyymmdd = (serial) => { const d = serialToYMD(serial); return `${d.y}${St
 const fmt4 = (x) => x.toFixed(4);
 
 // ======================= SALES =======================
-export const SALES_FIELDS = ['invDate', 'month', 'customer', 'product', 'prodName', 'fx', 'qty', 'unitPrice', 'amtUSD', 'amtVND', 'remark', 'invNo', 'lineNo', 'tranType'];
-export const SALES_HEADERS = ['Invoice Date', 'Month', 'Customer', 'Product Number', 'Product Name', 'Exchange Rate', 'Quantity', 'Unit Price (USD)', 'Amount (USD)', 'Amount (VND)', 'Remark', 'SI Invoice No.', 'Invoice Line No.', 'Transaction Type'];
+export const SALES_FIELDS = ['invDate', 'month', 'customer', 'product', 'prodName', 'fx', 'qty', 'unitPrice', 'amtUSD', 'amtVND', 'remark', 'invNo', 'lineNo', 'tranType', 'edNo', 'provRev'];
+// v1.14.57: ED Number (số tờ khai xuất khẩu) and Provision Reversal (hoàn nhập dự phòng) are carried with the line for reference and shown in Sales_COGS
+export const SALES_HEADERS = ['Invoice Date', 'Month', 'Customer', 'Product Number', 'Product Name', 'Exchange Rate', 'Quantity', 'Unit Price (USD)', 'Amount (USD)', 'Amount (VND)', 'Remark', 'SI Invoice No.', 'Invoice Line No.', 'Transaction Type', 'ED Number', 'Provision Reversal'];
+/** Positions of the workbook sheets 04_SALES_IMPORT / 04_SALES_DATA (columns A..N); later fields are web-only. */
+export const SALES_WB_FIELDS = SALES_FIELDS.slice(0, 14);
 const normH = (s) => txt(s).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-const ALIAS = { PRODUCTNUMBER: ['PRODUCTCODE', 'ITEMCODE'], PRODUCTNAME: ['ITEMNAME', 'DESCRIPTION'], EXCHANGERATE: ['FXRATE', 'RATE'], QUANTITY: ['QTY', 'SALESQTY'], UNITPRICEUSD: ['UNITPRICE', 'SELLINGPRICEUSD'], AMOUNTUSD: ['USDAMOUNT', 'REVENUEUSD'], AMOUNTVND: ['VNDAMOUNT', 'REVENUEVND'], SIINVOICENO: ['INVOICENO', 'SALESINVOICENO', 'SIINVOICE'], INVOICELINENO: ['LINENO', 'INVOICELINE'], TRANSACTIONTYPE: ['TRANTYPE', 'TYPE'] , BILLDATE: ['BLDATE', 'BOLDATE', 'BILLOFLADINGDATE', 'NGYBILL', 'SHIPDATE', 'SHIPMENTDATE', 'ONBOARDDATE', 'FOBDATE'], ORIGINALINVOICENO: ['ORIGINALINVOICE', 'ORIGINVOICE', 'REFINVOICE', 'REFINVOICENO', 'ORIGINALSIINVOICENO', 'HOADONGOC']};
+const ALIAS = { PRODUCTNUMBER: ['PRODUCTCODE', 'ITEMCODE'], PRODUCTNAME: ['ITEMNAME', 'DESCRIPTION'], EXCHANGERATE: ['FXRATE', 'RATE'], QUANTITY: ['QTY', 'SALESQTY'], UNITPRICEUSD: ['UNITPRICE', 'SELLINGPRICEUSD'], AMOUNTUSD: ['USDAMOUNT', 'REVENUEUSD'], AMOUNTVND: ['VNDAMOUNT', 'REVENUEVND'], SIINVOICENO: ['INVOICENO', 'SALESINVOICENO', 'SIINVOICE'], INVOICELINENO: ['LINENO', 'INVOICELINE'], TRANSACTIONTYPE: ['TRANTYPE', 'TYPE'], EDNUMBER: ['EDNO', 'ED', 'EXPORTDECLARATIONNO', 'EXPORTDECLARATION'], PROVISIONREVERSAL: ['PROVREVERSAL', 'PROVISIONREVERSALVND'] , BILLDATE: ['BLDATE', 'BOLDATE', 'BILLOFLADINGDATE', 'NGYBILL', 'SHIPDATE', 'SHIPMENTDATE', 'ONBOARDDATE', 'FOBDATE'], ORIGINALINVOICENO: ['ORIGINALINVOICE', 'ORIGINVOICE', 'REFINVOICE', 'REFINVOICENO', 'ORIGINALSIINVOICENO', 'HOADONGOC']};
 function salesCol(header, canonical) {
   const c = normH(canonical);
   for (let i = 0; i < header.length; i++) { const n = normH(header[i]); if (n === c || (ALIAS[c] && ALIAS[c].includes(n))) return i; }
@@ -30,7 +33,7 @@ function salesCol(header, canonical) {
 }
 
 /** STEP4_Import_Sales_Revenue: find the sales table in any sheet, return staging rows. */
-const SALES_NUM_FIELDS = ['qty', 'unitPrice', 'amtUSD', 'amtVND', 'fx'];
+const SALES_NUM_FIELDS = ['qty', 'unitPrice', 'amtUSD', 'amtVND', 'fx', 'provRev'];
 export function importSales(sheets, fileName, mode, period) {
   if (mode !== 'MONTHLY' && mode !== 'YTD') throw new Error('Chế độ import phải là MONTHLY hoặc YTD.');
   let ws = null, hdr = -1;
@@ -43,7 +46,7 @@ export function importSales(sheets, fileName, mode, period) {
   }
   if (!ws) throw new Error('Không tìm thấy sheet doanh thu có Invoice Date, Product Number, Quantity và Amount (USD).');
   const h = ws[hdr];
-  const col = Object.fromEntries([['invDate', 'Invoice Date'], ['month', 'Month'], ['customer', 'Customer'], ['product', 'Product Number'], ['prodName', 'Product Name'], ['fx', 'Exchange Rate'], ['qty', 'Quantity'], ['unitPrice', 'Unit Price USD'], ['amtUSD', 'Amount USD'], ['amtVND', 'Amount VND'], ['remark', 'Remark'], ['invNo', 'SI Invoice No'], ['lineNo', 'Invoice Line No'], ['tranType', 'Transaction Type']].map(([f, n]) => [f, salesCol(h, n)]));
+  const col = Object.fromEntries([['invDate', 'Invoice Date'], ['month', 'Month'], ['customer', 'Customer'], ['product', 'Product Number'], ['prodName', 'Product Name'], ['fx', 'Exchange Rate'], ['qty', 'Quantity'], ['unitPrice', 'Unit Price USD'], ['amtUSD', 'Amount USD'], ['amtVND', 'Amount VND'], ['remark', 'Remark'], ['invNo', 'SI Invoice No'], ['lineNo', 'Invoice Line No'], ['tranType', 'Transaction Type'], ['edNo', 'ED Number'], ['provRev', 'Provision Reversal']].map(([f, n]) => [f, salesCol(h, n)]));
   const cBill = salesCol(h, 'Bill Date'), cOrig = salesCol(h, 'Original Invoice No');
   const batchID = 'SAL-' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14).replace(/^(\d{8})/, '$1-');
   const importedAt = nowISO();
@@ -55,6 +58,7 @@ export function importSales(sheets, fileName, mode, period) {
     for (const f of SALES_FIELDS) o[f] = col[f] >= 0 ? (r[col[f]] ?? null) : null;
     // v1.14.19: numbers typed as text are read with the decimal comma ('34,6' = 34.6; num() gave 346). Unreadable text stays as is → validation flags it.
     for (const f of SALES_NUM_FIELDS) if (typeof o[f] === 'string') { const v = parseLocaleNum(o[f]); if (v !== null) o[f] = v; }
+    for (const f of ['edNo', 'provRev']) if (o[f] === '' || (typeof o[f] === 'string' && !o[f].trim())) o[f] = null; // optional columns: blank = none
     const d = toSerial(o.invDate);
     if (d !== null && !ttxt(o.month)) o.month = serialToYMD(d).m;
     o.tranType = col.tranType >= 0 ? utxt(r[col.tranType]) : '';
@@ -116,6 +120,7 @@ export function validateSaveSales(staging, salesDB, period, opts = {}) {
   if (book) for (const r of skip) { const d = recognitionDate(r); if (d === null || d < (mode === 'MONTHLY' ? periodStart : yearStart)) continue; if (!minInv || d < minInv) minInv = d; if (!maxInv || d > maxInv) maxInv = d; }
   for (const r of take) {
     const hard = [], warn = [];
+    if (r.provRev !== null && r.provRev !== undefined && r.provRev !== '' && typeof r.provRev !== 'number') warn.push('Provision Reversal is not a number');
     const invD = toSerial(r.invDate);
     const billSupplied = r.billDate !== null && r.billDate !== undefined && ttxt(r.billDate) !== '';
     const billD = billSupplied ? toSerial(r.billDate) : null;
@@ -203,7 +208,7 @@ export function validateSaveSales(staging, salesDB, period, opts = {}) {
     const prod = utxt(r.product);
     const inc = !prod || recognitionDate(r) === null ? 'N' : includeInPrice(r.tranType, num(r.qty), num(r.amtUSD));
     r.saveStat = 'SAVED'; r.savedAt = saveAt;
-    return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), include: inc, validResult: r.validStat, validMsg: r.validMsg, billDate: r.billDate ?? null, origInv: r.origInv ?? null, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
+    return { invDate: r.invDate, month: r.month, customer: r.customer, product: prod, prodName: r.prodName, fx: r.fx, qty: r.qty, unitPrice: r.unitPrice, amtUSD: r.amtUSD, amtVND: r.amtVND, remark: r.remark, invNo: r.invNo, lineNo: r.lineNo, tranType: utxt(r.tranType), edNo: r.edNo ?? null, provRev: r.provRev ?? null, include: inc, validResult: r.validStat, validMsg: r.validMsg, billDate: r.billDate ?? null, origInv: r.origInv ?? null, txnKey: r.txnKey, batchID: r.batchID, sourceFile: r.sourceFile, savedAt: saveAt, sourceRow: r.sourceRow };
   });
   const cov = salesCoverage(mode, minInv, maxInv, period);
   const old = (salesDB && salesDB.rows) || [];

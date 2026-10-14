@@ -158,19 +158,21 @@ const SALES_BASE = [
   ['Exchange Rate', 'Nên có', 'Tỷ giá VND/USD của hoá đơn.', 'Số, ví dụ 26040'],
   ['Amount (VND)', 'Nên có', 'Thành tiền VND = Amount (USD) × tỷ giá (lệch > 0,2% sẽ cảnh báo).', 'Số VND'],
   ['Original Invoice No.', 'Có điều kiện', 'Hoá đơn bán gốc của hàng trả lại – để trả đúng giá vốn của lần bán đó.', 'Chữ; bắt buộc nên có với SALES RETURN'],
+  ['ED Number', 'Không', 'Số tờ khai xuất khẩu (ED) của dòng bán. Lưu cùng dòng và hiển thị ở Sales_COGS (STEP 5.2).', 'Chữ'],
+  ['Provision Reversal', 'Không', 'Hoàn nhập dự phòng giảm giá gắn với dòng bán. Lưu để đối chiếu và hiển thị ở Sales_COGS; không làm thay đổi giá vốn FIFO.', 'Số VND'],
   ['Remark', 'Không', 'Ghi chú.', 'Chữ'],
 ];
 const withEx = (base, ex) => base.map((c, i) => [...c, ex[0][i], ex[1][i]]);
 export const SALES_COLS = withEx(SALES_BASE, [
-  ['2026-09-08', '2026-09-10', 'SI-2609-001', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'NORMAL SALE', 150, 137.78, 20667, 26040, 538168680, '', ''],
-  ['2026-09-28', '2026-10-02', 'SI-2609-045', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', 'NORMAL SALE', 1000, 9.5, 9500, 26100, 247950000, '', 'B/L tháng 10 → doanh thu tháng 10'],
+  ['2026-09-08', '2026-09-10', 'SI-2609-001', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'NORMAL SALE', 150, 137.78, 20667, 26040, 538168680, '', 'ED-306012345678', '', ''],
+  ['2026-09-28', '2026-10-02', 'SI-2609-045', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', 'NORMAL SALE', 1000, 9.5, 9500, 26100, 247950000, '', 'ED-306012349999', 1250000, 'B/L tháng 10 → doanh thu tháng 10'],
 ]);
 export const RETURN_COLS = withEx(SALES_BASE, [
-  ['2026-09-20', '', 'CN-2609-001', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', 'SALES RETURN', -10, 9.5, -95, 26100, -2479500, 'SI-2608-031', 'Hàng lỗi trả về'],
-  ['2026-09-25', '', 'CN-2609-002', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'CREDIT NOTE', '', '', -500, 26040, -13020000, '', 'Giảm giá theo thoả thuận'],
+  ['2026-09-20', '', 'CN-2609-001', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', 'SALES RETURN', -10, 9.5, -95, 26100, -2479500, 'SI-2608-031', '', '', 'Hàng lỗi trả về'],
+  ['2026-09-25', '', 'CN-2609-002', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'CREDIT NOTE', '', '', -500, 26040, -13020000, '', '', '', 'Giảm giá theo thoả thuận'],
 ]);
 const salesSheet = (name, title, period, cols, help) => ({
-  name, keep: true, header: 4, cols: [13, 13, 15, 10, 28, 20, 34, 18, 11, 13, 14, 12, 16, 18, 26],
+  name, keep: true, header: 4, cols: [13, 13, 15, 10, 28, 20, 34, 18, 11, 13, 14, 12, 16, 18, 18, 16, 26],
   aoa: [
     [title],
     [`Kỳ giá thành: ${period} · Điền từ dòng 5 · Tiêu đề dòng 4 KHÔNG đổi tên · Hướng dẫn chi tiết và ví dụ: sheet ${GUIDE_SHEET}. ${help}`],
