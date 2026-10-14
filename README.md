@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.29 (14/10/2026):** (1) STEP 2 · Tiêu hao chọn **theo từng dòng Stock Out** (không theo mã vật tư), có ô lọc; chỉ có hiệu lực trong kỳ. (2) STEP 5.2 · Chế độ STRICT_DATE: tiêu dùng FG là sự kiện theo ngày cùng bán hàng và rework (không còn ưu tiên trước); chế độ MONTHLY vẫn ưu tiên tiêu dùng trước bán hàng.
+>
 > **v1.14.28 (14/10/2026):** (1) STEP 2 · Vật tư đánh dấu **tiêu hao** (consumption): không phân bổ vào lô PC-P, ghi thẳng **Nợ 632 / Có 152**; đối chiếu Stock Out = phân bổ + tiêu hao. (2) Sổ FG Rework (2B) · Trạng thái **TIÊU HAO NỘI BỘ** (CONSUMPTION): FG xuất dùng nội bộ được tính FIFO ở STEP 5.2 **trước** giá vốn bán hàng trong tháng, ghi **Nợ 632 / Có 155**; không đi qua 154 rework. (3) STEP 1 · Cảnh báo bất thường tách 3 thẻ màu: A · chênh PC-P / PC-M (xanh), B · SL ≠ 0 nhưng Total Cost = 0 (vàng), C · số âm / sai kiểu (đỏ).
 >
 > **v1.14.27 (13/10/2026):** STEP 4.4 · Bảng thành phẩm theo mẫu chi tiết "FG month detail" (cột A → AA giống file kế toán): mỗi lô PC tách thành các dòng theo tháng ghi nhận giá vốn (Cost month); dòng không có Cost month là còn tồn, tổng = FG đầu kỳ. Upload thẳng file month detail; lô kỳ này từ STEP 4.3, số bán / xuất rework theo FIFO (5.2) tự tách dòng với Cost month của kỳ; roll forward và "file đầu kỳ cho kỳ sau" theo đúng mẫu (tháng 1 mang các dòng còn tồn). Tab mới: Chi tiết theo dòng, Theo Cost month, Đối chiếu 4.4 ↔ 5.1 / 5.2 (tồn đầu kỳ, giá vốn, xuất rework, tồn cuối kỳ, chênh lệch theo lô) – chỉ cảnh báo REVIEW, không chặn.

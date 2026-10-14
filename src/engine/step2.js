@@ -117,9 +117,9 @@ export function runStep2(datasets, period, opts = {}) {
   // oRule 'FAMILY' (default): O job codes → exact location, then DN/DS → T SP*, MK* → O MK*, VE* → O VE*, còn lại → đều mọi O.
   // oRule 'WORKBOOK': legacy Excel v30.9 behaviour (exact JOB CODE = location first), kept for golden parity tests.
   const oRule = opts.oRule || 'FAMILY';
-  // v1.14.28: RM materials marked "tiêu hao" (consumption) by item code: their Stock Out posts straight to Nợ 632 / Có 152
+  // v1.14.29: Stock Out LINES marked "tiêu hao" (consumption, key from soLineKeys): their amount posts straight to Nợ 632 / Có 152
   // and is NOT allocated to PC-P lots. Only non-FG rows are affected (FG stays in the 2B register).
-  const consRM = [...new Set((opts.consumeRM || []).map((c) => utxt(c)).filter(Boolean))];
+  const consRM = [...new Set((opts.consumeLines || []).map((c) => String(c)).filter(Boolean))];
   const consSet = new Set(consRM);
   const consMap = new Map();
   for (const erp of ['O', 'T']) if (!datasets[`PC-P-${erp}`]) throw new Error(`Thiếu PC-P-${erp}. Hãy import dữ liệu ERP trước.`);
@@ -145,12 +145,13 @@ export function runStep2(datasets, period, opts = {}) {
     const cKey = erp === 'O' ? headerCol(h, 'JOB CODE') : erp === 'T' ? headerCol(h, 'Customer') : headerCol(h, 'Location');
     if (cKey < 0) throw new Error(`${erp === 'O' ? 'JOB CODE' : erp === 'T' ? 'Customer' : 'Location'} header not found in STOCK OUT-${erp}`);
     const cItem = headerCol(h, 'Item Code'), cName = headerColAny(h, ['Item Name(English)', 'Item Name (English)', 'Item Name']);
+    const lineKeys = consSet.size && cItem >= 0 ? soLineKeys(ds, erp) : null;
     for (let i = 0; i < end; i++) {
       const r = ds.rows[i];
       if (txt(r[cCode]).length === 0) continue;
       const amt = -num(soCell(mask, erp, i, cCost, r[cCost]));
       const key = utxt(r[cKey]);
-      if (consSet.size && cItem >= 0 && consSet.has(utxt(r[cItem])) && !(mask[erp] && mask[erp].set.has(i))) {
+      if (lineKeys && consSet.has(lineKeys[i]) && !(mask[erp] && mask[erp].set.has(i))) {
         const code = utxt(r[cItem]), ck = `${erp}\u0001${code}`;
         let c = consMap.get(ck);
         if (!c) { c = { erp, code, name: cName >= 0 ? txt(r[cName]) : '', rows: 0, amt: 0 }; consMap.set(ck, c); }
@@ -248,32 +249,44 @@ export function runStep2(datasets, period, opts = {}) {
   tot.status = Math.abs(tot.diff) < 0.01 ? (Math.abs(tot.unalloc) < 0.01 ? 'PASS' : 'PARTIAL / CHECK') : 'CHECK';
 
   for (const p of pool) p.rmIncl = p.cost + p.alloc;
-  return { period, runAt: nowISO(), summary, total: tot, status: tot.status, detail, consumption, consumeRM: consRM, consRows: consCount, pc: pool, fgMaskCounts: { T: mask.T.set.size, S: mask.S.set.size, O: mask.O.set.size } };
+  return { period, runAt: nowISO(), summary, total: tot, status: tot.status, detail, consumption, consumeLines: consRM, consRows: consCount, pc: pool, fgMaskCounts: { T: mask.T.set.size, S: mask.S.set.size, O: mask.O.set.size } };
 }
 
-/** v1.14.28: RM materials (non-FG Stock Out dated in the period) for the "tiêu hao" picker – one line per item code. */
-export function stockOutMaterials(datasets, period) {
-  const mask = fgMask(datasets, period);
-  const m = new Map();
+/**
+ * v1.14.29: stable key of every Stock Out row (index-aligned with ds.rows; null for blank rows):
+ * ERP | document Code | line # | Item Code, with #2, #3 … when two rows share the same base (kept in row order).
+ */
+export function soLineKeys(ds, erp) {
+  const h = ds.header, keys = new Array((ds.rows || []).length).fill(null);
+  const cCode = headerCol(h, 'Code'), cLine = headerCol(h, '#'), cItem = headerCol(h, 'Item Code');
+  if (cCode < 0) return keys;
+  const seen = new Map(); const end = lastDataEnd(ds.rows, cCode);
+  for (let i = 0; i < end; i++) {
+    const r = ds.rows[i];
+    if (txt(r[cCode]).length === 0) continue;
+    const base = [erp, txt(r[cCode]), cLine >= 0 ? txt(r[cLine]) : String(i + 1), cItem >= 0 ? utxt(r[cItem]) : ''].join('|');
+    const n = (seen.get(base) || 0) + 1; seen.set(base, n);
+    keys[i] = n > 1 ? `${base}#${n}` : base;
+  }
+  return keys;
+}
+
+/** v1.14.29: non-FG Stock Out lines of the period, one per row, for the "tiêu hao" picker. */
+export function stockOutLines(datasets, period) {
+  const mask = fgMask(datasets, period); const out = [];
   for (const erp of ['T', 'O', 'S']) {
     const ds = datasets[`STOCK OUT-${erp}`]; if (!ds) continue;
-    const h = ds.header, cCode = headerCol(h, 'Code'), cItem = headerCol(h, 'Item Code'), cCost = headerCol(h, 'Total Cost');
-    const cName = headerColAny(h, ['Item Name(English)', 'Item Name (English)', 'Item Name']);
+    const h = ds.header, cCode = headerCol(h, 'Code'), cItem = headerCol(h, 'Item Code'), cCost = headerCol(h, 'Total Cost'), cLine = headerCol(h, '#');
+    const cName = headerColAny(h, ['Item Name(English)', 'Item Name (English)', 'Item Name']), cLoc = headerCol(h, 'Location');
     if (cCode < 0 || cItem < 0 || cCost < 0) continue;
-    const end = lastDataEnd(ds.rows, cCode);
+    const keys = soLineKeys(ds, erp); const end = lastDataEnd(ds.rows, cCode);
     for (let i = 0; i < end; i++) {
       const r = ds.rows[i];
-      if (txt(r[cCode]).length === 0) continue;
-      const code = utxt(r[cItem]); if (!code) continue;
-      if (mask[erp] && mask[erp].set.has(i)) continue;
-      const amt = -num(r[cCost]);
-      const g = m.get(code) || { code, name: '', erps: '', rows: 0, amt: 0 };
-      if (!g.name && cName >= 0) g.name = txt(r[cName]);
-      if (!g.erps.includes(erp)) g.erps += (g.erps ? '+' : '') + erp;
-      g.rows += 1; g.amt += amt; m.set(code, g);
+      if (!keys[i] || (mask[erp] && mask[erp].set.has(i))) continue;
+      out.push({ key: keys[i], erp, doc: txt(r[cCode]), line: cLine >= 0 ? txt(r[cLine]) : String(i + 1), item: utxt(r[cItem]), name: cName >= 0 ? txt(r[cName]) : '', loc: cLoc >= 0 ? txt(r[cLoc]) : '', amt: -num(r[cCost]) });
     }
   }
-  return [...m.values()].sort((a, b) => b.amt - a.amt || a.code.localeCompare(b.code));
+  return out.sort((a, b) => a.erp.localeCompare(b.erp) || a.doc.localeCompare(b.doc) || (Number(a.line) || 0) - (Number(b.line) || 0) || a.key.localeCompare(b.key));
 }
 
 /** RW_RawStockOutAmounts: raw Stock Out split RM vs FG (rows with consumption qty > 0, dated in period). */
