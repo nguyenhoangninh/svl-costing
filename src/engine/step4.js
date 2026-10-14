@@ -516,6 +516,17 @@ export function step4Gate(st) {
   return '';
 }
 
+/**
+ * v1.14.33: cầu nối RM. WIP ra (PC + Stock Out, không tính MR) = RM vào lô PC (PC-P RM + Stock Out phân bổ)
+ * + tiêu hao NVL (Stock Out đánh dấu tiêu hao, ghi thẳng Nợ 632 / Có 152, không vào lô PC).
+ * Trước 1.14.33 chỉ so totalRM với WIP ra nên mọi kỳ có tiêu hao đều báo lệch đúng bằng khoản tiêu hao.
+ */
+export function rmBridgeCheck(totalRM, consumedRM, step3Bridge) {
+  const expected = (Number(totalRM) || 0) + (Number(consumedRM) || 0);
+  const diff = expected - (Number(step3Bridge) || 0);
+  return { ok: Math.abs(diff) < 0.01, expected, diff };
+}
+
 /** STEP4_Run_Cost_Allocation. Throws on fatal errors; returns {blocked:true,...} when inputs are incomplete. */
 export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
   if (step2.status !== 'PASS') throw new Error('Đối chiếu STEP 2 chưa PASS.');
@@ -548,7 +559,10 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
   const zeroProduction = !lots.length;
   const totalRM = totalPCRm + totalSO;
   if (Math.abs(totalSO - step2SO) >= 0.01) throw new Error(`Stock Out phân bổ trên PC-P không khớp STEP 2. Chênh lệch ${(totalSO - step2SO).toFixed(2)}`);
-  if (Math.abs(totalRM - step3Bridge) >= 0.01) throw new Error(`RM STEP 4 không khớp cầu nối WIP STEP 3. Chênh lệch ${(totalRM - step3Bridge).toFixed(2)}`);
+  // v1.14.33: tiêu hao NVL (STEP 2, ghi 632 / 152) nằm trong WIP ra của STEP 3 nhưng không nằm trong lô PC
+  const consumedRM = Number(step2.total.cons) || 0;
+  const rmBridge = rmBridgeCheck(totalRM, consumedRM, step3Bridge);
+  if (!rmBridge.ok) throw new Error(`RM STEP 4 không khớp cầu nối WIP STEP 3 (RM lô PC + Stock Out phân bổ + tiêu hao 632/152). Chênh lệch ${rmBridge.diff.toFixed(2)}`);
   // prices
   const price = new Map(), priceSrc = new Map();
   for (const r of pm.rows) { const p = utxt(r.product); if (p && isNumeric(r.finalPrice) && num(r.finalPrice) > 0) { price.set(p, num(r.finalPrice)); priceSrc.set(p, ttxt(r.finalSource) || 'PRICE MASTER'); } }
@@ -583,9 +597,9 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
   const common622 = gl622 - dt622, common627 = gl627 - dt627;
   const glSummary = { direct622: dt622, direct627: dt627, common622, common627 };
   const blocked = !inputOK || missingPrice > 0 || directBad > 0 || common622 < -0.01 || common627 < -0.01;
-  const base = { period, runAt: nowISO(), lots: lots.length, totalQty, totalPCRm, totalSO, totalRM, step2SO, step3Bridge, missingPrice, fxOK: fx > 0, inputOK, gl622, gl627, fx, glStatus, glSummary, directOut, directBad, activeDirect: activeCount, reviewCount, zeroProduction };
+  const base = { period, runAt: nowISO(), lots: lots.length, totalQty, totalPCRm, totalSO, totalRM, step2SO, step3Bridge, consumedRM, missingPrice, fxOK: fx > 0, inputOK, gl622, gl627, fx, glStatus, glSummary, directOut, directBad, activeDirect: activeCount, reviewCount, zeroProduction };
   if (zeroProduction) {
-    const zeroBad = Math.abs(totalRM) > 0.01 || Math.abs(step3Bridge) > 0.01 || Math.abs(gl622) > 0.01 || Math.abs(gl627) > 0.01 || activeCount > 0 || directBad > 0;
+    const zeroBad = Math.abs(totalRM) > 0.01 || Math.abs(step3Bridge - consumedRM) > 0.01 || Math.abs(gl622) > 0.01 || Math.abs(gl627) > 0.01 || activeCount > 0 || directBad > 0;
     base.blocked = !inputOK || missingPrice > 0 || zeroBad;
     base.zeroReason = zeroBad ? 'Kỳ không có PC lot nhưng vẫn có RM / 622 / 627 / direct allocation cần xử lý.' : 'Kỳ không phát sinh sản xuất; STEP 5 chỉ chạy tồn đầu kỳ / bán hàng.';
     base.rows = []; base.alloc622 = 0; base.alloc627 = 0; base.sumCost = 0; base.nonPositive = 0;
@@ -644,7 +658,7 @@ function reconcile(x) {
   row('PC RM Cost', x.totalPCRm, x.totalPCRm, 0.01, 'REVIEW', 'PC output material cost');
   row('Stock Out Allocated', x.step2SO, x.totalRM - x.totalPCRm, 0.01, 'REVIEW', 'Must tie Step 2');
   row('Base Total RM (Pre WIP Adj)', x.totalPCRm + x.step2SO, x.totalRM, 0.01, 'REVIEW', 'Base PC RM + Stock Out; overhead driver remains locked to this base');
-  row('Step 3 Bridge', x.step3Bridge, x.totalRM, 0.01, 'REVIEW', 'WIP Out - MR Return');
+  row('Step 3 Bridge', x.step3Bridge, x.totalRM + (x.consumedRM || 0), 0.01, 'REVIEW', 'WIP Out - MR Return = RM lô PC + Stock Out phân bổ + tiêu hao 632/152');
   a.push({ label: 'Missing Product Prices', expected: 0, result: x.missingPrice, diff: x.missingPrice, status: x.missingPrice === 0 ? 'PASS' : 'BLOCK', note: 'Must be zero' });
   a.push({ label: 'FX Input', expected: 1, result: x.fxOK ? 1 : 0, diff: (x.fxOK ? 1 : 0) - 1, status: x.fxOK ? 'PASS' : 'BLOCK', note: 'Approved costing FX' });
   const bf = x.blocked ? 'BLOCK' : 'REVIEW';

@@ -1,6 +1,6 @@
 // Synthetic control tests (no private fixtures needed) — run in CI on every push / PR.
 import { parseUserNumber, cellDateSerial, num } from '../src/engine/util.js';
-import { validateSaveSales, salesCoverage, runStep4 } from '../src/engine/step4.js';
+import { validateSaveSales, salesCoverage, runStep4, rmBridgeCheck } from '../src/engine/step4.js';
 import { buildFingerprint, runBuild, setDecision, applyControl } from '../src/engine/step3b.js';
 import * as F5 from '../src/engine/step5.js';
 import { recheckRegisterRow } from '../src/engine/step2.js';
@@ -352,6 +352,16 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   const zSales = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 9), 'ZSALE', 'A', 2, 20)] }, { rows: [] }, P2).db.rows;
   const z5 = F5.runFIFO({ period: P2, opening, caRows: [], salesRows: zSales, pmRows: zPM.rows, fx: 25000, overrides: {}, dupDecisions: {}, mode: 'MONTHLY', tol: 1, step4: { current: 'CURRENT', overall: 'PASS', finalCost: 0, qty: 0 } });
   eq('#8 opening-FG-only FIFO works', [Math.round(z5.totals.prodQ), Math.round(z5.totals.cogsQ), Math.round(z5.totals.closeQ)], [0, 2, 8]);
+  // #8b v1.14.33: STEP 4 RM bridge = RM lô PC + Stock Out phân bổ + tiêu hao 632/152 = WIP ra (STEP 3)
+  eq('#8b rmBridgeCheck: lô PC + tiêu hao = WIP ra', [rmBridgeCheck(100, 25, 125).ok, rmBridgeCheck(100, 0, 125).ok], [true, false]);
+  eq('#8b rmBridgeCheck: diff = phần chưa giải thích', Math.round(rmBridgeCheck(100, 25, 150).diff), -25);
+  const cS2 = { status: 'PASS', period: P2, pc: [], total: { alloc: 0, cons: 1000 } };
+  const cS3 = { period: P2, summary: { outAmt: 1000, mrAmt: 0 }, checks: { soVsStep2: { status: 'PASS' }, pcmVsPcp: { status: 'PASS' }, exceptions: { value: 0 } } };
+  const c4 = runStep4({ period: P2, step2: cS2, step3: cS3, pm: zPM, gl: zGL, directAdj: [] });
+  eq('#8b STEP 4 with consumption only passes the bridge', [c4.zeroProduction, c4.blocked, c4.consumedRM], [true, false, 1000]);
+  let cBad = '';
+  try { runStep4({ period: P2, step2: cS2, step3: { ...cS3, summary: { outAmt: 1500, mrAmt: 0 } }, pm: zPM, gl: zGL, directAdj: [] }); } catch (e) { cBad = e.message; }
+  eq('#8b STEP 4 still stops when the bridge is not explained', cBad.startsWith('RM STEP 4 không khớp') && cBad.includes('-500.00'), true);
 
   // #7 NRV with 1.5 % selling cost: unit cost 100, price 4 USD × 25000 = 100000 → NRV 98500; here cost 100 VND so no provision; force price low
   const nv = F5.runFIFO({ ...ctx({}), pmRows: [{ product: 'A', finalPrice: 0.004 }], sellCostRate: 0.015 }); // price 100 VND, NRV 98.5
