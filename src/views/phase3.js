@@ -55,7 +55,7 @@ export function engineBalances(S, p2, res) {
     a155: res ? res.totals.closeA : 0,
     a2294: nrvAdj,
     // rework written off to 632 (unrepairable / scrap expensed, owner request 06/10/2026) is part of the 632 movement
-    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
+    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj + ((d.step2 && d.step2.total.cons) || 0) + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
     ...(() => { const bk = books(S); const rb = F5.revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions); return { a511: rb.a511, a5212: rb.a5212, a5213: rb.a5213 }; })(),
   };
 }

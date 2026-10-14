@@ -257,7 +257,8 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     if (r.status === 'MASTER DATA MISSING') S.masterMissing++;
   }
   const recon = S.opening + S.inAmt - S.outAmt - S.closingAmt;
-  const soTie = totalSO - step2.total.alloc;
+  // v1.14.28: Stock Out = allocated to PC lots + consumption (posted to 632 directly); both come from STEP 2
+  const soTie = totalSO - step2.total.alloc - (step2.total.cons || 0);
   const pcTie = pcmTieDifference(datasets);
   const checks = {
     wipRecon: { value: recon, status: Math.abs(recon) < 0.01 ? 'PASS' : 'CHECK' },

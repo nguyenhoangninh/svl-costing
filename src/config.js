@@ -16,4 +16,4 @@ export const ALLOWED_EMAILS = []; // e.g. ['ten@gmail.com'] — optional UI chec
 // Firestore collection holding one document per costing period (YYYY-MM).
 export const CLOUD_COLLECTION = 'svl_costing_periods';
 
-export const APP_VERSION = 'web 1.14.27 · Xử lý Rework (5B) · FIFO tách theo hoá đơn · TP sản xuất & tồn kho chi tiết theo dòng (4.4) · Doanh thu / Hàng trả lại tách riêng (511 · 5212 · 5213) · engine Costing Master v30.9';
+export const APP_VERSION = 'web 1.14.28 · Tiêu hao NVL (632/152) & tiêu dùng FG (632/155) · STEP 1 cảnh báo tách 3 nhóm · Xử lý Rework (5B) · FIFO tách theo hoá đơn · TP sản xuất & tồn kho chi tiết theo dòng (4.4) · Doanh thu / Hàng trả lại tách riêng (511 · 5212 · 5213) · engine Costing Master v30.9';

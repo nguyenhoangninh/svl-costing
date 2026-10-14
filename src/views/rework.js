@@ -13,7 +13,7 @@ const cfg = (S) => ({ agingMonths: 3, woAccount: '632', erpDiffPct: 20, ...(S.d.
 const closedNow = (S) => !!(S.d.closed && S.d.closed.period === S.period);
 const monthsBetween = (a, b) => (/^\d{4}-\d{2}$/.test(a) && /^\d{4}-\d{2}$/.test(b) ? (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5) - +a.slice(5)) : 0);
 const PENDING = new Set(['OPEN', 'HOLD']);
-const ST_VI = { OPEN: 'Đang treo', HOLD: 'Tạm giữ', COMPLETED: 'Hoàn thành → lô mới', 'RETURNED TO FG': 'Trả về kho', 'WRITTEN OFF': 'Ra chi phí' };
+const ST_VI = { OPEN: 'Đang treo', HOLD: 'Tạm giữ', COMPLETED: 'Hoàn thành → lô mới', 'RETURNED TO FG': 'Trả về kho', 'WRITTEN OFF': 'Ra chi phí', CONSUMPTION: 'Tiêu dùng nội bộ (632 / 155)' };
 const tabsHTML = (cur, tabs) => `<div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" role="tab" class="tab ${id === cur ? 'on' : ''}" data-tabrw="${id}" aria-selected="${id === cur}">${esc(label)}</button>`).join('')}</div>`;
 
 /** Rows enriched for display: cost basis, age, ERP vs FIFO unit cost. */
@@ -42,7 +42,9 @@ export function summary(S) {
   const sum = (f, p = () => true) => R.filter(p).reduce((a, r) => a + num(r[f]), 0);
   const res = S.d.step5 && S.d.step5.period === S.period ? S.d.step5 : null;
   const o = {
-    bf: sum('bfCost', (r) => r.active === 'B/F'), transfer: sum('fifoCost', (r) => r.active === 'Y'), erp: sum('erpRef', (r) => r.active === 'Y'),
+    // v1.14.28: CONSUMPTION rows are costed to 632 / 155 directly (not through rework WIP 154), so they are kept apart
+    bf: sum('bfCost', (r) => r.active === 'B/F'), transfer: sum('fifoCost', (r) => r.active === 'Y' && utxt(r.rwStatus) !== 'CONSUMPTION'), erp: sum('erpRef', (r) => r.active === 'Y' && utxt(r.rwStatus) !== 'CONSUMPTION'),
+    cons: sum('fifoCost', (r) => r.active === 'Y' && utxt(r.rwStatus) === 'CONSUMPTION'),
     completed: sum('carryIn'), returned: sum('returnedFG'), writeOff: sum('writeOff'), closing: sum('closingWIP'),
     erpAbn: R.filter((r) => r.erpCheck.startsWith('BẤT')).reduce((a, r) => a + num(r.erpRef), 0), erpAbnFifo: R.filter((r) => r.erpCheck.startsWith('BẤT')).reduce((a, r) => a + num(r.cost), 0), erpAbnN: R.filter((r) => r.erpCheck.startsWith('BẤT')).length,
     pending: R.filter((r) => r.pending).length, aged: R.filter((r) => r.aged).length, notRun: R.some((r) => r.active === 'Y' && !['PASS'].includes(utxt(r.fifoStatus)) && !utxt(r.fifoStatus).startsWith('BLOCK')),
@@ -108,7 +110,7 @@ export function view(el) {
     A.mountTable(box.querySelector('#rw-t'), { columns: cols, rows: list.map((r) => ({ ...r, erpDiffPct: r.erpDiff, erpGap: num(r.erpRef) - num(r.fifoCost) })), filterKey: 'erpCheck', height: 480, totals: ['qty', 'cost', 'erpRef', 'erpGap'], onExport: A.exportTable('REWORK_ERP_VS_FIFO', cols) });
   } else {
     const tr = (l, v, b) => `<tr><td>${b ? '<b>' + esc(l) + '</b>' : esc(l)}</td><td class="r">${b ? '<b>' + A.fmtNum(v) + '</b>' : A.fmtNum(v)}</td></tr>`;
-    const je = [['FG xuất đi rework (theo FIFO)', '154 (rework)', '155', sm.transfer], ['Rework hoàn thành – vào giá thành lô mới (qua STEP 4.3)', '155', '154 (rework)', sm.completed], ['Rework trả về kho nguyên trạng', '155', '154 (rework)', sm.returned],
+    const je = [['FG xuất đi rework (theo FIFO)', '154 (rework)', '155', sm.transfer], ['FG tiêu dùng nội bộ (FIFO, tính trước giá vốn bán hàng)', '632', '155', sm.cons], ['Rework hoàn thành – vào giá thành lô mới (qua STEP 4.3)', '155', '154 (rework)', sm.completed], ['Rework trả về kho nguyên trạng', '155', '154 (rework)', sm.returned],
       ...Object.entries(sm.woByAcc).map(([a, v]) => [`Rework ra chi phí (hủy / không sửa được / hàng hỏng)`, a, '154 (rework)', v])].filter((x) => Math.abs(x[3]) > 1);
     box.innerHTML = `<h2>Luân chuyển WIP rework (TK 154)</h2><table class="cp"><tbody>${tr('Đầu kỳ (B/F)', sm.bf)}${tr('+ FG xuất rework kỳ này', sm.transfer)}${tr('− Hoàn thành → lô mới', sm.completed)}${tr('− Trả về kho', sm.returned)}${tr('− Ra chi phí', sm.writeOff)}${tr('= Cuối kỳ (chuyển kỳ sau)', sm.closing, true)}<tr><td>Chênh lệch kiểm tra</td><td class="r">${A.pill(Math.abs(sm.roll) <= 1 ? 'PASS' : 'CHECK')} ${A.fmtNum(sm.roll)}</td></tr></tbody></table>
       <h2>Bút toán đề xuất trên FAST</h2>${je.length ? `<table class="cp"><thead><tr><th>Nghiệp vụ</th><th>Nợ</th><th>Có</th><th class="r">Số tiền</th></tr></thead><tbody>${je.map(([l, dr, cr, v]) => `<tr><td>${esc(l)}</td><td>${esc(dr)}</td><td>${esc(cr)}</td><td class="r">${A.fmtNum(v)}</td></tr>`).join('')}</tbody></table>` : A.emptyNote('Không có phát sinh.')}

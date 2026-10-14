@@ -184,6 +184,17 @@ summary { cursor: pointer; font-weight: 600; }
 .alert.block { color: var(--block); background: var(--block-bg); border-color: currentColor; }
 .alert.pass { color: var(--pass); background: var(--pass-bg); border-color: currentColor; }
 .alert.review { color: var(--review); background: var(--review-bg); border-color: currentColor; }
+/* v1.14.28: STEP 1 abnormal-data cards – A info (blue), B review (amber), C block (red) */
+.dq-cards { display: grid; gap: 12px; margin: 12px 0; }
+.dq-card { border: 1px solid; border-left-width: 6px; border-radius: var(--radius); padding: 10px 14px; background: var(--surface, transparent); }
+.dq-card h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dq-card.dq-info { border-color: var(--info); border-left-color: var(--info); background: var(--info-bg); }
+.dq-card.dq-info h3 { color: var(--info); }
+.dq-card.dq-warn { border-color: var(--review); border-left-color: var(--review); background: var(--review-bg); }
+.dq-card.dq-warn h3 { color: var(--review); }
+.dq-card.dq-block { border-color: var(--block); border-left-color: var(--block); background: var(--block-bg); }
+.dq-card.dq-block h3 { color: var(--block); }
+.dq-card .muted { color: inherit; opacity: .85; }
 .empty { border: 1px dashed var(--rule); border-radius: var(--radius); padding: 22px; text-align: center; color: var(--muted); background: var(--panel); }
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0; }
 .tab { font: inherit; font-size: 12.5px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); border-radius: 4px; padding: 3px 8px; cursor: pointer; }

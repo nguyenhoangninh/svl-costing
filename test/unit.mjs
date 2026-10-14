@@ -656,6 +656,60 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('R4c: counted in the broad fallback amount (checkpoint 11)', fb, 50);
 }
 
+// ---- v1.14.28 — RM consumption (tiêu hao): Nợ 632 / Có 152, kept out of the PC-P lots
+{
+  const { buildDataset: bd } = await import('../src/engine/step1.js');
+  const ser8 = (d) => (Date.UTC(2026, 7, d) - Date.UTC(1899, 11, 30)) / 86400000;
+  const HPx = ['PC No.', 'Document Group', 'Date', 'Status', 'MO No.', 'Sub-MO', 'Product Code', 'Product Name', 'Location', 'Unit', 'Current Complete Qty', 'Total Cost'];
+  const HSOx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Base Unit', 'Base Qty', 'Base Unit Cost', 'Total Cost', 'MO No.', 'DIVISION', 'JOB CODE', 'CUSTOMER'];
+  const HSSx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Quantity', 'Unit', 'Location', 'Base Unit Cost', 'Total Cost', 'Remark', 'MO No.', 'Doc Ref 1', 'DIVISION', 'JOB CODE'];
+  const HSTx = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', '#', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Unit', 'Quantity', 'Total Cost', 'Customer', 'MO No.'];
+  const { runStep2 } = await import('../src/engine/step2.js');
+  const dsC = {};
+  const addC = (name, h, rows) => { const d = bd([h, ...rows], `${name}-202608.xlsx`, P2); dsC[d.key] = d; };
+  addC('PC-P-O', HPx, [
+    ['PC-O1', 'PC', ser8(3), 'Completed', 'MO-1', 'MO-1-001', 'OLX-300', 'Bag', 'MKX1', 'PCS', 1, 100],
+    ['PC-O2', 'PC', ser8(3), 'Completed', 'MO-2', 'MO-2-001', 'OLX-400', 'Belt', 'VEX1', 'PCS', 1, 300],
+  ]);
+  addC('PC-P-T', HPx, []);
+  addC('STOCK OUT-O', HSOx, [
+    ['SO-C-1', 'Stock Out', 'G', 'Completed', ser8(7), null, 1, 'MAT-CONS', 'Consumable', 'RM', 'MKX1', 'PC', -4, 5, -40, null, 'DIV', 'MKX1', null],
+    ['SO-C-2', 'Stock Out', 'G', 'Completed', ser8(7), null, 2, 'MAT-ALLOC', 'Allocated', 'RM', 'MKX1', 'PC', -6, 5, -60, null, 'DIV', 'MKX1', null],
+  ]);
+  addC('STOCK OUT-T', HSTx, []);
+  addC('STOCK OUT-S', HSSx, []);
+  const plain = runStep2(dsC, P2);
+  eq('RM consumption: nothing selected → all 100 allocated to lots', [plain.total.alloc, plain.total.cons, plain.status], [100, 0, 'PASS']);
+  const cons = runStep2(dsC, P2, { consumeRM: ['mat-cons'] });
+  eq('RM consumption: marked code is posted to 632 (40), only 60 allocated, tie holds', [cons.total.alloc, cons.total.cons, cons.total.unalloc, Math.round(cons.total.diff), cons.status], [60, 40, 0, 0, 'PASS']);
+  eq('RM consumption: listed per ERP / code, not in the allocation detail', [cons.consumption.map((c) => [c.erp, c.code, c.rows, c.amt]), cons.detail.some((d) => d[1] === 'MAT-CONS')], [[['O', 'MAT-CONS', 1, 40]], false]);
+  eq('RM consumption: receiving lot carries only the allocated 60', Math.round(cons.pc.find((p) => p.pcNo === 'PC-O1').alloc), 60);
+}
+
+// ---- v1.14.28 — FG consumption (tiêu dùng nội bộ, Nợ 632 / Có 155): FIFO BEFORE the month's sales COGS
+{
+  const opC = { period: P2, status: 'LOADED', rows: [] }; F5.validateOpeningFG(opC, P2);
+  const caC = [{ pc: 'PCC1', date: ser(2026, 8, 3), prod: 'A', name: 'A', qty: 5, totalRM: 300, t622: 100, t627: 100, totalCost: 500, statusText: '' }];
+  const mkReg = (issue) => ({ rows: [{ active: 'Y', rid: 'CN1', fg: 'A', issueQty: issue, issueDate: ser(2026, 8, 10), inputCheck: 'PASS', rwStatus: 'CONSUMPTION', rwType: 'NORMAL', period: P2 }] });
+  const salesC = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 20), 'SC1', 'A', 3, 300)] }, { rows: [] }, P2).db.rows;
+  const baseC = { period: P2, opening: opC, caRows: caC, salesRows: salesC, pmRows: [], fx: 25000, overrides: {}, dupDecisions: {}, tol: 1, step4: { current: 'CURRENT', overall: 'PASS', finalCost: 500, qty: 5 } };
+  eq('FG consumption is not an active rework row (no STRICT_DATE gate)', F5.activeReworkCount(mkReg(2)), 0);
+  for (const mode of ['MONTHLY', 'STRICT_DATE']) {
+    const reg = mkReg(2);
+    const res = F5.runFIFO({ ...baseC, mode, register: reg });
+    F5.runReworkFIFO(res, reg, { period: P2, opening: opC, salesRows: salesC, step4Carry: 0 });
+    const c = reg.rows[0];
+    eq(`FG consumption ${mode}: 2 units × 100 costed first; closing row keeps no rework WIP`, [c.fifoStatus, c.fifoQty, Math.round(c.fifoCost), c.closingWIP, Math.round(res.totals.consA)], ['PASS', 2, 200, 0, 200]);
+    eq(`FG consumption ${mode}: sales get the rest (3 × 100); 632 total = 300 sales + 200 consumption`, [Math.round(res.totals.cogsA - res.totals.consA), Math.round(res.totals.cogsA)], [300, 500]);
+    eq(`FG consumption ${mode}: identities 8–12 PASS, closing FG = 0`, [[8, 9, 10, 11, 12].map((k) => res.rec[k].status).join(), res.totals.closeQ], ['PASS,PASS,PASS,PASS,PASS', 0]);
+    eq(`FG consumption ${mode}: rework batch 8 consumption check PASS`, res.rework.batch8.find((b) => b.label.startsWith('FG consumption')).status, 'PASS');
+    F5.finalizeRun(res);
+  }
+  const short = mkReg(6); const rShort = F5.runFIFO({ ...baseC, mode: 'MONTHLY', register: short });
+  F5.runReworkFIFO(rShort, short, { period: P2, opening: opC, salesRows: salesC, step4Carry: 0 });
+  eq('FG consumption short (6 > 5 on hand): BLOCK, 1 unit short, only 5 costed', [short.rows[0].fifoStatus, Math.round(rShort.totals.consQ), rShort.totals.consShort, rShort.runResult === 'BLOCKED'], ['BLOCK - INSUFFICIENT FG', 5, 1, true]);
+}
+
 // ---- v1.14.19 audit Release A — the exact regression cases of the 13/10/2026 audit
 {
   const RT = await import('../src/engine/return.js');
@@ -880,7 +934,7 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
     closing: [{ pc: 'PC-2601-001', prod: 'A', qty: 1, tot: 100 }, { pc: 'PC-2609-001', prod: 'C', qty: 60, tot: 600 }] };
   const rc = FD.reconcile(det, fgOpen, res, '2026-09');
   eq('4.4 recon: opening 17/1730 vs 5.1 17/1720 → LỆCH 10 VND (lot B)', [rc.rows[0].q44, rc.rows[0].q5, Math.round(rc.rows[0].da), rc.rows[0].status], [17, 17, 10, 'LỆCH']);
-  eq('4.4 recon: COGS 4.4 vs FIFO, rework, unmatched, closing', rc.rows.slice(1).map((r) => [r.q44, r.q5, r.status]), [[46, 49, 'LỆCH'], [10, 10, 'LỆCH'], [0, 3, 'LỆCH'], [61, 61, 'KHỚP']]);
+  eq('4.4 recon: COGS 4.4 vs FIFO, rework, consumption (none), unmatched, closing', rc.rows.slice(1).map((r) => [r.q44, r.q5, r.status]), [[46, 49, 'LỆCH'], [10, 10, 'LỆCH'], [0, 0, 'KHỚP'], [0, 3, 'LỆCH'], [61, 61, 'KHỚP']]);
   eq('4.4 recon: lot differences (opening value, closing prior-year lot only in 4.4)', rc.lots.map((l) => [l.side, l.type, l.pc, Math.round(l.da)]), [['Đầu kỳ', 'LỆCH GIÁ TRỊ', 'PC-2608-0040', 10]]);
   eq('4.4 recon status is REVIEW (never BLOCK)', rc.status, 'REVIEW');
   const ok = FD.reconcile(FD.buildDetail({ opening: op, current: { period: '2026-09', rows: [], sales: [] } }, '2026-09'), { period: '2026-09', rows: [{ pc: 'PC-2601-001', prod: 'A', qty: 4, tot: 400 }, { pc: 'PC-2512-009', prod: 'Z', qty: 3, tot: 330 }, { pc: 'PC-2608-0040', prod: 'B', qty: 10, tot: 1000 }] }, null, '2026-09');

@@ -117,6 +117,11 @@ export function runStep2(datasets, period, opts = {}) {
   // oRule 'FAMILY' (default): O job codes → exact location, then DN/DS → T SP*, MK* → O MK*, VE* → O VE*, còn lại → đều mọi O.
   // oRule 'WORKBOOK': legacy Excel v30.9 behaviour (exact JOB CODE = location first), kept for golden parity tests.
   const oRule = opts.oRule || 'FAMILY';
+  // v1.14.28: RM materials marked "tiêu hao" (consumption) by item code: their Stock Out posts straight to Nợ 632 / Có 152
+  // and is NOT allocated to PC-P lots. Only non-FG rows are affected (FG stays in the 2B register).
+  const consRM = [...new Set((opts.consumeRM || []).map((c) => utxt(c)).filter(Boolean))];
+  const consSet = new Set(consRM);
+  const consMap = new Map();
   for (const erp of ['O', 'T']) if (!datasets[`PC-P-${erp}`]) throw new Error(`Thiếu PC-P-${erp}. Hãy import dữ liệu ERP trước.`);
   for (const erp of ['O', 'T', 'S']) if (!datasets[`STOCK OUT-${erp}`]) throw new Error(`Thiếu STOCK OUT-${erp}. Hãy import dữ liệu ERP trước.`);
   const mask = fgMask(datasets, period);
@@ -125,6 +130,7 @@ export function runStep2(datasets, period, opts = {}) {
 
   // ---- group Stock Out ----
   const groups = []; const gIndex = new Map();
+  let consCount = 0;
   const add = (erp, key, type, fam, amt) => {
     const k = `${erp}\u0001${key}\u0001${type}\u0001${fam}`;
     let g = gIndex.get(k);
@@ -138,11 +144,19 @@ export function runStep2(datasets, period, opts = {}) {
     const end = lastDataEnd(ds.rows, cCode);
     const cKey = erp === 'O' ? headerCol(h, 'JOB CODE') : erp === 'T' ? headerCol(h, 'Customer') : headerCol(h, 'Location');
     if (cKey < 0) throw new Error(`${erp === 'O' ? 'JOB CODE' : erp === 'T' ? 'Customer' : 'Location'} header not found in STOCK OUT-${erp}`);
+    const cItem = headerCol(h, 'Item Code'), cName = headerColAny(h, ['Item Name(English)', 'Item Name (English)', 'Item Name']);
     for (let i = 0; i < end; i++) {
       const r = ds.rows[i];
       if (txt(r[cCode]).length === 0) continue;
       const amt = -num(soCell(mask, erp, i, cCost, r[cCost]));
       const key = utxt(r[cKey]);
+      if (consSet.size && cItem >= 0 && consSet.has(utxt(r[cItem])) && !(mask[erp] && mask[erp].set.has(i))) {
+        const code = utxt(r[cItem]), ck = `${erp}\u0001${code}`;
+        let c = consMap.get(ck);
+        if (!c) { c = { erp, code, name: cName >= 0 ? txt(r[cName]) : '', rows: 0, amt: 0 }; consMap.set(ck, c); }
+        c.rows += 1; c.amt += amt; consCount += 1;
+        continue;
+      }
       if (erp === 'O') add('O', key, 'JOB CODE', '', amt);
       else if (erp === 'T') add('T', key, 'CUSTOMER', key, amt);
       else add('S', key, 'LOCATION', sFamily(key), amt);
@@ -151,7 +165,10 @@ export function runStep2(datasets, period, opts = {}) {
 
   // ---- allocate ----
   const detail = [];
-  const sum = { T: [0, 0, 0], S: [0, 0, 0], O: [0, 0, 0] };
+  const sum = { T: [0, 0, 0, 0], S: [0, 0, 0, 0], O: [0, 0, 0, 0] };
+  // consumption: src (col 0) includes it, col 3 = posted directly to 632 (not allocated)
+  for (const c of consMap.values()) { const s = sum[c.erp] || sum.O; s[0] += c.amt; s[3] += c.amt; }
+  const consumption = [...consMap.values()].map((c) => ({ erp: c.erp, code: c.code, name: c.name, rows: c.rows, amt: c.amt })).sort((a, b) => a.erp.localeCompare(b.erp) || b.amt - a.amt);
   for (const g of groups) {
     const srcERP = g.erp, srcAmt = g.cost;
     let allocated = 0, unalloc = 0, totalW = 0, cand = 0, forceEqual = false, broad = false, note = '', status = 'ALLOCATED';
@@ -221,17 +238,42 @@ export function runStep2(datasets, period, opts = {}) {
   }
 
   const summary = ['T', 'S', 'O'].map((erp) => {
-    const [src, alloc, un] = sum[erp];
-    const diff = src - alloc - un;
+    const [src, alloc, un, cons] = sum[erp];
+    const diff = src - alloc - un - cons;
     const status = Math.abs(diff) < 0.01 ? (Math.abs(un) < 0.01 ? 'PASS' : 'PARTIAL / CHECK') : 'CHECK';
-    return { erp, src, alloc, unalloc: un, diff, status };
+    return { erp, src, alloc, unalloc: un, cons, diff, status };
   });
-  const tot = summary.reduce((a, s) => ({ src: a.src + s.src, alloc: a.alloc + s.alloc, unalloc: a.unalloc + s.unalloc }), { src: 0, alloc: 0, unalloc: 0 });
-  tot.erp = 'TOTAL'; tot.diff = tot.src - tot.alloc - tot.unalloc;
+  const tot = summary.reduce((a, s) => ({ src: a.src + s.src, alloc: a.alloc + s.alloc, unalloc: a.unalloc + s.unalloc, cons: a.cons + s.cons }), { src: 0, alloc: 0, unalloc: 0, cons: 0 });
+  tot.erp = 'TOTAL'; tot.diff = tot.src - tot.alloc - tot.unalloc - tot.cons;
   tot.status = Math.abs(tot.diff) < 0.01 ? (Math.abs(tot.unalloc) < 0.01 ? 'PASS' : 'PARTIAL / CHECK') : 'CHECK';
 
   for (const p of pool) p.rmIncl = p.cost + p.alloc;
-  return { period, runAt: nowISO(), summary, total: tot, status: tot.status, detail, pc: pool, fgMaskCounts: { T: mask.T.set.size, S: mask.S.set.size, O: mask.O.set.size } };
+  return { period, runAt: nowISO(), summary, total: tot, status: tot.status, detail, consumption, consumeRM: consRM, consRows: consCount, pc: pool, fgMaskCounts: { T: mask.T.set.size, S: mask.S.set.size, O: mask.O.set.size } };
+}
+
+/** v1.14.28: RM materials (non-FG Stock Out dated in the period) for the "tiêu hao" picker – one line per item code. */
+export function stockOutMaterials(datasets, period) {
+  const mask = fgMask(datasets, period);
+  const m = new Map();
+  for (const erp of ['T', 'O', 'S']) {
+    const ds = datasets[`STOCK OUT-${erp}`]; if (!ds) continue;
+    const h = ds.header, cCode = headerCol(h, 'Code'), cItem = headerCol(h, 'Item Code'), cCost = headerCol(h, 'Total Cost');
+    const cName = headerColAny(h, ['Item Name(English)', 'Item Name (English)', 'Item Name']);
+    if (cCode < 0 || cItem < 0 || cCost < 0) continue;
+    const end = lastDataEnd(ds.rows, cCode);
+    for (let i = 0; i < end; i++) {
+      const r = ds.rows[i];
+      if (txt(r[cCode]).length === 0) continue;
+      const code = utxt(r[cItem]); if (!code) continue;
+      if (mask[erp] && mask[erp].set.has(i)) continue;
+      const amt = -num(r[cCost]);
+      const g = m.get(code) || { code, name: '', erps: '', rows: 0, amt: 0 };
+      if (!g.name && cName >= 0) g.name = txt(r[cName]);
+      if (!g.erps.includes(erp)) g.erps += (g.erps ? '+' : '') + erp;
+      g.rows += 1; g.amt += amt; m.set(code, g);
+    }
+  }
+  return [...m.values()].sort((a, b) => b.amt - a.amt || a.code.localeCompare(b.code));
 }
 
 /** RW_RawStockOutAmounts: raw Stock Out split RM vs FG (rows with consumption qty > 0, dated in period). */
@@ -260,11 +302,13 @@ export const RW_HEADERS = ['Active', 'Period', 'Rework ID', 'ERP', 'Stock Out Do
 export const RW_EDITABLE = ['rwType', 'rwStatus', 'pcNo', 'outFG', 'compDate', 'compQty', 'scrapQty', 'note'];
 
 /** Rework statuses. OPEN / HOLD = pending (cost stays in rework WIP 154); the other three are dispositions (owner request 06/10/2026). */
-export const RW_STATUSES = ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF'];
+export const RW_STATUSES = ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF', 'CONSUMPTION'];
+/** v1.14.28: CONSUMPTION = FG issued for internal consumption (tiêu dùng nội bộ): costed FIFO in STEP 5.2 BEFORE the month's sales COGS, booked Nợ 632 / Có 155. */
 export function rwInputCheck(rwType, status, pcNo, issueQty, compQty, scrapQty, outFG, dispNote = null) {
   rwType = utxt(rwType); status = utxt(status); pcNo = ttxt(pcNo); outFG = ttxt(outFG);
   // returned unchanged to FG stock / written off (cannot be repaired, abnormal): a reason is required, no output FG / PC
   if (status === 'RETURNED TO FG' || status === 'WRITTEN OFF') return ttxt(dispNote).length >= 5 ? 'PASS' : 'REVIEW - NOTE REQUIRED';
+  if (status === 'CONSUMPTION') return 'PASS'; // no output FG / PC: the stock is consumed in-house
   if (!outFG) return 'BLOCK - OUTPUT FG REQUIRED';
   if (rwType === 'ABNORMAL') return 'REVIEW - ABNORMAL REWORK';
   if (status === 'COMPLETED') {
@@ -287,6 +331,7 @@ export function rwInputCheck(rwType, status, pcNo, issueQty, compQty, scrapQty, 
 export function rwAllocate(row, cost, fifoOk = true) {
   const o = { closingWIP: 0, carryIn: 0, writeOff: 0, returnedFG: 0, scrapCost: 0 };
   const st = utxt(row.rwStatus);
+  if (st === 'CONSUMPTION') return o; // cost is booked to 632 by STEP 5.2 (runFIFO), never to rework WIP
   if (!fifoOk || utxt(row.inputCheck) !== 'PASS') { o.closingWIP = cost; return o; }
   if (st === 'COMPLETED' && utxt(row.rwType) === 'NORMAL') {
     const comp = num(row.compQty), scrap = num(row.scrapQty);
@@ -396,11 +441,12 @@ export function recheckRegisterRow(row) {
 export function step2Classification(datasets, period, step2, register) {
   const raw = rawStockOutAmounts(datasets, period);
   const allocatedRM = step2 ? step2.total.alloc : 0;
-  const rmDiff = raw.rm - allocatedRM;
+  const consumedRM = step2 ? (step2.total.cons || 0) : 0;
+  const rmDiff = raw.rm - allocatedRM - consumedRM;
   const fgRows = register ? register.rows.filter((r) => r.active === 'Y').length : 0;
   const fgQty = register ? register.rows.reduce((a, r) => a + num(r.issueQty), 0) : 0;
   return {
-    totalRaw: raw.total, rmEligible: raw.rm, fgRef: raw.fg, allocatedRM, rmDiff, fgRows, fgQty, fgAllocated: 0,
+    totalRaw: raw.total, rmEligible: raw.rm, fgRef: raw.fg, allocatedRM, consumedRM, rmDiff, fgRows, fgQty, fgAllocated: 0,
     classCheck: Math.abs(raw.total - raw.rm - raw.fg) <= TOL_AMT ? 'PASS' : 'CHECK',
     gate: Math.abs(rmDiff) <= TOL_AMT ? 'PASS' : 'RERUN / CHECK',
   };

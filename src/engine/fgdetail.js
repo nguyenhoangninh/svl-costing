@@ -29,7 +29,7 @@ export const DET_FIELDS = DET_COLS.map((c) => c[0]);
 /** Money columns split pro rata with the quantity when a row is split. */
 const MONEY = ['rmA', 'rmST', 'total', 'totalRM', 'c622', 'c627', 'provUSD', 'provVND', 'net', 'fgEnd'];
 const TOLQ = 1e-6, TOLA = 1;
-export const KIND_LABEL = { SALE: 'Bán hàng (COGS)', REWORK: 'Xuất rework', PRIOR: 'Đã xuất (file đầu kỳ)' };
+export const KIND_LABEL = { SALE: 'Bán hàng (COGS)', REWORK: 'Xuất rework', CONSUME: 'Tiêu dùng nội bộ (632 / 155)', PRIOR: 'Đã xuất (file đầu kỳ)' };
 
 const norm = (s) => txt(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const blank = (v) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
@@ -177,7 +177,7 @@ export function applyConsumption(rows, recs, month) {
   const taken = new Map(); const left = rows.map((r) => (isOpen(r) ? num(r.qty) : 0)); const unmatched = [];
   for (const x of recs || []) {
     let need = num(x.qty); if (need <= TOLQ) continue;
-    const kind = x.kind === 'REWORK' ? 'REWORK' : 'SALE';
+    const kind = x.kind === 'REWORK' ? 'REWORK' : x.kind === 'CONSUME' ? 'CONSUME' : 'SALE';
     for (const i of open.get(lotOf(x)) || []) {
       if (left[i] <= TOLQ) continue;
       const t = Math.min(left[i], need); left[i] -= t; need -= t;
@@ -191,7 +191,7 @@ export function applyConsumption(rows, recs, month) {
   rows.forEach((r, i) => {
     const m = taken.get(i); if (!m) { out.push(r); return; }
     const docs = (e) => { const a = [...e.docs]; return a.length > 6 ? `${a.slice(0, 6).join(', ')} … (+${a.length - 6})` : a.join(', '); };
-    out.push(...splitOff(rows, i, ['SALE', 'REWORK'].filter((k) => m[k]).map((k) => ({ kind: k, qty: m[k].qty, month, docs: docs(m[k]), fifoTot: m[k].fifoTot }))));
+    out.push(...splitOff(rows, i, ['SALE', 'REWORK', 'CONSUME'].filter((k) => m[k]).map((k) => ({ kind: k, qty: m[k].qty, month, docs: docs(m[k]), fifoTot: m[k].fifoTot }))));
   });
   return { rows: out, unmatched };
 }
@@ -233,7 +233,7 @@ export function lotsFromRows(rows, period) {
 }
 /** Issues of the year as consumption-like records (for the product / month summaries). */
 export const issuesOfYear = (rows, period) => rows.filter((r) => !isOpen(r) && r.costMonth.slice(0, 4) === period.slice(0, 4))
-  .map((r) => ({ month: r.costMonth, kind: r.kind === 'REWORK' ? 'REWORK' : 'SALE', prod: r.prod, pc: r.pc, qty: num(r.qty), tot: num(r.total) }));
+  .map((r) => ({ month: r.costMonth, kind: r.kind === 'REWORK' ? 'REWORK' : r.kind === 'CONSUME' ? 'CONSUME' : 'SALE', prod: r.prod, pc: r.pc, qty: num(r.qty), tot: num(r.total) }));
 
 /** By Cost month (issued) + "Còn tồn", split into this year's production and earlier years. */
 export function byCostMonth(rows, period) {
@@ -279,9 +279,11 @@ export function reconcile(det, fgOpen, res, period) {
   const sum = (l, f) => (l || []).reduce((a, r) => a + num(r[f]), 0);
   const open44 = det.opening.filter(isOpen), close44 = det.rows.filter(isOpen);
   const cogs44 = det.rows.filter((r) => r.costMonth === period && r.kind === 'SALE'), rw44 = det.rows.filter((r) => r.costMonth === period && r.kind === 'REWORK');
+  const cons44 = det.rows.filter((r) => r.costMonth === period && r.kind === 'CONSUME');
   const has51 = !!(fgOpen && fgOpen.period === period && fgOpen.rows && fgOpen.rows.length);
   const has52 = !!(res && res.period === period);
-  const fifo = has52 ? (res.detail || []).filter((d) => ttxt(d.lid) && num(d.qty)) : [];
+  const fifo = has52 ? (res.detail || []).filter((d) => ttxt(d.lid) && num(d.qty) && d.kind !== 'CONS') : [];
+  const fifoCons = has52 ? (res.detail || []).filter((d) => ttxt(d.lid) && num(d.qty) && d.kind === 'CONS') : [];
   const rwF = has52 && res.rework ? (res.rework.rows || []).filter((r) => ttxt(r.lid) && num(r.qty)) : [];
   const line = (area, label, q44, a44, ok, q5, a5, note = '') => {
     const st = !ok ? 'CHƯA CÓ SỐ' : Math.abs(q44 - q5) <= TOLQ && Math.abs(a44 - a5) <= TOLA ? 'KHỚP' : 'LỆCH';
@@ -291,6 +293,7 @@ export function reconcile(det, fgOpen, res, period) {
     line('Đầu kỳ', 'Tồn FG đầu kỳ: 4.4 (dòng chưa có Cost month) ↔ STEP 5.1 FG đầu kỳ', sum(open44, 'qty'), sum(open44, 'total'), has51, has51 ? sum(fgOpen.rows, 'qty') : 0, has51 ? sum(fgOpen.rows, 'tot') : 0, has51 ? `5.1: ${fgOpen.source || ''} · ${fgOpen.status || ''}` : 'Chưa nạp FG đầu kỳ ở STEP 5.1'),
     line('Trong kỳ', 'Giá vốn bán hàng kỳ này: dòng Cost month = kỳ (bán hàng) ↔ FIFO STEP 5.2', sum(cogs44, 'qty'), sum(cogs44, 'total'), has52, sum(fifo, 'qty'), sum(fifo, 'tot'), has52 ? 'Giá trị 4.4 tách theo tỷ lệ SL của dòng; FIFO lấy giá trị của lớp tồn STEP 5' : 'Chưa chạy FIFO kỳ này'),
     line('Trong kỳ', 'Xuất rework kỳ này: dòng Cost month = kỳ (rework) ↔ Rework FIFO STEP 5', sum(rw44, 'qty'), sum(rw44, 'total'), has52, sum(rwF, 'qty'), sum(rwF, 'tot')),
+    line('Trong kỳ', 'Tiêu dùng nội bộ kỳ này: dòng Cost month = kỳ (CONSUME) ↔ FIFO tiêu dùng STEP 5.2 (Nợ 632 / Có 155)', sum(cons44, 'qty'), sum(cons44, 'total'), has52, sum(fifoCons, 'qty'), sum(fifoCons, 'tot'), 'Tiêu dùng nội bộ được tính FIFO trước giá vốn bán hàng'),
     line('Trong kỳ', 'Số FIFO lấy từ lô không có / không đủ trong 4.4', 0, 0, has52, sum(det.unmatched, 'qty'), sum(det.unmatched, 'tot'), 'Lô không có trong file 4.4 hoặc 4.4 còn tồn ít hơn số FIFO đã xuất'),
     line('Cuối kỳ', 'Tồn FG cuối kỳ: 4.4 (dòng chưa có Cost month) ↔ STEP 5.2 FG cuối kỳ', sum(close44, 'qty'), sum(close44, 'total'), has52, has52 ? sum(res.closing, 'qty') : 0, has52 ? sum(res.closing, 'tot') : 0, has52 ? 'STEP 5 cuối kỳ gồm cả lớp hàng trả lại / rework nhập lại (nếu có)' : 'Chưa chạy FIFO kỳ này'),
   ];

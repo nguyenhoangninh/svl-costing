@@ -124,7 +124,7 @@ export function step2ReportSheets(s2, cls, period, appVersion = '') {
     { kind: 'section', text: 'A. Đối chiếu Stock Out trong kỳ' },
     { kind: 'kv', rows: [
       ...(cls ? [['Tổng Stock Out trong kỳ (3 hệ, theo ERP)', M(cls.totalRaw)], ['(−) FG xuất đi rework – loại khỏi STEP 2, xử lý ở 2B / 5B (giá ERP, memo)', M(cls.fgRef)], ['Stock Out NVL cần phân bổ', M(cls.rmEligible), 'strong']] : []),
-      ['Stock Out NVL theo nhóm nguồn', M(T.src)], ['Đã phân bổ vào lô PC', M(T.alloc)], ['Chưa phân bổ', M(T.unalloc)], ['Chênh lệch', M(T.diff)], ['Trạng thái', T.status],
+      ['Stock Out NVL theo nhóm nguồn', M(T.src)], ['Đã phân bổ vào lô PC', M(T.alloc)], ['Tiêu hao → 632 / Có 152 (không phân bổ)', M(T.cons || 0)], ['Chưa phân bổ', M(T.unalloc)], ['Chênh lệch', M(T.diff)], ['Trạng thái', T.status],
     ] },
     { kind: 'gap' },
     { kind: 'section', text: 'B. Theo hệ nguồn' },
