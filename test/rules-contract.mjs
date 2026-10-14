@@ -72,7 +72,7 @@ ok('approval module is precached for offline use', sw.includes("'./src/engine/ap
 // v1.14.43 Live Notifications (atomic revision event + private read state)
 ok('Notifications: event bound to a committed period revision',
   rules.includes("getAfter(periodPath(request.resource.data.period)).data.rev == request.resource.data.rev")
-  && store.includes("if (announcement) t.set("));
+  && store.includes("if (includeNotice) t.set("));
 ok('Notifications: event actor bound to signed-in user',
   rules.includes('request.resource.data.actorUid == request.auth.uid')
   && rules.includes('request.resource.data.actor == myEmail()'));
