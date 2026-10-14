@@ -1,7 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
-> **v1.14.39 (14/10/2026):** Hoàn tác ENH-06 (v1.14.38, PR #23) theo quyết định của anh: không nâng Firebase lên Blaze nên Cloud Functions không được dùng. Duyệt đơn giá nhập tay STEP 5R quay về phía máy khách như trước. Giữ nguyên các sửa lỗi của v1.14.37 và đợt 2, 3 audit. ENH-06 có thể làm lại khi có Blaze và đã deploy functions.
+> **v1.14.40 (14/10/2026):** Rà soát toàn bộ sau khi hoàn tác ENH-06 (gói Spark, không Cloud Functions). Mã nguồn sau revert khớp đúng trạng thái trước ENH-06. Sửa tài liệu: mục Governance và Bảo mật trước đây ghi kiểm soát maker-checker như được thực thi nghiêm ngặt, thực tế chỉ kiểm tra trên trình duyệt; nay ghi rõ là giới hạn đã biết. Thêm ghi chú gói Spark: hạn mức Firestore và rủi ro tạm ngưng khi vượt hạn mức. Không đổi logic nghiệp vụ.
+> **v1.14.39 (14/10/2026):** Hoàn tác ENH-06 (v1.14.38, PR #23) theo quyết định của anh: không nâng Firebase lên Blaze nên Cloud Functions không được dùng. Duyệt đơn giá nhập tay STEP 5R quay về phía máy khách như trước. Giữ nguyên các sửa lỗi của v1.14.37 và đợt 2, 3 audit. Quyết định: không dùng Blaze và không dùng Cloud Functions; ENH-06 không làm lại theo hướng máy chủ.
 > **v1.14.37 (14/10/2026):** Kiểm thử thật trên trình duyệt (Chromium, Firebase giả lập trong bộ nhớ, dữ liệu từ file Costing) phát hiện **một lỗi mất dữ liệu**: khi CLOSE đã được cloud ghi nhưng phản hồi bị mất, bước dọn dẹp ghi lỗi xoá các chunk của revision vừa commit, khiến kỳ đã đóng không tải lại được. Đã sửa: chỉ xoá chunk khi con trỏ kỳ xác nhận commit chưa thành công; không đọc được con trỏ thì giữ chunk. Thêm kiểm thử trình duyệt: `test/e2e-authgate.mjs` (ENH-05: không hiện dữ liệu khi chưa xác thực) và `test/e2e-cloud.mjs` (ENH-04/07/08/09).
 > **v1.14.36 (14/10/2026):** Đợt 3 audit kỹ thuật (ENH-07/09/10; ENH-06 chưa làm): (1) Đồng bộ cloud: kỳ đang rời khỏi được đẩy lên trước khi chuyển kỳ (nếu cloud từ chối, người dùng quyết định); kỳ còn chờ hiện trên thanh trạng thái; lỗi tự thử lại lũy tiến 2 s → 60 s, tối đa 8 lần, và thử lại ngay khi có mạng. (2) CLOSE MONTH: chuẩn bị trên máy → ghi cloud → hoàn tất; nhật ký "CLOSE MONTH" và bài đăng FG chỉ ghi sau khi cloud xác nhận; lỗi thì hoàn tác cả bài đăng FG; cloud đã ghi nhưng mất phản hồi được nhận diện bằng mốc đóng kỳ, không áp dụng hai lần. (3) Kiểm tra kỳ trước được đọc lại ngay trước CLOSE; kỳ trước đã mở lại sau khi chuyển số dư thì được báo lệch và chặn CLOSE cho đến khi roll forward lại.
 > **v1.14.35 (14/10/2026):** Đợt 2 audit kỹ thuật (ENH-08/04/05): (1) Nhật ký thao tác (svl_costing_audit) ghi **người thao tác, thời điểm và mã thiết bị ngay lúc xảy ra**; sự kiện tạo offline không được gán cho người đăng nhập sau; mỗi sự kiện có mã riêng nên đồng bộ lặp không tạo bản sao; Firestore rules kiểm tra uid/email của sự kiện. (2) Xoá kỳ trên cloud (admin, kỳ chưa từng CLOSED) làm 2 pha: gỡ con trỏ kỳ trong một transaction trước, rồi mới dọn chunk; lỗi giữa chừng chỉ để lại dữ liệu mồ côi và chạy lại được. (3) Không còn đường vòng offline: khi chưa xác thực Firebase thì không hiển thị dữ liệu kế toán trên máy.
@@ -130,6 +131,8 @@ Engine ban đầu được port từ VBA v30.9 và vẫn giữ **legacy regressi
 4. **Authentication → Settings → Authorized domains → Add domain**: `nguyenhoangninh.github.io`.
 5. Trong rules, thay `YOUR_EMAIL@gmail.com` bằng email Google của chủ sở hữu (luôn có quyền Quản trị). Người dùng khác được thêm/xoá ngay trên web: **Kỳ, cloud & chuyển đổi → Người dùng & phân quyền** (Quản trị / Chỉnh sửa / Chỉ xem).
 
+**Gói Firebase: Spark (miễn phí), không nâng lên Blaze.** Ứng dụng chỉ dùng Authentication, Firestore và Firestore rules, nên chạy được trên Spark. Không có Cloud Functions; mọi kiểm soát phải nằm trong rules và trình duyệt. Hạn mức Firestore theo ví dụ trong tài liệu Firebase là khoảng 50.000 lượt đọc và 20.000 lượt ghi mỗi ngày; các hạn mức khác không được ghi ở trang đó. **Khi vượt hạn mức, Firebase tạm ngưng dịch vụ đó đến hết tháng**, nên cloud sync có thể dừng giữa kỳ. Hãy theo dõi **Firebase Console → Usage** trong tuần đầu sau khi publish rules.
+
 Khi đã cấu hình Firebase, **phải đăng nhập** mới xem / sửa được dữ liệu. Muốn thử nghiệm không ảnh hưởng dữ liệu thật, mở `…/svl-costing/?sandbox=1`: dùng một cơ sở dữ liệu riêng trên máy, không đồng bộ cloud.
 
 ## Cài như ứng dụng trên iPhone / Android
@@ -175,7 +178,7 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 | Nội dung | Cách hoạt động |
 |---|---|
 | Chặn theo 3B (F-07) | STEP 4 và CLOSE MONTH bị chặn khi: còn WIP âm chưa đưa vào 3B, chưa BUILD / BUILD cũ, còn dòng chưa quyết định, đã APPROVE chưa APPLY. Riêng đóng kỳ: mọi bút toán DIRECT_632 phải RECORDED. |
-| Đối chiếu FAST (F-17) | STEP 5.3 → *Đối chiếu FAST*: nhập 154, 155, 632, 511. Lệch >1 VND phải được **Admin khác người nhập FAST** xác nhận kèm giải trình; approval được bind vào figures và tự hết hiệu lực khi số đổi. |
+| Đối chiếu FAST (F-17) | STEP 5.3 → *Đối chiếu FAST*: nhập 154, 155, 632, 511. Lệch >1 VND phải được **Admin khác người nhập FAST** xác nhận kèm giải trình (kiểm tra trên trình duyệt, xem *Bảo mật dữ liệu*); approval được bind vào figures và tự hết hiệu lực khi số đổi. |
 | 3B theo giá trị (F-01) | ACTUAL_USAGE chia theo giá trị tiêu hao PC-M (Total Cost). Chọn lại "theo số lượng" ở màn hình 3B nếu cần; kỳ chuyển từ Excel giữ cách cũ để khớp file. |
 | FIFO theo ngày (F-04) | STRICT_DATE: dòng bán và phiếu xuất rework chạy chung theo ngày; mỗi sự kiện chỉ dùng lớp có ngày ≤ ngày của nó. MONTHLY giữ như Excel, có cảnh báo khi rework lấy lớp hoàn thành sau ngày xuất. |
 | Ngày Bill (F-08) | Nếu file có giá trị *Bill/B.L. Date* thì đây là Recognition Date bắt buộc; Bill Date invalid hoặc sau kỳ bị BLOCK. Chỉ fallback Invoice Date khi Bill Date thực sự trống. YTD Sales DB không được replace quá ngày cuối kỳ giá thành. |
@@ -189,9 +192,9 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 ## Governance v1.9
 
 - **STEP 2 fallback trọng yếu:** fallback rộng >5% tổng Stock Out phân bổ sẽ BLOCK cho tới khi Admin xác nhận lý do.
-- **Manual Price:** chỉnh sửa reset approval; `Approved By` do hệ thống ghi từ identity đăng nhập, không nhập tay; maker không tự approve.
-- **Direct 622/627:** dòng Active bắt buộc Reason / Evidence và maker-checker approval; thay đổi allocation reset approval.
-- **FAST difference:** Admin approver phải khác người nhập FAST.
+- **Manual Price:** chỉnh sửa reset approval; `Approved By` lấy từ tài khoản đang đăng nhập trên trình duyệt, không nhập tay; việc chặn maker tự approve chỉ có trên giao diện (xem *Bảo mật dữ liệu*).
+- **Direct 622/627:** dòng Active bắt buộc Reason / Evidence và maker-checker approval (kiểm tra trên trình duyệt); thay đổi allocation reset approval.
+- **FAST difference:** Admin approver phải khác người nhập FAST (kiểm tra trên trình duyệt).
 - **Cloud revision:** mỗi cloud commit tạo manifest hash + immutable revision document; superseded content-addressed chunks được giữ để phục vụ trace/retention.
 - **CLOSED period:** không xoá trực tiếp; phải REOPEN trước và để lại revision/audit trail.
 - **NRV:** period có provision proposed phải có accounting decision trước Close.
@@ -201,6 +204,7 @@ Khi có phiên bản mới, ứng dụng hiện thanh **Cập nhật**. Khi mấ
 - Repo này chỉ chứa **code**. Không commit file ERP, file Costing Master hay dữ liệu xuất ra (`.gitignore` đã chặn `*.xlsx`, `*.xlsm`, `*.xls`).
 - File ERP được đọc ngay trong trình duyệt; dữ liệu lên cloud được nén gzip, chia khối ≤700 KB trong `svl_costing_periods/{kỳ}/chunks`.
 - API key Firebase trong `src/config.js` là định danh công khai, không phải mật khẩu; quyền truy cập do Firestore rules quyết định.
+- **Giới hạn đã biết (gói Spark, không Cloud Functions):** các kiểm soát maker-checker (duyệt đơn giá nhập tay, duyệt chênh lệch FAST, duyệt 3B, duyệt dòng Direct 622/627) chỉ được kiểm tra trong trình duyệt; người có quyền ghi có thể bỏ qua. Firestore rules chỉ chặn ghi trái vai trò (viewer / editor / admin) và mọi thay đổi trên kỳ đã CLOSED.
 
 ## Cấu trúc
 
