@@ -83,7 +83,9 @@ service cloud.firestore {
     // Append-only audit trail: anyone who can write data can add own events; nobody can change or delete them.
     match /svl_costing_audit/{id} {
       allow read: if canRead();
-      allow create: if canWrite() && request.resource.data.by == myEmail();
+      // v1.14.35 (ENH-08): an ACTOR event must name the signed-in uid and email that performed it; UNVERIFIED events are uploaded by the signed-in user.
+      allow create: if canWrite() && request.resource.data.by == myEmail()
+        && (request.resource.data.get('attribution', 'LEGACY') != 'ACTOR' || (request.resource.data.actorUid == request.auth.uid && request.resource.data.actorEmail == myEmail()));
       allow update, delete: if false;
     }
   }

@@ -409,7 +409,8 @@ function renderShell() {
 }
 
 function render() {
-  if (store.needsSignIn() || (store.cloud.enabled && !store.cloud.user && !store.cloud.offline)) {
+  // v1.14.35 (audit ENH-05): no local accounting data is shown until a Firebase session is confirmed (no offline bypass)
+  if (store.needsSignIn() || (store.cloud.enabled && !store.cloud.user)) {
     document.body.classList.add('auth-screen');
     $('#rail').innerHTML = '';
     $('#account').innerHTML = '';

@@ -31,5 +31,14 @@ ok('REOPEN has cloud-state preflight', phase3.includes("Cloud đang ở trạng 
 ok('permission error gives rules/admin guidance', phase3.includes('Publish firestore.rules mới nhất') && phase3.includes('Quản trị'));
 ok('REOPEN revision changes only closed / everClosed (accepted by every published rules version)', app.includes('closed: null, everClosed: true }') && !app.includes('step5: live.step5'));
 
+// v1.14.35 (audit wave 2)
+const appJs = app;
+ok('ENH-08 audit ACTOR events must match the signed-in uid and email', rules.includes("get('attribution', 'LEGACY') != 'ACTOR'") && rules.includes('actorUid == request.auth.uid') && rules.includes('actorEmail == myEmail()'));
+ok('ENH-08 audit documents are keyed by event id (idempotent upload)', store.includes('fb.F.doc(fb.fs, AUDIT, e.eventId)') && store.includes('if (!ex.exists())'));
+ok('ENH-08 actor is captured at event time, not at upload', store.includes('const actor = cloud.user ? { uid: cloud.user.uid'));
+ok('ENH-04 cloudDelete removes the pointer in a transaction before sweeping chunks', store.indexOf('t.delete(pdoc(period))') > 0 && store.indexOf('t.delete(pdoc(period))') < store.indexOf('await sweepChunks(period, {});', store.indexOf('export async function cloudDelete')));
+ok('ENH-04 cloudDelete refuses to sweep under a pointer saved meanwhile', store.includes('vừa được lưu lại trên cloud trong lúc xoá'));
+ok('ENH-05 render has no offline bypass for local accounting data', !appJs.includes('!store.cloud.offline') && appJs.includes('(store.cloud.enabled && !store.cloud.user)'));
+
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
