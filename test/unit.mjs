@@ -6,6 +6,7 @@ import * as F5 from '../src/engine/step5.js';
 import { recheckRegisterRow } from '../src/engine/step2.js';
 import { splitBooks, bookOf } from '../src/engine/revenue.js';
 import * as FP from '../src/engine/fgprod.js';
+import * as AQ from '../src/engine/auditqueue.js';
 
 let n = 0, fail = 0;
 const eq = (label, got, want) => { n++; const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) { fail++; console.log(`✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); } };
@@ -1099,6 +1100,30 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('template 4.4 detail: 2 example rows (one stock, one sold 202608), no BLOCK', [gd.rows.length, gd.stats.block, gd.stats.stockQty, gd.stats.soldQty], [2, 0, 12, 5]);
   eq('template 4.4 detail: guide sheet alone is not a table', FD.findDetailSheet({ [T.GUIDE_SHEET]: T.fgDetailGuide('2026-09').aoa }), null);
 }
+
+// ---- audit wave 2 (ENH-08): actor fixed at event time, never re-attributed at upload
+{
+  const A = { uid: 'uid-a', email: 'A@x.com', role: 'editor' }, B = { uid: 'uid-b', email: 'b@x.com', role: 'admin' };
+  const eA = AQ.makeAuditEvent({ period: '2026-09', action: 'CLOSE', detail: 'd', app: 'v', at: '2026-09-30T10:00:00Z', actor: A, deviceId: 'dev1', eventId: 'e1' });
+  eq('ENH-08 event keeps actor uid/email/role of the moment', [eA.attribution, eA.actorUid, eA.actorEmail, eA.actorRole], ['ACTOR', 'uid-a', 'a@x.com', 'editor']);
+  const eAnon = AQ.makeAuditEvent({ period: '2026-09', action: 'SAVE', detail: '', app: 'v', actor: null, eventId: 'e2' });
+  eq('ENH-08 event without a signed-in actor is UNVERIFIED', [eAnon.attribution, eAnon.actorUid], ['UNVERIFIED', '']);
+  eq('ENH-08 A event is not uploadable by B', AQ.mayUpload(eA, B.uid), false);
+  eq('ENH-08 A event is uploadable by A', AQ.mayUpload(eA, A.uid), true);
+  eq('ENH-08 unverified event is uploadable by anyone signed in', AQ.mayUpload(eAnon, B.uid), true);
+  const part = AQ.partitionQueue([eA, eAnon], B.uid);
+  eq('ENH-08 B signing in uploads only unverified; A event waits', [part.ready.map((e) => e.eventId), part.waiting.map((e) => e.eventId)], [['e2'], ['e1']]);
+  const docB = AQ.toAuditDoc(eAnon, B);
+  eq('ENH-08 unverified event is stored under the uploader, flagged', [docB.by, docB.attribution, docB.actorUid], ['b@x.com', 'UNVERIFIED', '']);
+  const docA = AQ.toAuditDoc(eA, A);
+  eq('ENH-08 ACTOR doc carries actorUid and by == actor email', [docA.by, docA.actorUid, docA.actorEmail, docA.eventId], ['a@x.com', 'uid-a', 'a@x.com', 'e1']);
+  const legacy = AQ.normalizeQueue([{ period: '2026-08', at: '2026-08-02T00:00:00Z', action: 'OLD', detail: 'x', app: '1.14.30' }]);
+  eq('ENH-08 legacy queue entry gets an id and is UNVERIFIED', [legacy[0].attribution, typeof legacy[0].eventId, legacy[0].eventId.length > 10], ['UNVERIFIED', 'string', true]);
+  eq('ENH-08 event ids are unique', new Set([0, 1, 2, 3, 4].map(() => AQ.newEventId())).size, 5);
+  eq('ENH-08 detail capped at 2000 chars', AQ.makeAuditEvent({ period: 'p', action: 'a', detail: 'z'.repeat(3000), eventId: 'e3' }).detail.length, 2000);
+}
+
+// ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

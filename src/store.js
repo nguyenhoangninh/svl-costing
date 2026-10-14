@@ -1,6 +1,7 @@
 // Persistence: IndexedDB on this device (always) + Firestore cloud sync (when signed in).
 // Large objects are gzip-compressed and split into ≤700 KB chunks for Firestore.
 import { FIREBASE_CONFIG, ALLOWED_EMAILS, CLOUD_COLLECTION } from './config.js';
+import * as AQ from './engine/auditqueue.js';
 
 // ---------------- IndexedDB ----------------
 /** ?sandbox=1 → separate local database, cloud disabled (training / testing; never mixed with production data). */
@@ -91,7 +92,7 @@ export async function initCloud(onUser) {
       onUser(cloud.user);
       if (cloud.user) flushAudit();
     });
-  } catch (e) { cloud.offline = true; cloud.error = 'Không kết nối được Firebase — chỉ xem dữ liệu đã lưu trên máy này, không chỉnh sửa được cho đến khi kết nối lại.'; console.warn(e); cloud.ready = false; onUser(null); }
+  } catch (e) { cloud.offline = true; cloud.error = 'Không kết nối được Firebase — chưa xác thực phiên nên chưa hiển thị dữ liệu kế toán trên máy này. Kết nối lại rồi tải lại trang.'; console.warn(e); cloud.ready = false; onUser(null); }
 }
 const allowed = (email) => !ALLOWED_EMAILS.length || ALLOWED_EMAILS.map((x) => x.toLowerCase()).includes(String(email || '').toLowerCase());
 /** Popup first (works on desktop, Android and installed iOS apps); falls back to a full-page redirect where popups are not allowed. */
@@ -274,23 +275,52 @@ export async function cloudPeriods() {
   return q.docs.map((d) => ({ period: d.id, updatedAt: d.data().updatedAt, updatedBy: d.data().updatedBy, summary: d.data().summary || {} }));
 }
 
+/**
+ * Hard-delete a period that was never CLOSED (admin only). v1.14.35 (audit ENH-04), two phases:
+ *  1. one transaction removes the period POINTER, only while it is still the revision we inspected and never closed;
+ *  2. then every chunk no longer reachable from a pointer is swept.
+ * A failure after phase 1 leaves only unreferenced chunks (never a pointer to missing data); calling again finishes the sweep.
+ * Revision documents stay as history.
+ */
 export async function cloudDelete(period) {
   if (!isAdmin()) throw new Error('Chỉ quản trị viên được xoá kỳ trên cloud.');
-  const meta = await cloudMeta(period); if (!meta) return;
-  if (meta.summary && meta.summary.everClosed) throw new Error('Kỳ này đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete. Chỉ REOPEN để điều chỉnh rồi CLOSE lại.');
-  // Backward-compatible protection for periods closed before everClosed was introduced.
+  const meta = await cloudMeta(period);
+  if (meta && meta.summary && meta.summary.everClosed) throw new Error('Kỳ này đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete. Chỉ REOPEN để điều chỉnh rồi CLOSE lại.');
+  // Backward-compatible protection for periods closed before everClosed was introduced (also covers a pointer already gone).
   const revs = await cloudRevisions(period, 1000);
   if (revs.some((r) => r.summary && r.summary.closed)) throw new Error('Kỳ này đã từng CLOSED trong revision history; không được hard-delete.');
+  if (meta) {
+    await fb.F.runTransaction(fb.fs, async (t) => {
+      const s2 = await t.get(pdoc(period));
+      if (!s2.exists()) return; // already removed by an earlier attempt: go on with the sweep
+      const d = s2.data();
+      if ((d.rev || 0) !== (meta.rev || 0)) throw new ConflictError(d);
+      if (d.summary && (d.summary.everClosed || d.summary.closed)) throw new Error('Kỳ này vừa được ghi là CLOSED trên cloud; không xoá.');
+      t.delete(pdoc(period));
+    });
+  }
+  // a save that started meanwhile would have written a pointer: never sweep under a live pointer
+  if (await cloudMeta(period)) throw new Error('Kỳ này vừa được lưu lại trên cloud trong lúc xoá; chưa xoá dữ liệu. Thử lại sau khi kiểm tra.');
   await sweepChunks(period, {});
-  await fb.F.deleteDoc(pdoc(period));
 }
 
 // ---------------- append-only audit trail (svl_costing_audit) ----------------
+// v1.14.35 (audit ENH-08): the actor is captured when the event happens (cloud.user at that moment), never at upload.
+// Each event has a stable eventId used as its document id, so a repeated upload cannot create a duplicate.
 const AUDIT = 'svl_costing_audit';
 let auditQueue = [];
+let auditQueueLoaded = false;
+function deviceId() {
+  try {
+    let id = localStorage.getItem('svl.deviceId');
+    if (!id) { id = AQ.newEventId(); localStorage.setItem('svl.deviceId', id); }
+    return id;
+  } catch { return ''; }
+}
 export function cloudAudit(evt) {
   if (!cloud.enabled) return;
-  auditQueue.push(evt);
+  const actor = cloud.user ? { uid: cloud.user.uid, email: cloud.user.email, role: cloud.role } : null;
+  auditQueue.push(AQ.makeAuditEvent({ ...evt, actor, deviceId: deviceId() }));
   localSet('auditQueue', auditQueue).catch(() => {});
   flushAudit();
 }
@@ -299,11 +329,17 @@ export async function flushAudit() {
   if (flushing || !cloud.user || !fb) return;
   flushing = true;
   try {
-    if (!auditQueue.length) auditQueue = (await localGet('auditQueue')) || [];
-    while (auditQueue.length) {
-      const e = auditQueue[0];
-      await fb.F.addDoc(fb.F.collection(fb.fs, AUDIT), { ...e, by: cloud.user.email.toLowerCase(), role: cloud.role, serverAt: fb.F.serverTimestamp() });
-      auditQueue.shift();
+    if (!auditQueueLoaded) { auditQueue = AQ.normalizeQueue((await localGet('auditQueue')) || []); auditQueueLoaded = true; }
+    const me = { uid: cloud.user.uid, email: cloud.user.email, role: cloud.role };
+    for (;;) {
+      // events of another verified actor stay queued until that person signs in again
+      const i = auditQueue.findIndex((e) => AQ.mayUpload(e, me.uid));
+      if (i < 0) break;
+      const e = auditQueue[i];
+      const ref = fb.F.doc(fb.fs, AUDIT, e.eventId);
+      const ex = await fb.F.getDoc(ref);
+      if (!ex.exists()) await fb.F.setDoc(ref, { ...AQ.toAuditDoc(e, me), serverAt: fb.F.serverTimestamp() });
+      auditQueue.splice(i, 1);
       await localSet('auditQueue', auditQueue);
     }
   } catch (e) { console.warn('audit flush', e); } finally { flushing = false; }
