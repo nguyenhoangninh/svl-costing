@@ -11,7 +11,7 @@ const expected = [
 ];
 for (const text of expected) assert.ok(source.includes(text), 'Required rule not found: ' + text);
 for (const m of ['svl_costing_notifications', 'svl_costing_notification_reads', 'svl_costing_audit']) {
-  assert.equal((source.match(new RegExp('match /' + m + '/\\\\{', 'g')) || []).length, 1, 'Exactly one match block expected for ' + m);
+  assert.equal(source.split('match /' + m + '/{').length - 1, 1, 'Exactly one match block expected for ' + m);
 }
 let stack = [], mode = 'code', line = 1, closing = { '{': '}', '(': ')', '[': ']' };
 for (let i=0; i<source.length; i++) {
