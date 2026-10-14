@@ -41,7 +41,9 @@ function miLines(ds, erp, period) {
  * Đơn giá xuất NVL trong kỳ và danh sách vật tư / dòng biến động bất thường.
  * Trả về { materials, lines, summary, missing } — materials sắp theo mức độ bất thường.
  */
-export function materialIssueCosts(datasets, period) {
+export function materialIssueCosts(datasets, period, opts = {}) {
+  const DEV = Number.isFinite(opts.dev) ? opts.dev : MATCOST_DEV;
+  const MIN = Number.isFinite(opts.minCost) ? opts.minCost : MATCOST_MIN_COST;
   const all = []; const missing = [];
   for (const erp of ['T', 'S', 'O']) {
     const ds = datasets && datasets[`MI-M-${erp}`];
@@ -71,7 +73,7 @@ export function materialIssueCosts(datasets, period) {
     let nDev = 0, maxDev = 0;
     for (const l of g.costed) {
       const u = l.cost / l.qty, dev = ref > 0 ? u / ref - 1 : 0;
-      if (l.cost >= MATCOST_MIN_COST && Math.abs(dev) > MATCOST_DEV) {
+      if (l.cost >= MIN && Math.abs(dev) > DEV) {
         nDev++;
         if (Math.abs(dev) > Math.abs(maxDev)) maxDev = dev;
         flaggedLines.push({ ...l, unitCost: u, bq, ref, dev, flag: 'REVIEW - BẤT THƯỜNG' });
@@ -92,7 +94,7 @@ export function materialIssueCosts(datasets, period) {
     materials: materials.length, flagged: materials.filter((m) => m.flag === 'REVIEW - BẤT THƯỜNG').length,
     missingCost: materials.filter((m) => m.flag === 'REVIEW - THIẾU COST').length,
     flaggedLines: flaggedLines.length, zeroCostLines: materials.reduce((a, m) => a + m.nZero, 0),
-    lines: all.length, dev: MATCOST_DEV, minCost: MATCOST_MIN_COST,
+    lines: all.length, dev: DEV, minCost: MIN,
   };
   return { materials, lines: flaggedLines, summary, missing };
 }

@@ -18,6 +18,16 @@ import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
 import { step2ReportSheets, ruleSummary, ruleOf } from './engine/step2report.js';
 import { materialIssueCosts, MATCOST_DEV, MATCOST_MIN_COST } from './engine/matcost.js';
+// v1.14.46: ngưỡng bất thường của bảng đơn giá xuất NVL (chỉ ảnh hưởng hiển thị, không ảnh hưởng tính giá thành)
+const MC_KEY = 'svl.matcostOpts';
+function mcOpts() {
+  try {
+    const o = JSON.parse(localStorage.getItem(MC_KEY) || 'null');
+    if (o && Number.isFinite(o.dev) && o.dev > 0 && Number.isFinite(o.minCost) && o.minCost >= 0) return { dev: o.dev, minCost: o.minCost };
+  } catch { /* localStorage không dùng được: dùng mặc định */ }
+  return { dev: MATCOST_DEV, minCost: MATCOST_MIN_COST };
+}
+function setMcOpts(o) { try { if (o) localStorage.setItem(MC_KEY, JSON.stringify(o)); else localStorage.removeItem(MC_KEY); } catch { /* bỏ qua */ } render(); }
 import * as TPL from './engine/templates.js';
 import * as DQ from './engine/dataquality.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
@@ -704,9 +714,13 @@ function dqSection(dq) {
 }
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
-  const mc = materialIssueCosts(S.d.datasets, S.period); // v1.14.43: đơn giá xuất NVL (MI-M) và dòng bất thường
+  const mcO = mcOpts();
+  const mc = materialIssueCosts(S.d.datasets, S.period, mcO); // v1.14.43: đơn giá xuất NVL (MI-M) và dòng bất thường
   const mcSec = `<h2>Đơn giá xuất NVL trong kỳ (MI-M)</h2>
-    ${mc.materials.length ? `<p class="muted">Đơn giá = Total Cost ÷ SL xuất (dòng SL > 0). Đơn giá BQ = tổng cost ÷ tổng SL của các dòng có cost. Đơn giá chuẩn = trung vị các đơn giá dòng. Bất thường: dòng có thành tiền ≥ ${fmtNum(MATCOST_MIN_COST)} VND lệch > ${Math.round(MATCOST_DEV * 100)}% so với đơn giá chuẩn. Thiếu cost: dòng SL > 0 nhưng Total Cost = 0 (không tính vào BQ).</p>
+    <div class="row"><label>Ngưỡng lệch (%) <input id="mc-dev" type="number" min="1" step="1" value="${Math.round(mcO.dev * 100)}" style="width:90px"></label>
+    <label>Thành tiền tối thiểu (VND) <input id="mc-min" type="number" min="0" step="100000" value="${mcO.minCost}" style="width:150px"></label>
+    <button class="btn ghost" id="mc-reset" type="button">Mặc định</button></div>
+    ${mc.materials.length ? `<p class="muted">Đơn giá = Total Cost ÷ SL xuất (dòng SL > 0). Đơn giá BQ = tổng cost ÷ tổng SL của các dòng có cost. Đơn giá chuẩn = trung vị các đơn giá dòng. Bất thường: dòng có thành tiền ≥ ${fmtNum(mcO.minCost)} VND lệch > ${Math.round(mcO.dev * 100)}% so với đơn giá chuẩn. Thiếu cost: dòng SL > 0 nhưng Total Cost = 0 (không tính vào BQ). Ngưỡng chỉ ảnh hưởng bảng này, không ảnh hưởng tính giá thành.</p>
     <p class="muted">${fmtNum(mc.summary.materials)} vật tư · ${fmtNum(mc.summary.flagged)} vật tư bất thường · ${fmtNum(mc.summary.missingCost)} vật tư thiếu cost · ${fmtNum(mc.summary.flaggedLines)} dòng lệch · ${fmtNum(mc.summary.zeroCostLines)} dòng cost = 0${mc.missing.length ? ` · chưa có MI-M hệ ${esc(mc.missing.join(', '))}` : ''}</p>
     <div id="t-mc"></div>
     <h2>Dòng xuất lệch bất thường</h2><div id="t-mc-lines"></div>` : `<p class="muted">Chưa có dữ liệu MI-M trong kỳ ${esc(S.period)}.</p>`}`;
@@ -735,6 +749,16 @@ VIEWS.step1 = (el) => {
     const pcols = DQ.PCR_FIELDS.map((f, i) => ({ key: f, label: DQ.PCR_HEADERS[i], type: ['pcp', 'pcm', 'diff'].includes(f) ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 260 : f === 'erp' ? 50 : ['pcp', 'pcm', 'diff'].includes(f) ? 170 : 130 }));
     mountTable($('#t-pcrec'), { columns: pcols, rows: c.dq.recon.issues, filterKey: 'type', height: 300, totals: ['pcp', 'pcm', 'diff'], onExport: exportTable('01_DOI_CHIEU_PCP_PCM', pcols) });
   }
+  const mcDev = $('#mc-dev'), mcMin = $('#mc-min');
+  const mcApply = () => {
+    const dv = Number(mcDev && mcDev.value), mn = Number(mcMin && mcMin.value);
+    if (!(dv > 0) || !(mn >= 0) || !Number.isFinite(dv) || !Number.isFinite(mn)) { toast('Ngưỡng lệch phải > 0 và thành tiền tối thiểu ≥ 0.', 'review'); return; }
+    setMcOpts({ dev: dv / 100, minCost: mn });
+  };
+  if (mcDev) mcDev.addEventListener('change', mcApply);
+  if (mcMin) mcMin.addEventListener('change', mcApply);
+  const mcReset = $('#mc-reset');
+  if (mcReset) mcReset.addEventListener('click', () => setMcOpts(null));
   if (mc.materials.length && $('#t-mc')) {
     const mcCols = [{ key: 'erp', label: 'Hệ', width: 60 }, { key: 'code', label: 'Mã VT', width: 130 }, { key: 'name', label: 'Tên vật tư', width: 300 }, { key: 'unit', label: 'ĐVT', width: 70 },
       { key: 'nLines', label: 'Số dòng', type: 'int', width: 90 }, { key: 'qty', label: 'SL xuất', type: 'qty', width: 120 }, { key: 'cost', label: 'Giá trị xuất', type: 'num', width: 150 },
