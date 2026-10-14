@@ -121,12 +121,20 @@ export function view(el) {
 function form(box, S, r, c) {
   const st = utxt(r.rwStatus);
   const v = (x) => esc(x ?? '');
+  // v1.14.31: tiêu dùng nội bộ được xác nhận / hoàn tác ở màn 2B, không xử lý ở đây
+  if (st === 'CONSUMPTION') {
+    box.innerHTML = `<div class="card" style="padding:12px;margin:8px 0"><h2 style="margin-top:0">Xử lý: ${esc(r.rid)}</h2>
+      <p class="muted">Dòng này là <b>tiêu dùng nội bộ (632 / 155)</b>. Hoàn tác hoặc xác nhận ở màn <b>2B · Sổ FG Stock Out / Rework</b>, khối "Tiêu dùng nội bộ".</p>
+      <div class="row"><button class="btn ghost" type="button" id="rw-cancel">Đóng</button></div></div>`;
+    box.querySelector('#rw-cancel').addEventListener('click', () => { S.rwSel = null; A.render(); });
+    return;
+  }
   const dt = typeof r.compDate === 'number' ? serialToISO(r.compDate) : '';
   box.innerHTML = `<form id="f-rw" class="card" style="padding:12px;margin:8px 0;border:1px solid var(--line, #ccc);border-radius:10px">
     <h2 style="margin-top:0">Xử lý: ${esc(r.rid)}</h2>
     <p class="muted">${esc(r.fg)} · ${esc(r.fgName || '')} · SL ${A.fmtNum(r.qty)} · giá trị FIFO ${A.fmtNum(r.cost)} VND · xuất ${esc(r.origin)} (${r.age} tháng)</p>
     <div class="row" style="flex-wrap:wrap;gap:12px">
-      <label>Hướng xử lý <select name="st">${RW_STATUSES.map((x) => `<option value="${x}" ${x === st ? 'selected' : ''}>${esc(ST_VI[x])} (${x})</option>`).join('')}</select></label>
+      <label>Hướng xử lý <select name="st">${RW_STATUSES.filter((x) => x !== 'CONSUMPTION').map((x) => `<option value="${x}" ${x === st ? 'selected' : ''}>${esc(ST_VI[x])} (${x})</option>`).join('')}</select></label>
       <label>Loại <select name="ty">${['NORMAL', 'ABNORMAL'].map((x) => `<option ${x === utxt(r.rwType) ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
       <label data-for="COMPLETED">PC rework <input name="pc" value="${v(r.pcNo)}" style="width:140px"></label>
       <label data-for="COMPLETED">FG đầu ra <input name="out" value="${v(r.outFG || r.fg)}" style="width:140px"></label>

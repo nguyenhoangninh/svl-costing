@@ -1,7 +1,7 @@
 // SVL Costing Web — application shell (state, persistence, views)
-import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
+import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, utxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
-import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
+import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS, confirmConsFg, undoConsFg, consFgEligible, consFgConfirmed, consFgPendingCount } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
@@ -20,13 +20,13 @@ import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
+const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, consumeCfg: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, consumeCfg: null, consFg: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -272,7 +272,7 @@ function guardPeriod() {
 const guardMutate = () => guardEdit() && guardPeriod();
 const who = () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này');
 const canEditPeriod = () => store.canEdit() && !isClosed();
-const WRITE_ACTS = new Set(['new-period', 'dq-confirm', 'dq-unconfirm', 'run-step2', 'pc-basis-apply', 'pc-basis-undo', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
+const WRITE_ACTS = new Set(['new-period', 'dq-confirm', 'dq-unconfirm', 'cfg-fg-save', 'cfg-fg-confirm', 'cfg-fg-undo', 'run-step2', 'pc-basis-apply', 'pc-basis-undo', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
 
 /** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
 function parseNum(v, label) {
@@ -811,15 +811,64 @@ function bfFromRow(r) {
 }
 
 // ---------- 2B register ----------
+/** v1.14.31: khối tiêu dùng nội bộ (CONSUMPTION) – chọn dòng, lưu nháp, xác nhận, hoàn tác. Tách khỏi bảng rework. */
+const cfgChecked = () => [...document.querySelectorAll('input[data-cfg-fg]:checked')].map((i) => i.dataset.cfgFg);
+function cfgSumText(root) {
+  const boxes = [...root.querySelectorAll('input[data-cfg-fg]:checked')];
+  return `Đã tick ${fmtNum(boxes.length)} dòng · SL ${fmtNum(boxes.reduce((a, b) => a + num(b.dataset.qty), 0))}`;
+}
+function consFgPanel(reg) {
+  const canEdit = canEditPeriod();
+  const draft = S.d.consFg || { rids: [], reason: '' };
+  const draftSet = new Set(draft.rids || []);
+  const rows = reg.rows.filter((r) => consFgEligible(r) || consFgConfirmed(r));
+  const confirmed = reg.rows.filter(consFgConfirmed);
+  const pending = consFgPendingCount(reg.rows);
+  const fifoSum = confirmed.filter((r) => utxt(r.fifoStatus) === 'PASS').reduce((a, r) => a + num(r.fifoCost), 0);
+  const dis = canEdit ? '' : 'disabled';
+  const tr = (r) => {
+    const conf = consFgConfirmed(r);
+    const chk = conf ? '<span class="pill s-pass">ĐÃ XÁC NHẬN</span>' : `<input type="checkbox" data-cfg-fg="${esc(r.rid)}" data-qty="${num(r.issueQty)}" ${draftSet.has(r.rid) ? 'checked' : ''} ${dis} aria-label="Chọn ${esc(r.rid)}">`;
+    const undo = conf && canEdit ? `<button class="btn ghost" type="button" data-act="cfg-fg-undo" data-rid="${esc(r.rid)}">Hoàn tác</button>` : '';
+    return `<tr data-q="${esc(`${r.rid} ${r.fg} ${r.fgName || ''}`.toLowerCase())}"><td>${chk}</td><td>${esc(r.rid)}</td><td>${fmtCell(r.issueDate, 'date')}</td><td>${esc(r.fg)}</td><td>${esc(r.fgName || '')}</td><td class="r">${fmtNum(num(r.issueQty))}</td><td class="r">${fmtNum(num(r.erpRef))}</td><td class="r">${conf ? fmtNum(num(r.fifoCost)) : '–'}</td><td>${conf ? pill(r.fifoStatus) : ''}</td><td>${undo}</td></tr>`;
+  };
+  return `<section class="cfg-fg" style="margin:8px 0 16px">
+    <h2>Tiêu dùng nội bộ (632 / 155)</h2>
+    <p class="muted">FG xuất ra dùng nội bộ: không bán và không đi qua rework WIP (154). Tick dòng → nhập lý do → <b>Lưu nháp</b> (chỉ lưu danh sách, chưa đổi số liệu) hoặc <b>Xác nhận tiêu dùng nội bộ</b> (chuyển các dòng sang CONSUMPTION). Sau đó chạy <b>RUN FIFO (STEP 5.2)</b> để tính giá theo ngày xuất.</p>
+    ${pending ? `<div class="alert review">${fmtNum(pending)} dòng tiêu dùng nội bộ chưa được tính giá – chạy RUN FIFO (STEP 5.2) để ghi Nợ 632 / Có 155.</div>` : ''}
+    ${canEdit ? '' : '<div class="alert review">Kỳ đã đóng hoặc bạn không có quyền sửa – chỉ xem.</div>'}
+    <div class="kpis">${kpiN('Đã xác nhận (dòng)', confirmed.length)}${kpi('Giá FIFO đã tính (632 / 155)', fifoSum)}${kpiN('Đang tick (chưa xác nhận)', draftSet.size)}</div>
+    ${rows.length ? `<p><label>Lọc: <input type="search" id="cfg-q" placeholder="Rework ID, mã FG, tên…" style="min-width:260px"></label></p>
+    <div style="overflow:auto;max-height:440px;border:1px solid var(--rule)"><table class="cp"><thead><tr><th>Chọn</th><th>Rework ID</th><th>Ngày xuất</th><th>FG Code</th><th>Tên FG</th><th class="r">SL xuất</th><th class="r">ERP memo</th><th class="r">Giá FIFO (VND)</th><th>Trạng thái FIFO</th><th></th></tr></thead>
+    <tbody>${rows.map(tr).join('')}</tbody></table></div>` : emptyNote('Chưa có dòng FG nào đang hoạt động trong kỳ này để chọn tiêu dùng nội bộ.')}
+    <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px">
+      <label style="flex:1;min-width:260px">Lý do <input id="cfg-reason" value="${esc(draft.reason || '')}" ${dis} placeholder="Bắt buộc khi xác nhận (≥ 5 ký tự), ví dụ: Dùng làm mẫu thử nội bộ" style="width:100%"></label>
+      <span id="cfg-sum" class="muted"></span>
+      <button class="btn ghost" type="button" data-act="cfg-fg-save" ${dis}>Lưu nháp</button>
+      <button class="btn" type="button" data-act="cfg-fg-confirm" ${dis}>Xác nhận tiêu dùng nội bộ</button>
+    </div></section>`;
+}
+function bindConsFg(el) {
+  const sum = () => { const t = el.querySelector('#cfg-sum'); if (t) t.textContent = cfgSumText(el); };
+  el.querySelectorAll('input[data-cfg-fg]').forEach((cb) => cb.addEventListener('change', sum));
+  const q = el.querySelector('#cfg-q');
+  if (q) q.addEventListener('input', () => {
+    const t = q.value.trim().toLowerCase();
+    el.querySelectorAll('.cfg-fg tbody tr').forEach((row) => { row.style.display = !t || row.dataset.q.includes(t) ? '' : 'none'; });
+  });
+  sum();
+}
 VIEWS.rework = (el) => {
   const reg = S.d.register;
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">FG xuất kho đi rework không phải tiêu hao NVL. Cập nhật loại, trạng thái và lô PC rework ở đây; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO được tính khi chạy STEP 5.2 (FIFO rework). Xử lý dòng treo (hoàn thành / trả về kho / ra chi phí) ở <a href="#rwflow">màn hình 5B · Xử lý Rework</a>.</p></div>
+    <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">Sổ gồm FG xuất đi rework (bảng bên dưới) và FG tiêu dùng nội bộ (khối trên, có xác nhận riêng). Cập nhật loại, trạng thái và lô PC rework ở bảng; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO được tính khi chạy STEP 5.2 (FIFO rework). Xử lý dòng treo (hoàn thành / trả về kho / ra chi phí) ở <a href="#rwflow">màn hình 5B · Xử lý Rework</a>.</p></div>
     ${reg ? `<div class="result"><span>Kiểm tra dữ liệu nhập</span>${pill(reg.rows.filter((r) => String(r.inputCheck).startsWith('BLOCK')).length ? 'BLOCK' : 'PASS')}<small>${reg.stats.rows} dòng kỳ này · ${reg.stats.bfRows} dòng B/F</small></div>` : ''}</header>
     ${reg ? `<div class="kpis">${kpiN('Số lượng FG xuất', reg.stats.issueQty)}${kpi('Giá trị ERP (memo – không dùng tính giá)', reg.stats.erpRef)}${kpi('Giá trị FIFO (dùng tính giá)', reg.rows.filter((r) => r.active === 'Y').reduce((a, r) => a + num(r.fifoCost), 0))}${kpi('Rework WIP chuyển sang (B/F)', reg.stats.bfCost)}${kpi('Closing Rework WIP', reg.rows.reduce((a, r) => a + num(r.closingWIP), 0))}</div>
+    ${consFgPanel(reg)}
     <div id="t-rw"></div>` : emptyNote('Sổ được tạo khi chạy STEP 2.', 'step2', 'Mở STEP 2')}
   </section>`;
   if (!reg) return;
+  bindConsFg(el);
   const types = { issueQty: 'qty', erpRef: 'num', compQty: 'qty', scrapQty: 'qty', fifoQty: 'qty', fifoCost: 'num', closingWIP: 'num', carryIn: 'num', bfQty: 'qty', bfCost: 'num', issueDate: 'date', compDate: 'date', srcRow: 'int', inputCheck: 'status', fifoStatus: 'status', lastFifoRun: 'date' };
   const editable = { rwType: ['NORMAL', 'ABNORMAL'], rwStatus: ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF', 'CONSUMPTION'], pcNo: null, outFG: null, compDate: null, compQty: null, scrapQty: null, note: null };
   const cols = RW_FIELDS.map((f, i) => ({ key: f, label: RW_HEADERS[i], type: types[f] || 'text', width: f === 'rid' ? 250 : f === 'fgName' ? 240 : f === 'note' ? 200 : ['inputCheck', 'fifoStatus'].includes(f) ? 190 : 110, editable: f in editable, options: editable[f] || undefined }))
@@ -828,6 +877,11 @@ VIEWS.rework = (el) => {
     columns: cols, rows: reg.rows, filterKey: 'inputCheck', height: 520, totals: ['issueQty', 'erpRef', 'closingWIP', 'carryIn'],
     onExport: exportTable('03_FG_REWORK_INPUT', cols),
     onEdit: !canEditPeriod() ? undefined : (row, k, val) => {
+      if (k === 'rwStatus' && (utxt(val) === 'CONSUMPTION' || consFgConfirmed(row))) {
+        // v1.14.31: tiêu dùng nội bộ chỉ thao tác ở khối phía trên (xác nhận / hoàn tác), không qua dropdown của bảng
+        toast(consFgConfirmed(row) && utxt(val) !== 'CONSUMPTION' ? 'Dòng đang là tiêu dùng nội bộ: dùng nút Hoàn tác ở khối phía trên.' : 'Chọn tiêu dùng nội bộ ở khối "Tiêu dùng nội bộ (632 / 155)" phía trên.', 'review');
+        render(); return;
+      }
       if (k === 'compDate') row[k] = val ? ((Date.UTC(+val.slice(0, 4), +val.slice(5, 7) - 1, +val.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000) : null;
       else if (['compQty', 'scrapQty'].includes(k)) { const v = parseNum(val, k); if (v === undefined) return; row[k] = v; }
       else row[k] = val;
@@ -1380,6 +1434,36 @@ document.addEventListener('click', async (e) => {
       S.d.importAck = { parts, by: who(), at: nowISO() };
       audit('ERP DATA ANOMALY UNCONFIRM', `Phần ${key} (${DQ.DQ_PARTS[key]}) · xóa xác nhận · ${who()}`);
       markDirty('importAck', 'audit'); toast(`Đã xóa xác nhận phần ${key}. STEP 2 bị chặn cho đến khi xác nhận lại.`, 'review'); render(); break;
+    }
+    case 'cfg-fg-save': {
+      if (!guardMutate()) break;
+      const ids = cfgChecked(); const reason = (document.querySelector('#cfg-reason')?.value || '').trim();
+      S.d.consFg = { rids: ids, reason, by: who(), at: nowISO() };
+      audit('2B CONSUMPTION DRAFT', `${ids.length} dòng tick · ${reason || '(chưa có lý do)'}`);
+      markDirty('consFg', 'audit'); toast(`Đã lưu nháp ${ids.length} dòng. Chưa đổi trạng thái hay số liệu – bấm Xác nhận để áp dụng.`, 'pass'); render(); break;
+    }
+    case 'cfg-fg-confirm': {
+      if (!guardMutate()) break;
+      const ids = cfgChecked(); const reason = (document.querySelector('#cfg-reason')?.value || '').trim();
+      if (!ids.length) { toast('Chưa tick dòng nào để xác nhận.', 'review'); break; }
+      if (reason.length < 5) { toast('Nhập lý do (ít nhất 5 ký tự) trước khi xác nhận.', 'review'); break; }
+      const qty = S.d.register.rows.filter((r) => ids.includes(r.rid)).reduce((a, r) => a + num(r.issueQty), 0);
+      if (!confirm(`Xác nhận ${ids.length} dòng FG làm tiêu dùng nội bộ (SL ${fmtNum(qty)})?\nSố tiền ghi Nợ 632 / Có 155 sẽ được tính khi chạy RUN FIFO (STEP 5.2).`)) break;
+      const res = confirmConsFg(S.d.register.rows, ids, reason, who(), nowISO());
+      if (!res.ok) { toast(res.error, 'review'); break; }
+      S.d.consFg = null;
+      audit('2B CONSUMPTION CONFIRM', `${res.rows.length} dòng · SL ${fmtNum(qty)} · ${reason} · ${res.rows.map((r) => r.rid).join(', ')}`);
+      markDirty('register', 'consFg', 'audit'); toast(`Đã xác nhận ${res.rows.length} dòng tiêu dùng nội bộ. Chạy RUN FIFO (STEP 5.2) để tính giá.`, 'pass'); render(); break;
+    }
+    case 'cfg-fg-undo': {
+      if (!guardMutate()) break;
+      const row = S.d.register && S.d.register.rows.find((x) => x.rid === a.dataset.rid);
+      if (!row) break;
+      if (!confirm(`Hoàn tác tiêu dùng nội bộ dòng ${row.rid}? Dòng trở về OPEN và phải chạy lại RUN FIFO (STEP 5.2).`)) break;
+      const res = undoConsFg(row, who(), nowISO());
+      if (!res.ok) { toast(res.error, 'review'); break; }
+      audit('2B CONSUMPTION UNDO', `${row.rid} → OPEN`);
+      markDirty('register', 'audit'); toast(`Đã hoàn tác ${row.rid}.`, 'review'); render(); break;
     }
     case 'sales-tpl': await exportBook(`SVL_Sales_Revenue_Import_Template_v2_${S.period}.xlsx`, TPL.salesTemplate(S.period)); break;
     case 'ret-tpl': await exportBook(`SVL_Sales_Returns_Import_Template_v1_${S.period}.xlsx`, TPL.returnsTemplate(S.period)); break;
