@@ -525,7 +525,10 @@ function renderShell() {
   renderSync();
 }
 
+// v1.14.55: each process stage has its own table-header hue (body[data-stage]); overview and tools stay slate
+const STAGE_OF = { step1: 's1', step2: 's2', rework: 's2', opening: 's3', step3: 's3', p3b: 's3', sales: 's4', gl: 's4', step4: 's4', fgprod: 's4', fgopen: 's5', step5: 's5', rwflow: 's5', salesreturn: 's5', close: 's5' };
 function render() {
+  document.body.dataset.stage = STAGE_OF[S.view] || 's0';
   // v1.14.35 (audit ENH-05): no local accounting data is shown until a Firebase session is confirmed (no offline bypass)
   if (store.needsSignIn() || (store.cloud.enabled && !store.cloud.user)) {
     document.body.classList.add('auth-screen');
@@ -1094,7 +1097,7 @@ function consFgPanel(reg) {
     <p class="muted">FG xuất ra dùng nội bộ: không bán và không đi qua rework WIP (154). Tick dòng → nhập lý do → <b>Lưu nháp</b> (chỉ lưu danh sách) hoặc <b>Xác nhận tiêu dùng nội bộ</b> (chuyển các dòng sang CONSUMPTION). Sau đó chạy <b>RUN FIFO (STEP 5.2)</b> để tính giá theo ngày xuất.</p>
     ${pending ? `<div class="alert review">${fmtNum(pending)} dòng tiêu dùng nội bộ chưa được tính giá – chạy RUN FIFO (STEP 5.2) để ghi Nợ 632 / Có 155.</div>` : ''}
     ${canEdit ? '' : '<div class="alert review">Kỳ đã đóng hoặc bạn không có quyền sửa – chỉ xem.</div>'}
-    <div class="kpis">${kpiN('Đã xác nhận (dòng)', confirmed.length)}${kpi('Giá FIFO đã tính (632 / 155)', fifoSum)}</div>
+    <div class="kpis">${kpiN('Đã xác nhận (dòng)', confirmed.length, { sub: 'Dòng FG chuyển sang tiêu dùng nội bộ' })}${kpi('Giá FIFO đã tính (632 / 155)', fifoSum, false, { tone: 'out', sub: 'Nợ 632 / Có 155 sau STEP 5.2' })}</div>
     ${rows.length ? `<div class="cons-bar">
         <label class="grow">Tìm kiếm<input type="search" id="cfg-q" placeholder="Rework ID, mã FG, tên…"></label>
         <span class="muted cons-vis" id="cfg-sum"></span></div>
@@ -1123,7 +1126,7 @@ VIEWS.rework = (el) => {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 2B · Sổ FG Stock Out / Rework</h1><p class="lead">Sổ gồm FG xuất đi rework (bảng bên dưới) và FG tiêu dùng nội bộ (khối trên, có xác nhận riêng). Cập nhật loại, trạng thái và lô PC rework ở bảng; dữ liệu nhập tay được giữ khi chạy lại STEP 2. Giá trị FIFO được tính khi chạy STEP 5.2 (FIFO rework). Xử lý dòng treo (hoàn thành / trả về kho / ra chi phí) ở <a href="#rwflow">màn hình 5B · Xử lý Rework</a>.</p></div>
     ${reg ? `<div class="result"><span>Kiểm tra dữ liệu nhập</span>${pill(reg.rows.filter((r) => String(r.inputCheck).startsWith('BLOCK')).length ? 'BLOCK' : 'PASS')}<small>${reg.stats.rows} dòng kỳ này · ${reg.stats.bfRows} dòng B/F</small></div>` : ''}</header>
-    ${reg ? `<div class="kpis">${kpiN('Số lượng FG xuất', reg.stats.issueQty)}${kpi('Giá trị ERP (memo – không dùng tính giá)', reg.stats.erpRef)}${kpi('Giá trị FIFO (dùng tính giá)', reg.rows.filter((r) => r.active === 'Y').reduce((a, r) => a + num(r.fifoCost), 0))}${kpi('Rework WIP chuyển sang (B/F)', reg.stats.bfCost)}${kpi('Closing Rework WIP', reg.rows.reduce((a, r) => a + num(r.closingWIP), 0))}</div>
+    ${reg ? `<div class="kpis">${kpiN('Số lượng FG xuất', reg.stats.issueQty, { sub: `${fmtNum(reg.rows.length) || 0} dòng trong sổ` })}${kpi('Giá trị ERP (memo)', reg.stats.erpRef, false, { tone: 'base', sub: 'Chỉ để đối chiếu, không dùng tính giá' })}${kpi('Giá trị FIFO (dùng tính giá)', reg.rows.filter((r) => r.active === 'Y').reduce((a, r) => a + num(r.fifoCost), 0), false, { tone: 'out', sub: 'Tính khi chạy STEP 5.2' })}${kpi('Rework WIP chuyển sang (B/F)', reg.stats.bfCost, false, { tone: 'base', sub: 'Số dư rework kỳ trước' })}${kpi('Closing Rework WIP', reg.rows.reduce((a, r) => a + num(r.closingWIP), 0), true, { tone: 'res', sub: 'TK 154 rework cuối kỳ' })}</div>
     ${consFgPanel(reg)}
     <div id="t-rw"></div>` : emptyNote('Sổ được tạo khi chạy STEP 2.', 'step2', 'Mở STEP 2')}
   </section>`;
@@ -1179,7 +1182,7 @@ VIEWS.opening = (el) => {
     mountTable($('#t-op'), { columns: cols, rows: op.rows, filterKey: 'status', totals: ['qty', 'amt'], height: 520, onExport: exportTable('WIP_OPENING', cols) });
   }
 };
-const kpiN = (label, n) => `<div class="kpi"><span>${esc(label)}</span><b>${n === undefined || n === null ? '—' : typeof n === 'string' ? esc(n) : fmtNum(n)}</b></div>`;
+const kpiN = (label, n, opts = {}) => `<div class="kpi t-${opts.tone || 'cnt'}"><span>${esc(label)}</span><b>${n === undefined || n === null ? '—' : typeof n === 'string' ? esc(n) : n === 0 ? '0' : fmtNum(n)}</b><small>${opts.sub || ''}</small></div>`;
 
 async function importOpening(file) {
   if (!file || !guardMutate()) return;
@@ -1880,7 +1883,7 @@ function cardTables(root) {
       if (tds.length === 1) tr.classList.add('sep');
       tds.forEach((td, i) => {
         td.dataset.label = heads[i] || ''; const tx = td.textContent.trim();
-        if ((!tx && !td.querySelector('select,input,button')) || (/^(Chênh lệch|Difference)$/i.test(heads[i] || '') && /^[–-]?$/.test(tx))) td.classList.add('empty');
+        if ((!tx && !td.querySelector('select,input,button')) || (/^(Chênh lệch|Difference)$/i.test(heads[i] || '') && /^[–-]?$/.test(tx))) td.classList.add('na');
       });
     }
   }
