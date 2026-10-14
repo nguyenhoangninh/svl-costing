@@ -946,13 +946,13 @@ VIEWS.step2 = (el) => {
     ${consumptionSection(s2)}
     ${s2 ? `
     <div class="s2-stack">
-      <div class="s2-block"><h2>Đối chiếu theo hệ nguồn</h2><table class="cp s2-rec"><thead><tr><th rowspan="2">Hệ nguồn</th><th class="r" rowspan="2">Stock Out nguồn</th><th class="r" colspan="3" style="text-align:center">Đã phân bổ vào lô PC của hệ</th><th class="r" rowspan="2">Tổng đã phân bổ</th><th class="r" rowspan="2">Chưa phân bổ</th><th class="r" rowspan="2">Chênh lệch</th><th rowspan="2">Trạng thái</th></tr>
-        <tr><th class="r"><span class="erp erp-T">T</span></th><th class="r"><span class="erp erp-S">S</span></th><th class="r"><span class="erp erp-O">O</span></th></tr></thead><tbody>
+      <div class="s2-block"><h2>Đối chiếu theo hệ nguồn</h2><table class="cp s2-rec"><thead><tr><th rowspan="2">Hệ nguồn</th><th class="r" rowspan="2">Stock Out nguồn</th><th class="grp" colspan="3">Đã phân bổ vào lô PC của hệ</th><th class="r" rowspan="2">Tổng đã phân bổ</th><th class="r" rowspan="2">Chưa phân bổ</th><th class="r" rowspan="2">Chênh lệch</th><th rowspan="2">Trạng thái</th></tr>
+        <tr><th class="r sys-col"><span class="erp erp-T">T</span></th><th class="r sys-col"><span class="erp erp-S">S</span></th><th class="r sys-col"><span class="erp erp-O">O</span></th></tr></thead><tbody>
       ${(() => {
         // allocated amount by source system × system of the receiving PC lot (detail col 0 = source, 6 = PC system, 8 = PC No., 15 = amount)
         const m = {}; for (const x of s2.detail) if (x[8]) { const k = x[0] + '>' + x[6]; m[k] = (m[k] || 0) + num(x[15]); }
         const cell = (src, t) => (src === 'TOTAL' ? ['T', 'S', 'O'].reduce((a, e) => a + (m[e + '>' + t] || 0), 0) : m[src + '>' + t] || 0);
-        return [...s2.summary, s2.total].map((r) => `<tr class="${r.erp === 'TOTAL' ? 'tot' : ''}"><td>${r.erp === 'TOTAL' ? 'Tổng' : `<span class="erp erp-${r.erp}">${r.erp}</span>`}</td><td class="r">${v(r.src)}</td><td class="r">${v(cell(r.erp, 'T'))}</td><td class="r">${v(cell(r.erp, 'S'))}</td><td class="r">${v(cell(r.erp, 'O'))}</td><td class="r">${v(r.alloc)}</td><td class="r">${v(r.unalloc)}</td><td class="r">${v(r.diff)}</td><td>${pill(r.status)}</td></tr>`).join('');
+        return [...s2.summary, s2.total].map((r) => `<tr class="${r.erp === 'TOTAL' ? 'tot' : ''}"><td>${r.erp === 'TOTAL' ? 'Tổng' : `<span class="erp erp-${r.erp}">${r.erp}</span>`}</td><td class="r">${v(r.src)}</td>${['T', 'S', 'O'].map((t) => { const x = cell(r.erp, t); return `<td class="r sys-col${Math.abs(x) < 0.005 ? ' zero' : ''}">${v(x)}</td>`; }).join('')}<td class="r">${v(r.alloc)}</td><td class="r">${v(r.unalloc)}</td><td class="r">${v(r.diff)}</td><td>${pill(r.status)}</td></tr>`).join('');
       })()}
       </tbody></table><p class="muted">Hệ S không có lô PC-P nên Stock Out hệ S được phân bổ sang lô hệ T (location DS/DN → mã SP*) hoặc hệ O (VE*, MK*); location khác chia đều cho T + O.</p></div>
       <div class="s2-block"><h2>Phân loại Stock Out (NVL / FG)</h2><table class="cp s2-cls"><tbody>
@@ -1820,11 +1820,26 @@ window.addEventListener('hashchange', () => { routeFromHash(); closeNav(); rende
 const isPhone = () => matchMedia('(max-width: 699px)').matches;
 /** Checkpoint sections stay open on larger screens; on phones only the ones that need attention are open. */
 const cpOpen = (status) => (!isPhone() || !String(status).startsWith('PASS') ? 'open' : '');
+/** Column labels of a header that may span several rows (rowspan / colspan): "Group · Column" per body column. */
+function headLabels(t) {
+  const grid = [];
+  [...t.querySelectorAll('thead tr')].forEach((tr, ri) => {
+    let c = 0;
+    for (const th of tr.children) {
+      while (grid[ri] && grid[ri][c] !== undefined) c++;
+      const rs = th.rowSpan || 1, cs = th.colSpan || 1, tx = th.textContent.trim();
+      for (let r = ri; r < ri + rs; r++) { grid[r] = grid[r] || []; for (let k = c; k < c + cs; k++) grid[r][k] = tx; }
+      c += cs;
+    }
+  });
+  const n = Math.max(0, ...grid.map((r) => r.length));
+  return Array.from({ length: n }, (_, k) => [...new Set(grid.map((r) => r[k]).filter(Boolean))].join(' · '));
+}
 /** Phone layout: checkpoint tables become label/value cards (labels taken from the table header). */
 function cardTables(root) {
   for (const t of root.querySelectorAll('table.cp')) {
     if (t.classList.contains('el')) continue;
-    const heads = [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    const heads = headLabels(t);
     if (!heads.length) continue;
     t.classList.add('cards');
     for (const tr of t.querySelectorAll('tbody tr')) {
