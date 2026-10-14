@@ -674,7 +674,8 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
     D18('T', 'DOONA', 'Customer', 100, 'T', 'PC-A', 60, 'ALLOCATED', 'DOONA -> T SP*.'),
     D18('T', 'DOONA', 'Customer', 100, 'T', 'PC-B', 40, 'ALLOCATED', 'DOONA -> T SP*.'),
     D18('O', 'XX', 'Job', 30, 'O', 'PC-C', 30, 'FALLBACK RM COST', 'O other -> all O theo PC RM Cost.'),
-    D18('S', 'Y', 'Loc', 10, 'T+O', 'PC-D', 10, 'FALLBACK RM COST', 'S other -> T+O theo PC RM Cost.'),
+    // a PC row carries the system of its own lot (step2.js writes p.erp), here an O lot
+    D18('S', 'Y', 'Loc', 10, 'O', 'PC-D', 10, 'FALLBACK RM COST', 'S other -> T+O theo PC RM Cost.'),
   ];
   const s2 = { period: P9, runAt: '', status: 'PASS', detail, summary: [], pc: [], fallbackApproval: null, total: { src: 140, alloc: 140, unalloc: 0, diff: 0, status: 'PASS' } };
   const rs = ruleSummary(s2);
@@ -682,6 +683,9 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('ruleSummary: R1 amount = 100 over 2 lots', [byCode.R1.alloc, byCode.R1.lines, byCode.R1.groups], [100, 2, 1]);
   eq('ruleSummary: R4c and R6 amounts', [byCode.R4c.alloc, byCode.R6.alloc], [30, 10]);
   eq('ruleSummary: rule amounts add to total allocated', rs.reduce((a, r) => a + r.alloc, 0), 140);
+  // v1.14.54: allocated amount split by the receiving PC system adds back to the rule total
+  eq('ruleSummary: T + S + O = allocated for every rule', rs.every((r) => Math.abs(r.allocT + r.allocS + r.allocO - r.alloc) < 0.005), true);
+  eq('ruleSummary: R1 (T customer) goes to T lots only', [byCode.R1.allocT, byCode.R1.allocO], [100, 0]);
   eq('ruleSummary: share of total allocated', Math.round(byCode.R1.share * 1000) / 1000, 0.714);
   eq('ruleSummary v1.14.22: full catalogue in fixed order, also rules without data', rs.map((r) => r.code), ['R1', 'R2', 'R3', 'R4', 'R4a', 'R4b', 'R4c', 'R5a', 'R5b', 'R5c', 'R6', 'R0', 'RX']);
   eq('ruleSummary v1.14.22: unused rule = 0 and flagged, priority row and source ERP set', [byCode.R2.alloc, byCode.R2.used, byCode.R2.screen, byCode.R2.erp, byCode.R5b.screen, byCode.R1.used], [0, false, 2, 'T', 8, true]);

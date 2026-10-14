@@ -609,7 +609,35 @@ table.cp thead th.sys-col { border-left-color: var(--head-rule); }
 .vt-table tr.hl td { background: var(--review-bg) !important; }
 .page h2 { border-left: 3px solid var(--accent); padding-left: 9px; line-height: 1.3; }
 .dq-card h3, .card h2:first-child { border-left: 0; padding-left: 0; }
-.kpis { border-top: 3px solid var(--accent); }
+/* v1.14.54: KPI tiles carry meaning — colour bar by role (base = đầu kỳ, in = vào / nhập, out = ra / giá vốn, res = cuối kỳ / kết quả) and a context line */
+.kpi { border-top: 3px solid var(--kpi-c, var(--rule)); gap: 2px; }
+.kpi.t-base { --kpi-c: var(--none); } .kpi.t-in { --kpi-c: var(--info); } .kpi.t-out { --kpi-c: var(--review); } .kpi.t-res { --kpi-c: var(--accent); }
+.kpi.strong b { color: var(--ink); } .kpi.t-res b { color: var(--accent); } .kpi b.bad { color: var(--block); }
+.kpi span { font-weight: 500; }
+.kpi small { line-height: 1.35; }
+.kpi small i { font-style: normal; font-weight: 600; } .kpi small i.ok { color: var(--pass); } .kpi small i.warn { color: var(--block); }
+.kpi-groups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 14px 0; }
+.kpi-group h3 { font-size: 13.5px; margin: 0 0 6px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.kpi-group h3 small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.kpi-group .kpis { margin: 0; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+/* v1.14.54: STEP 4.2 — input card beside the pool summary */
+.gl-grid { display: grid; grid-template-columns: minmax(320px, 500px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1100px) { .gl-grid { grid-template-columns: minmax(0, 1fr); } }
+.glf { max-width: none; }
+.card-t { font-size: 15px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
+.gl-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.gl-fields .gl-wide { grid-column: 1 / -1; }
+.glf label small { font-size: 11.5px; color: var(--muted); }
+.glf input[inputmode="decimal"] { text-align: right; }
+.gl-pool { overflow-x: auto; }
+.gl-pool table.cp { margin-top: 4px; }
+.gl-pool table.cp th, .gl-pool table.cp td { white-space: nowrap; }
+.gl-pool td.up { color: var(--review); font-weight: 600; } .gl-pool td.down { color: var(--pass); font-weight: 600; }
+.gl-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--rule); border-radius: var(--radius); margin-top: 14px; overflow: hidden; }
+.gl-facts > div { padding: 10px 12px; border-right: 1px solid var(--rule-2); display: flex; flex-direction: column; gap: 2px; }
+.gl-facts > div:last-child { border-right: 0; }
+.gl-facts span { font-size: 12px; color: var(--muted); } .gl-facts b { font-size: 17px; } .gl-facts small { font-size: 11.5px; color: var(--muted); }
+@media (max-width: 640px) { .gl-fields { grid-template-columns: 1fr; } .gl-facts { grid-template-columns: 1fr; } .gl-facts > div { border-right: 0; border-bottom: 1px solid var(--rule-2); } }
 .dq-card table.cp thead th { white-space: nowrap; }
 @media (max-width: 699px) {
   table.cp.cards tbody tr:nth-child(even) td, table.cp.cards tbody tr:hover td { background: none; }

@@ -410,23 +410,44 @@ export function viewGL(el) {
   const S = A.S; const d = S.d; const gl = d.gl || { period: '', fx: null, gl622: null, gl627: null };
   const edit = A.canEdit(); const dt = directTotals(d.directAdj);
   const prev = gl.prevRef || {};
+  // v1.14.54: amounts shown with thousand groups (the parser accepts full groups); fx stays plain to avoid the 26.300 ambiguity
+  const grp = (v) => (v === null || v === undefined || v === '' ? '' : Number.isInteger(num(v)) ? num(v).toLocaleString('vi-VN') : String(v));
+  const chg = (cur, old) => { if (!old || !cur) return 'Kỳ trước: —'; const p = (cur - old) / old * 100; return `${p >= 0 ? '+' : ''}${p.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} % so với kỳ trước`; };
+  const chgCell = (cur, old) => { if (!old || !cur) return '<td class="r muted">—</td>'; const p = (cur - old) / old * 100; return `<td class="r ${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '+' : ''}${p.toLocaleString('vi-VN', { maximumFractionDigits: 1 })} %</td>`; };
+  const poolRow = (lbl, glv, dir, old, tot = false) => `<tr class="${tot ? 'tot' : ''}"><td>${esc(lbl)}</td><td class="r">${A.fmtNum(glv)}</td><td class="r">${A.fmtNum(dir)}</td><td class="r"><b>${A.fmtNum(glv - dir)}</b></td><td class="r">${old ? A.fmtNum(old) : '—'}</td>${chgCell(glv, old)}</tr>`;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 4.2 · FX, GL 622 / 627 &amp; phân bổ trực tiếp</h1><p class="lead">Nhập tỷ giá giá thành và số dư 622 (nhân công trực tiếp), 627 (chi phí sản xuất chung) của kỳ ${esc(S.period)} từ FAST. Phần phân bổ trực tiếp (nếu có) được trừ khỏi pool chung.</p></div>
       <div class="result"><span>Kỳ GL</span>${A.pill(gl.period === S.period ? 'PASS' : 'BLOCK')}<small>${esc(gl.period || 'chưa nhập')}</small></div></header>
+    <div class="gl-grid">
     <form id="f-gl" class="card glf">
-      <div class="glrow"><label>Tỷ giá phân bổ (VND/USD)<input name="fx" inputmode="decimal" value="${esc(gl.fx ?? '')}" ${edit ? '' : 'disabled'}></label><span class="muted">Kỳ trước: ${A.fmtNum(num(prev.fx), 2)}</span></div>
-      <div class="glrow"><label>GL 622 – Nhân công trực tiếp (VND)<input name="gl622" inputmode="decimal" value="${esc(gl.gl622 ?? '')}" ${edit ? '' : 'disabled'}></label><span class="muted">Kỳ trước: ${A.fmtNum(num(prev.gl622))}</span></div>
-      <div class="glrow"><label>GL 627 – Chi phí sản xuất chung (VND)<input name="gl627" inputmode="decimal" value="${esc(gl.gl627 ?? '')}" ${edit ? '' : 'disabled'}></label><span class="muted">Kỳ trước: ${A.fmtNum(num(prev.gl627))}</span></div>
-      <div class="glrow"><label>Người lập<input name="preparedBy" value="${esc(gl.preparedBy ?? '')}" ${edit ? '' : 'disabled'}></label><label>Nguồn<input name="sourceRef" value="${esc(gl.sourceRef ?? 'FAST / GL current-period TB')}" ${edit ? '' : 'disabled'}></label></div>
-      <div class="glrow"><label>622 lũy kế năm (cho STEP 5)<input name="ytd622" inputmode="decimal" value="${esc(gl.ytd622 ?? '')}" ${edit ? '' : 'disabled'}></label><label>627 lũy kế năm<input name="ytd627" inputmode="decimal" value="${esc(gl.ytd627 ?? '')}" ${edit ? '' : 'disabled'}></label></div>
-      <p class="muted">Nhập số không cần dấu phân cách (26300, 15506701812) hoặc đủ nhóm nghìn (15.506.701.812 / 15,506,701,812). Số dạng “26.300” sẽ bị hỏi lại vì không rõ là 26300 hay 26,3.</p>
+      <h3 class="card-t">Số liệu từ FAST · kỳ ${esc(S.period)}</h3>
+      <div class="gl-fields">
+        <label class="gl-wide">Tỷ giá phân bổ (VND/USD)<input name="fx" inputmode="decimal" value="${esc(gl.fx ?? '')}" ${edit ? '' : 'disabled'}><small>Kỳ trước: ${prev.fx ? A.fmtNum(num(prev.fx), 2) : '—'}</small></label>
+        <label>GL 622 · Nhân công trực tiếp (VND)<input name="gl622" inputmode="decimal" value="${esc(grp(gl.gl622))}" ${edit ? '' : 'disabled'}><small>Kỳ trước: ${prev.gl622 ? A.fmtNum(num(prev.gl622)) : '—'}</small></label>
+        <label>GL 627 · Chi phí sản xuất chung (VND)<input name="gl627" inputmode="decimal" value="${esc(grp(gl.gl627))}" ${edit ? '' : 'disabled'}><small>Kỳ trước: ${prev.gl627 ? A.fmtNum(num(prev.gl627)) : '—'}</small></label>
+        <label>622 lũy kế năm (cho STEP 5)<input name="ytd622" inputmode="decimal" value="${esc(grp(gl.ytd622))}" ${edit ? '' : 'disabled'}></label>
+        <label>627 lũy kế năm<input name="ytd627" inputmode="decimal" value="${esc(grp(gl.ytd627))}" ${edit ? '' : 'disabled'}></label>
+        <label>Người lập<input name="preparedBy" value="${esc(gl.preparedBy ?? '')}" ${edit ? '' : 'disabled'}></label>
+        <label>Nguồn<input name="sourceRef" value="${esc(gl.sourceRef ?? 'FAST / GL current-period TB')}" ${edit ? '' : 'disabled'}></label>
+      </div>
+      <p class="muted">Số tiền nhập liền (15871239529) hoặc đủ nhóm nghìn (15.871.239.529). Tỷ giá nhập liền (26300); “26.300” sẽ bị hỏi lại vì không rõ là 26300 hay 26,3.</p>
       ${edit ? `<div class="row"><button class="btn" type="submit">Lưu GL cho kỳ ${esc(S.period)}</button><span class="muted">${gl.updatedAt ? `Lưu lúc ${A.fmtTs(gl.updatedAt)}` : ''}</span></div>` : ''}
     </form>
-    <h2>Pool chung</h2>
-    <table class="cp"><tbody>
-      <tr><td>Direct 622</td><td class="r">${A.fmtNum(dt.d622)}</td><td>Common pool 622</td><td class="r">${A.fmtNum(num(gl.gl622) - dt.d622)}</td></tr>
-      <tr><td>Direct 627</td><td class="r">${A.fmtNum(dt.d627)}</td><td>Common pool 627</td><td class="r">${A.fmtNum(num(gl.gl627) - dt.d627)}</td></tr>
-    </tbody></table>
+    <div class="card gl-pool">
+      <h3 class="card-t">Pool chung phân bổ cho lô</h3>
+      <p class="muted">Pool chung = GL kỳ này − phân bổ trực tiếp. STEP 4.3 chia pool chung cho các lô hoàn thành.</p>
+      <table class="cp"><thead><tr><th>Khoản mục</th><th class="r">GL kỳ này</th><th class="r">Trực tiếp</th><th class="r">Pool chung</th><th class="r">Kỳ trước</th><th class="r">Thay đổi</th></tr></thead><tbody>
+        ${poolRow('622 · Nhân công', num(gl.gl622), dt.d622, num(prev.gl622))}
+        ${poolRow('627 · SX chung', num(gl.gl627), dt.d627, num(prev.gl627))}
+        ${poolRow('Tổng 622 + 627', num(gl.gl622) + num(gl.gl627), dt.d622 + dt.d627, num(prev.gl622) + num(prev.gl627), true)}
+      </tbody></table>
+      <div class="gl-facts">
+        <div><span>Tỷ giá phân bổ</span><b>${gl.fx ? A.fmtNum(num(gl.fx), 2) : '—'}</b><small>${chg(num(gl.fx), num(prev.fx))}</small></div>
+        <div><span>Tỷ trọng 627 / (622 + 627)</span><b>${num(gl.gl622) + num(gl.gl627) ? (num(gl.gl627) / (num(gl.gl622) + num(gl.gl627)) * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + ' %' : '—'}</b><small>622: ${num(gl.gl622) + num(gl.gl627) ? (num(gl.gl622) / (num(gl.gl622) + num(gl.gl627)) * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + ' %' : '—'}</small></div>
+        <div><span>Dòng phân bổ trực tiếp</span><b>${dt.n}</b><small>${dt.n ? 'đang Active' : 'không có'}</small></div>
+      </div>
+    </div>
+    </div>
     <h2>Phân bổ trực tiếp 622 / 627 <small>Chỉ dùng cho khoản xác định được cho một lô cụ thể. Active = Y.</small></h2>
     <div id="dir-approval"></div><div id="l-dir"></div></section>`;
   if (edit) el.querySelector('#f-gl').addEventListener('submit', (e) => {

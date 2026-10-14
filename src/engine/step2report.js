@@ -48,17 +48,18 @@ export function ruleSummary(s2) {
   for (const x of detail) {
     const k = `${x[D.erp]}|${x[D.key]}|${x[D.type]}`;
     let g = groups.get(k);
-    if (!g) { const r = ruleOf(x[D.note]); g = { code: r.code, label: r.label, kind: r.kind, src: num(x[D.src]), lines: 0, alloc: 0 }; groups.set(k, g); }
-    if (x[D.pc]) { g.lines++; g.alloc += num(x[D.alloc]); }
+    if (!g) { const r = ruleOf(x[D.note]); g = { code: r.code, label: r.label, kind: r.kind, src: num(x[D.src]), lines: 0, alloc: 0, by: { T: 0, S: 0, O: 0 } }; groups.set(k, g); }
+    // v1.14.54: also split by the system of the receiving PC lot (detail column Target ERP = the PC's own system)
+    if (x[D.pc]) { g.lines++; g.alloc += num(x[D.alloc]); const e = String(x[D.tErp] || ''); if (e in g.by) g.by[e] += num(x[D.alloc]); }
   }
   const byCode = new Map();
   for (const g of groups.values()) {
-    const r = byCode.get(g.code) || { code: g.code, label: g.label, kind: g.kind, groups: 0, lines: 0, src: 0, alloc: 0 };
-    r.groups++; r.lines += g.lines; r.src += g.src; r.alloc += g.alloc; byCode.set(g.code, r);
+    const r = byCode.get(g.code) || { code: g.code, label: g.label, kind: g.kind, groups: 0, lines: 0, src: 0, alloc: 0, allocT: 0, allocS: 0, allocO: 0 };
+    r.groups++; r.lines += g.lines; r.src += g.src; r.alloc += g.alloc; r.allocT += g.by.T; r.allocS += g.by.S; r.allocO += g.by.O; byCode.set(g.code, r);
   }
   const totalAlloc = [...byCode.values()].reduce((a, r) => a + r.alloc, 0);
   // every rule of the catalogue (0 when unused this period), then any unexpected code found in the data
-  const all = RULE_CATALOG.map((c) => byCode.get(c.code) || { ...c, groups: 0, lines: 0, src: 0, alloc: 0 })
+  const all = RULE_CATALOG.map((c) => byCode.get(c.code) || { ...c, groups: 0, lines: 0, src: 0, alloc: 0, allocT: 0, allocS: 0, allocO: 0 })
     .concat([...byCode.values()].filter((r) => !RULE_ORDER.includes(r.code)));
   const srcErp = (label) => { const m = /^([TOS])\b/.exec(String(label || '')); return m ? m[1] : ''; };
   return all.map((r) => ({ ...r, screen: SCREEN_OF[r.code] ?? '', erp: srcErp(r.label), used: r.groups > 0, share: totalAlloc ? r.alloc / totalAlloc : 0, totalAlloc }));
