@@ -1,7 +1,7 @@
 // SVL Costing Web — application shell (state, persistence, views)
 import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
-import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutMaterials, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
+import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
@@ -660,22 +660,23 @@ async function importERP(files) {
 }
 
 // ---------- STEP 2 ----------
-/** v1.14.28: RM materials marked "tiêu hao" (item codes) – posted Nợ 632 / Có 152 and kept out of PC-P lots. */
-const consumeRMList = () => (S.d.consumeCfg && Array.isArray(S.d.consumeCfg.rm) ? S.d.consumeCfg.rm : []);
+/** v1.14.29: Stock Out LINES marked "tiêu hao" (keys from soLineKeys) – posted Nợ 632 / Có 152 and kept out of PC-P lots. */
+const consumeLineKeys = () => (S.d.consumeCfg && Array.isArray(S.d.consumeCfg.lines) ? S.d.consumeCfg.lines : []);
 function consumptionSection(s2) {
   const hasSO = ['T', 'O', 'S'].some((e) => S.d.datasets[`STOCK OUT-${e}`]);
   if (!hasSO) return '';
-  const cands = stockOutMaterials(S.d.datasets, S.period);
-  const sel = new Set(consumeRMList());
-  const selAmt = cands.filter((c) => sel.has(c.code)).reduce((a, c) => a + c.amt, 0);
-  const stale = s2 && JSON.stringify([...(s2.consumeRM || [])].sort()) !== JSON.stringify([...sel].sort());
+  const lines = stockOutLines(S.d.datasets, S.period);
+  const sel = new Set(consumeLineKeys());
+  const selAmt = lines.filter((c) => sel.has(c.key)).reduce((a, c) => a + c.amt, 0);
+  const stale = s2 && JSON.stringify([...(s2.consumeLines || [])].sort()) !== JSON.stringify([...sel].sort());
   return `<h2>Tiêu hao NVL (consumption)</h2>
-    <p class="muted">Vật tư đánh dấu <b>tiêu hao</b> không phân bổ vào lô PC-P; số tiền ghi thẳng <b>Nợ 632 / Có 152</b> (tiêu dùng nội bộ). Đổi lựa chọn rồi <b>chạy lại STEP 2</b> để áp dụng.</p>
+    <p class="muted">Từng dòng Stock Out được đánh dấu <b>tiêu hao</b> sẽ không phân bổ vào lô PC-P; số tiền ghi thẳng <b>Nợ 632 / Có 152</b>. Lựa chọn chỉ có hiệu lực trong kỳ này. Đổi lựa chọn rồi <b>chạy lại STEP 2</b> để áp dụng.</p>
     ${stale ? '<div class="alert review">Danh sách tiêu hao đã thay đổi sau lần chạy STEP 2 gần nhất – chạy lại STEP 2 để cập nhật số liệu.</div>' : ''}
-    ${s2 && s2.consumption ? `<div class="kpis">${kpi('Tiêu hao → 632 (Có 152)', s2.total.cons || 0)}${kpiN('Số vật tư tiêu hao', s2.consumption.length)}${kpi('Đã chọn (kỳ này)', selAmt)}</div>` : ''}
-    <details ${sel.size ? 'open' : ''}><summary>Chọn vật tư tiêu hao · ${fmtNum(cands.length)} vật tư Stock Out kỳ này · đã chọn ${fmtNum(sel.size)} mã</summary>
-    ${cands.length ? `<table class="cp s2-cons"><thead><tr><th>Tiêu hao</th><th>Item Code</th><th>Tên vật tư</th><th>Hệ</th><th class="r">Số dòng</th><th class="r">Stock Out (VND)</th></tr></thead><tbody>
-      ${cands.map((c) => `<tr><td><input type="checkbox" data-cons="${esc(c.code)}" ${sel.has(c.code) ? 'checked' : ''} aria-label="Tiêu hao ${esc(c.code)}"></td><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td>${esc(c.erps)}</td><td class="r">${fmtNum(c.rows)}</td><td class="r">${fmtNum(c.amt)}</td></tr>`).join('')}
+    ${s2 && s2.consumption ? `<div class="kpis">${kpi('Tiêu hao → 632 (Có 152)', s2.total.cons || 0)}${kpiN('Số dòng tiêu hao', s2.consRows || 0)}${kpi('Đã chọn (kỳ này)', selAmt)}</div>` : ''}
+    <details ${sel.size ? 'open' : ''}><summary>Chọn dòng tiêu hao · ${fmtNum(lines.length)} dòng Stock Out NVL kỳ này · đã chọn ${fmtNum(sel.size)} dòng</summary>
+    ${lines.length ? `<p><label>Lọc: <input type="search" id="cons-q" placeholder="Chứng từ, mã vật tư, tên…" style="min-width:260px"></label></p>
+    <table class="cp s2-cons"><thead><tr><th>Tiêu hao</th><th>Hệ</th><th>Chứng từ</th><th class="r">Dòng</th><th>Item Code</th><th>Tên vật tư</th><th>Location</th><th class="r">Stock Out (VND)</th></tr></thead><tbody>
+      ${lines.map((c) => `<tr data-q="${esc((c.doc + ' ' + c.item + ' ' + c.name).toLowerCase())}"><td><input type="checkbox" data-cons="${esc(c.key)}" ${sel.has(c.key) ? 'checked' : ''} aria-label="Tiêu hao ${esc(c.doc)} dòng ${esc(c.line)}"></td><td><span class="erp erp-${c.erp}">${c.erp}</span></td><td>${esc(c.doc)}</td><td class="r">${esc(c.line)}</td><td>${esc(c.item)}</td><td>${esc(c.name)}</td><td>${esc(c.loc)}</td><td class="r">${fmtNum(c.amt)}</td></tr>`).join('')}
     </tbody></table>` : emptyNote('Chưa có dòng Stock Out vật tư (non-FG) trong kỳ.')}
     </details>`;
 }
@@ -716,14 +717,19 @@ VIEWS.step2 = (el) => {
   </section>`;
   el.querySelectorAll('[data-cons]').forEach((cb) => cb.addEventListener('change', (e) => {
     if (!guardMutate()) { e.target.checked = !e.target.checked; return; }
-    const code = e.target.dataset.cons, on = e.target.checked;
-    const set = new Set(consumeRMList()); if (on) set.add(code); else set.delete(code);
-    S.d.consumeCfg = { rm: [...set].sort(), by: who(), at: nowISO() };
-    audit('STEP 2 - TIÊU HAO NVL', `${code} · ${on ? 'BẬT tiêu hao (Nợ 632 / Có 152)' : 'TẮT tiêu hao (phân bổ vào lô PC)'} · ${who()}`);
+    const key = e.target.dataset.cons, on = e.target.checked;
+    const set = new Set(consumeLineKeys()); if (on) set.add(key); else set.delete(key);
+    S.d.consumeCfg = { lines: [...set].sort(), by: who(), at: nowISO() };
+    audit('STEP 2 - TIÊU HAO NVL', `${key} · ${on ? 'BẬT tiêu hao (Nợ 632 / Có 152)' : 'TẮT tiêu hao (phân bổ vào lô PC)'} · ${who()}`);
     markDirty('consumeCfg', 'audit');
-    toast(`Đã lưu lựa chọn tiêu hao ${code}. Chạy lại STEP 2 để áp dụng.`, 'review');
+    toast('Đã lưu lựa chọn tiêu hao. Chạy lại STEP 2 để áp dụng.', 'review');
     render();
   }));
+  const cq = el.querySelector('#cons-q');
+  if (cq) cq.addEventListener('input', () => {
+    const q = cq.value.trim().toLowerCase();
+    el.querySelectorAll('.s2-cons tbody tr[data-q]').forEach((tr) => { tr.style.display = !q || tr.dataset.q.includes(q) ? '' : 'none'; });
+  });
   if (s2) {
     const dc = STEP2_DETAIL_HEADERS.map((h, i) => ({ key: i, label: h, type: [4, 13, 15].includes(i) ? 'num' : i === 14 ? 'pct' : i === 3 ? 'int' : i === 16 ? 'status' : 'text', width: [11].includes(i) ? 260 : [17].includes(i) ? 180 : [4, 13, 15].includes(i) ? 140 : 110 }));
     const rs = ruleSummary(s2);
@@ -770,7 +776,7 @@ function doStep2() {
     return;
   }
   try {
-    const s2 = runStep2(S.d.datasets, S.period, { consumeRM: consumeRMList() });
+    const s2 = runStep2(S.d.datasets, S.period, { consumeLines: consumeLineKeys() });
     S.d.step2 = s2;
     const bf = S.d.register ? S.d.register.rows.filter((r) => r.active === 'B/F').map(bfFromRow) : (S.d.bfSeed || []);
     const bfSrc = S.d.register ? S.d.register.bfSrc : null;
@@ -1155,7 +1161,7 @@ async function migrateWorkbook(file) {
       S.d.register = { period, refreshedAt: '', rows: oldRows, stats: {} };
       audit('MIGRATE FROM EXCEL', `${file.name} · ${Object.keys(S.d.datasets).length} báo cáo ERP · Opening ${S.d.opening ? S.d.opening.rows.length : 0} dòng · Rework ${oldRows.length} dòng`);
       // re-run engine
-      const s2 = runStep2(S.d.datasets, period, { consumeRM: consumeRMList() }); S.d.step2 = s2;
+      const s2 = runStep2(S.d.datasets, period, { consumeLines: consumeLineKeys() }); S.d.step2 = s2;
       const bf = oldRows.filter((r) => r.active === 'B/F').map(bfFromRow);
       S.d.register = buildReworkRegister(S.d.datasets, period, oldRows, bf);
       let s3 = null, s3err = '';

@@ -280,19 +280,23 @@ export function runFIFO(ctx) {
   // FIFO allocation
   const D = []; let shortProducts = 0; const undatedUsed = new Set();
   const rwByProd = new Map(), rwPlan = [];
+  // v1.14.29: FG consumption in STRICT_DATE is an issue event like sales / rework (date order); in MONTHLY it is a pre-pass (below)
+  const consByProd = new Map();
   if (mode !== 'MONTHLY' && ctx.register) ctx.register.rows.forEach((r, i) => {
-    if (utxt(r.active) !== 'Y' || utxt(r.rwStatus) === 'CONSUMPTION' || utxt(r.inputCheck).includes('BLOCK') || !(num(r.issueQty) > TOLQ)) return;
-    const p = utxt(r.fg); if (!rwByProd.has(p)) rwByProd.set(p, []);
-    rwByProd.get(p).push({ i, d: dateVal(r.issueDate) || 0, qty: num(r.issueQty) });
+    if (utxt(r.active) !== 'Y' || utxt(r.inputCheck).includes('BLOCK') || !(num(r.issueQty) > TOLQ)) return;
+    const isCons = utxt(r.rwStatus) === 'CONSUMPTION', p = utxt(r.fg);
+    const bucket = isCons ? consByProd : rwByProd;
+    if (!bucket.has(p)) bucket.set(p, []);
+    bucket.get(p).push({ i, d: dateVal(r.issueDate) || 0, qty: num(r.issueQty) });
   });
   // MONTHLY split (owner decision 06/10/2026): 'INVOICE' (default) – each invoice line, in date order, takes the oldest
   // remaining layers of the month, so every FIFO take is tied to a month, an invoice and a lot; the month total is the same
   // as the workbook. 'PRORATA' – the workbook's original method (month FIFO total spread over lines by quantity).
   const monthlySplit = ctx.monthlySplit === 'PRORATA' ? 'PRORATA' : 'INVOICE';
-  // v1.14.28 — FG consumption (tiêu dùng nội bộ, Nợ 632 / Có 155): costed FIFO from the layers BEFORE the month's sales COGS
-  // (owner priority: stock-out consumption first, then sales COGS). STRICT_DATE: a layer must be dated on/before the issue date.
+  // v1.14.28 — FG consumption (tiêu dùng nội bộ, Nợ 632 / Có 155), MONTHLY: costed FIFO from the layers BEFORE the month's sales COGS
+  // (owner priority: stock-out consumption first, then sales COGS). STRICT_DATE: see the event loop in strictProduct.
   const consPlan = [];
-  if (ctx.register) {
+  if (mode === 'MONTHLY' && ctx.register) {
     const consRows = ctx.register.rows.map((r, i) => ({ r, i }))
       .filter(({ r }) => utxt(r.active) === 'Y' && utxt(r.rwStatus) === 'CONSUMPTION' && !utxt(r.inputCheck).includes('BLOCK') && num(r.issueQty) > TOLQ)
       .sort((a, b) => (dateVal(a.r.issueDate) || 0) - (dateVal(b.r.issueDate) || 0) || a.i - b.i);
@@ -357,7 +361,7 @@ export function runFIFO(ctx) {
   }
   // STRICT_DATE (owner decision 02/10/2026): sales and FG rework issues of a product run through FIFO in one date order;
   // each event can only use layers dated on/before it. Rework takes are reserved here and booked by runReworkFIFO.
-  const RANK = { R: 0, S: 1, T: 2 };
+  const RANK = { R: 0, C: 0, S: 1, T: 2 };
   const matches = Object.fromEntries(Object.entries(ctx.returnMatches || {}).map(([k, v]) => [k.toUpperCase(), v]));
   /** Book one return (both modes); failures stay REVIEW so STEP 5R can resolve them. */
   function bookReturn(s, candidates) {
@@ -377,6 +381,7 @@ export function runFIFO(ctx) {
       ...list.map((s) => ({ k: 'S', d: s.date, o: s.dbRow, s })),
       ...ret.map((s) => ({ k: 'T', d: s.date, o: s.dbRow, s })),
       ...(rwByProd.get(prod) || []).map((e) => ({ k: 'R', d: e.d, o: e.i, e })),
+      ...(consByProd.get(prod) || []).map((e) => ({ k: 'C', d: e.d, o: e.i, e })),
     ].sort((a, b) => a.d - b.d || (a.k === b.k ? a.o - b.o : RANK[a.k] - RANK[b.k])); // same day: rework, then sales, then returns of those sales
     let short = false;
     const currentOrigins = () => [...originNow.values()].filter((o) => o.prod === prod && o.date <= (currentEventDate || Number.MAX_SAFE_INTEGER));
@@ -388,6 +393,26 @@ export function runFIFO(ctx) {
         const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
         const layer = bookReturn(s, [...currentOrigins(), ...prior]);
         if (layer) { prodLayers.push(layer); prodLayers.sort((a, b) => a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i)); }
+        continue;
+      }
+
+      if (x.k === 'C') {
+        // FG consumption (tiêu dùng nội bộ): takes FIFO layers dated on/before the issue, booked to 632 / 155 by the totals
+        const c = { i: x.e.i, prod, qty: 0, rm: 0, a622: 0, a627: 0, tot: 0, takes: [], short: 0 };
+        let ndc = x.e.qty;
+        for (const l of prodLayers) {
+          if (ndc <= TOLQ) break;
+          const avail = l.qty - l.oq - (l.rq || 0);
+          if (avail <= TOLQ) continue;
+          if (l.dt === 0 && l.src !== 'OPENING') { undatedUsed.add(l.lid || `${l.pc}|${prod}`); continue; }
+          if (!(l.dt <= x.d || l.dt === 0)) continue;
+          const take = avail <= ndc + TOLQ ? avail : ndc;
+          const d = takeLayer(l, take, D, prod, 0); d.kind = 'CONS';
+          c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.takes.push({ lid: l.lid, qty: d.qty });
+          ndc -= take;
+        }
+        if (ndc > TOLQ) { c.short = ndc; short = true; }
+        consPlan.push(c);
         continue;
       }
 
@@ -429,7 +454,7 @@ export function runFIFO(ctx) {
       bookReturn(s, [...[...cur.values()].filter((o) => o.prod === s.prod && o.date <= s.date), ...prior]);
     }
   } else {
-    const products = new Set([...lines.keys(), ...rwByProd.keys(), ...returnByProd.keys()]);
+    const products = new Set([...lines.keys(), ...rwByProd.keys(), ...consByProd.keys(), ...returnByProd.keys()]);
     for (const prod of products) strictProduct(prod, lines.get(prod) || []);
     sorted.sort((a, b) => a.prod.localeCompare(b.prod) || a.dt - b.dt || (a.src === 'OPENING' ? -1 : b.src === 'OPENING' ? 1 : a.i - b.i));
   }
@@ -649,7 +674,7 @@ export function runReworkFIFO(res, register, ctx) {
   for (const { r, i } of consRowsReg) {
     const c = consByRow.get(i);
     if (!c) { r.fifoStatus = 'NOT COSTED - RUN STEP 5.2'; r.fifoQty = 0; r.fifoCost = 0; }
-    else { r.fifoStatus = c.short > TOL_QTY ? 'BLOCK - INSUFFICIENT FG' : 'PASS'; r.fifoQty = c.qty; r.fifoCost = c.tot; }
+    else { r.fifoStatus = c.short > TOL_QTY ? (res.mode === 'STRICT_DATE' ? 'BLOCK - INSUFFICIENT FG AT ISSUE DATE' : 'BLOCK - INSUFFICIENT FG') : 'PASS'; r.fifoQty = c.qty; r.fifoCost = c.tot; }
     Object.assign(r, rwAllocate(r, num(r.fifoCost), r.fifoStatus === 'PASS'));
     r.lastFifoRun = now;
   }

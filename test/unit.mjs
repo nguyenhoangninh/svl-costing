@@ -680,9 +680,16 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   addC('STOCK OUT-S', HSSx, []);
   const plain = runStep2(dsC, P2);
   eq('RM consumption: nothing selected → all 100 allocated to lots', [plain.total.alloc, plain.total.cons, plain.status], [100, 0, 'PASS']);
-  const cons = runStep2(dsC, P2, { consumeRM: ['mat-cons'] });
-  eq('RM consumption: marked code is posted to 632 (40), only 60 allocated, tie holds', [cons.total.alloc, cons.total.cons, cons.total.unalloc, Math.round(cons.total.diff), cons.status], [60, 40, 0, 0, 'PASS']);
+  // v1.14.29: the picker marks single Stock Out LINES: the first line (MAT-CONS, 40) is consumption, the second is allocated
+  const { soLineKeys, stockOutLines } = await import('../src/engine/step2.js');
+  const lineKeys = soLineKeys(dsC['STOCK OUT-O'], 'O');
+  eq('RM consumption: each Stock Out line has its own key', [lineKeys.filter(Boolean).length, new Set(lineKeys.filter(Boolean)).size], [2, 2]);
+  eq('RM consumption: picker lists non-FG lines with their amounts', stockOutLines(dsC, P2).map((x) => [x.doc, x.item, x.amt]), [['SO-C-1', 'MAT-CONS', 40], ['SO-C-2', 'MAT-ALLOC', 60]]);
+  const cons = runStep2(dsC, P2, { consumeLines: [lineKeys[0]] });
+  eq('RM consumption: marked line is posted to 632 (40), only 60 allocated, tie holds', [cons.total.alloc, cons.total.cons, cons.total.unalloc, Math.round(cons.total.diff), cons.status], [60, 40, 0, 0, 'PASS']);
   eq('RM consumption: listed per ERP / code, not in the allocation detail', [cons.consumption.map((c) => [c.erp, c.code, c.rows, c.amt]), cons.detail.some((d) => d[1] === 'MAT-CONS')], [[['O', 'MAT-CONS', 1, 40]], false]);
+  const lineOnly = runStep2(dsC, P2, { consumeLines: [lineKeys[1]] });
+  eq('RM consumption: a different line of the same material is not consumed', [lineOnly.total.cons, lineOnly.total.alloc], [60, 40]);
   eq('RM consumption: receiving lot carries only the allocated 60', Math.round(cons.pc.find((p) => p.pcNo === 'PC-O1').alloc), 60);
 }
 
@@ -708,6 +715,17 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   const short = mkReg(6); const rShort = F5.runFIFO({ ...baseC, mode: 'MONTHLY', register: short });
   F5.runReworkFIFO(rShort, short, { period: P2, opening: opC, salesRows: salesC, step4Carry: 0 });
   eq('FG consumption short (6 > 5 on hand): BLOCK, 1 unit short, only 5 costed', [short.rows[0].fifoStatus, Math.round(rShort.totals.consQ), rShort.totals.consShort, rShort.runResult === 'BLOCKED'], ['BLOCK - INSUFFICIENT FG', 5, 1, true]);
+  // v1.14.29 STRICT_DATE: issues are taken in date order with sales — a sale dated 05/08 is costed before the consumption of 10/08
+  const salesEarly = validateSaveSales({ mode: 'MONTHLY', rows: [row(ser(2026, 8, 5), 'SE1', 'A', 1, 100)] }, { rows: [] }, P2).db.rows;
+  const regD = mkReg(5); const rD = F5.runFIFO({ ...baseC, salesRows: salesEarly, mode: 'STRICT_DATE', register: regD });
+  F5.runReworkFIFO(rD, regD, { period: P2, opening: opC, salesRows: salesEarly, step4Carry: 0 });
+  eq('FG consumption STRICT: sale of 05/08 takes 1 first; consumption 10/08 gets the remaining 4 and is short 1',
+    [rD.sales.find((x) => x.inv === 'SE1').fq, regD.rows[0].fifoQty, regD.rows[0].fifoStatus, Math.round(rD.totals.consQ)], [1, 4, 'BLOCK - INSUFFICIENT FG AT ISSUE DATE', 4]);
+  // STRICT with enough stock: consumption 2 (10/08) and sale 3 (20/08) both costed; identities hold
+  const regS = mkReg(2); const rS2 = F5.runFIFO({ ...baseC, mode: 'STRICT_DATE', register: regS });
+  F5.runReworkFIFO(rS2, regS, { period: P2, opening: opC, salesRows: salesC, step4Carry: 0 });
+  eq('FG consumption STRICT: 2 consumed at 200, sales 300, rec 8–12 PASS',
+    [regS.rows[0].fifoStatus, Math.round(rS2.totals.consA), Math.round(rS2.totals.cogsA - rS2.totals.consA), [8, 9, 10, 11, 12].map((k) => rS2.rec[k].status).join()], ['PASS', 200, 300, 'PASS,PASS,PASS,PASS,PASS']);
 }
 
 // ---- v1.14.19 audit Release A — the exact regression cases of the 13/10/2026 audit
