@@ -58,5 +58,13 @@ ok('missing MI-M system is reported (S)', r.missing.includes('S') && !r.missing.
 ok('thresholds are exported for the screen text', MATCOST_DEV === 0.3 && MATCOST_MIN_COST === 1000000);
 ok('no datasets → empty result, no crash', (() => { const e = materialIssueCosts({}, P); return e.materials.length === 0 && e.missing.length === 3; })());
 
+// v1.14.46: thresholds are options (the screen lets the user change them)
+const rDev = materialIssueCosts(datasets, P, { dev: 2.5 });
+ok('threshold 250 %: the 220 % line in M1 is no longer flagged', rDev.lines.length === 0 && rDev.summary.dev === 2.5 && rDev.summary.flagged === 0);
+const rMin = materialIssueCosts(datasets, P, { minCost: 300000 });
+ok('minimum cost 300k: M2 line of 500k (deviating) is flagged too', rMin.lines.some((l) => l.code === 'M2') && rMin.lines.some((l) => l.code === 'M1') && rMin.summary.minCost === 300000);
+const rDef = materialIssueCosts(datasets, P, {});
+ok('no options → defaults (30 %, 1.000.000 VND)', rDef.summary.dev === MATCOST_DEV && rDef.summary.minCost === MATCOST_MIN_COST && rDef.lines.length === 1);
+
 console.log(`\n${total - fail}/${total} material unit cost checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
