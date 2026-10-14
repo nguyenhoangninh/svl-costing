@@ -240,14 +240,39 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   if ((cur && cur.summary && (cur.summary.everClosed || cur.summary.closed)) || safeSummary.closed) safeSummary.everClosed = true;
   const meta = { period, rev: curRev + 1, blobs: manifest, manifestHash, summary: safeSummary, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
   const revisionId = `${String(meta.rev).padStart(6, '0')}-${manifestHash}`;
+  // Never announce a no-op manual sync; every announcement is atomically linked to a committed revision.
+  const changed = Object.keys({ ...old, ...manifest }).some((name) => (old[name] && old[name].hash) !== (manifest[name] && manifest[name].hash))
+    || JSON.stringify(cur && cur.summary || {}) !== JSON.stringify(safeSummary);
+  const announcement = changed && opts.notice ? {
+    ...opts.notice, period, rev: meta.rev, actor: cloud.user.email.toLowerCase(),
+    actorUid: cloud.user.uid, clientAt: meta.updatedAt, createdAt: F.serverTimestamp(),
+  } : null;
+  const commitRevision = (includeNotice) => F.runTransaction(fb.fs, async (t) => {
+    const s2 = await t.get(pdoc(period));
+    const r2 = s2.exists() ? s2.data().rev || 0 : 0;
+    if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
+    t.set(pdoc(period), meta);
+    t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
+    if (includeNotice) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
+  });
   try {
-    await F.runTransaction(fb.fs, async (t) => {
-      const s2 = await t.get(pdoc(period));
-      const r2 = s2.exists() ? s2.data().rev || 0 : 0;
-      if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
-      t.set(pdoc(period), meta);
-      t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
-    });
+    try {
+      await commitRevision(announcement && cloud.noticesSupported !== false);
+    } catch (firstError) {
+      // Safe migration: if the new notification Rules have NOT been deployed yet, do not block
+      // accounting saves/CLOSE. Retry the immutable revision WITHOUT a notification and surface a
+      // warning; no optimistic event is emitted. A genuine period/rules permission error still fails.
+      if (!announcement || firstError.code !== 'permission-denied') throw firstError;
+      const check = await F.getDoc(pdoc(period)).catch(() => null);
+      if (check && check.exists() && check.data().rev === meta.rev && check.data().manifestHash === manifestHash) {
+        // The commit landed; do not retry an already-committed revision.
+      } else {
+        await commitRevision(false);
+        cloud.noticesSupported = false;
+        meta.noticeDisabled = true;
+        console.warn('Notification rules not active; costing revision committed without notice.');
+      }
+    }
   } catch (e) {
     // v1.14.36 (fix, found by test/e2e-cloud.mjs): a lost reply does NOT mean the commit failed. Remove this attempt's chunks
     // only when the pointer proves the commit did not land; if the pointer cannot be read, keep them (orphans are harmless,
@@ -262,6 +287,7 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   }
   // Do not sweep superseded content-addressed chunks: immutable revision manifests may still reference them.
   // Retention can be managed by a separate archival policy after the accounting retention period.
+  if (announcement && cloud.noticesSupported === false) meta.noticeDisabled = true;
   return meta;
 }
 function referenced(manifest, id) {
@@ -299,6 +325,69 @@ export async function cloudLoad(period, onProgress) {
     out[name] = JSON.parse(json);
   }
   return { meta, blobs: out };
+}
+
+// ---------------- committed realtime notifications ----------------
+// One collection-wide ordered listener keeps ALL periods visible without N listeners or composite indexes.
+export function watchNotifications(onRows, onError = () => {}) {
+  if (!cloud.user || !fb) return () => {};
+  const F = fb.F;
+  const q = F.query(F.collection(fb.fs, 'svl_costing_notifications'), F.orderBy('createdAt', 'desc'), F.limit(80));
+  return F.onSnapshot(q,
+    (snapshot) => onRows(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })), snapshot.metadata),
+    onError);
+}
+/**
+ * Compatibility feed for sites whose new notification-specific Firestore rules
+ * have not been deployed yet. The costing period collection is already readable
+ * by every authorized user. This feed contains REVISION metadata only, not actions
+ * or accounting blobs; it cannot claim which Step was edited or approved.
+ */
+export function watchPeriodActivity(onRows, onError = () => {}) {
+  if (!cloud.user || !fb) return () => {};
+  const F = fb.F;
+  const q = F.query(F.collection(fb.fs, CLOUD_COLLECTION), F.orderBy('updatedAt', 'desc'), F.limit(80));
+  return F.onSnapshot(q, (snapshot) => {
+    const rows = snapshot.docs.map((doc) => {
+      const d = doc.data(), period = doc.id, summary = d.summary || {};
+      const closed = !!summary.closed;
+      return {
+        id: period + '_' + (d.rev || 0), period, rev: d.rev || 0,
+        actor: String(d.updatedBy || '').toLowerCase(), actorUid: '',
+        createdAt: d.updatedAt,
+        kind: closed ? 'warning' : 'info',
+        category: 'cloud-revision', view: closed ? 'close' : 'cc',
+        title: closed ? 'Kỳ giá thành đã đóng trên Cloud' : 'Kỳ giá thành đã được cập nhật',
+        detail: 'Revision #' + (d.rev || 0) + ' đã lưu trên Cloud. Chế độ tương thích không có chi tiết thao tác / Step.',
+      };
+    });
+    onRows(rows, snapshot.metadata);
+  }, onError);
+}
+
+function readRef() {
+  if (!cloud.user) throw new Error('Chưa đăng nhập để xem thông báo.');
+  return fb.F.doc(fb.fs, 'svl_costing_notification_reads', cloud.user.uid);
+}
+export function watchNotificationReads(onState, onError = () => {}) {
+  if (!cloud.user || !fb) return () => {};
+  return fb.F.onSnapshot(readRef(), (s) => onState(s.exists() ? s.data() : { seen: [] }), onError);
+}
+export async function markNoticeRead(id) {
+  const F = fb.F, ref = readRef();
+  await F.runTransaction(fb.fs, async (t) => {
+    const s = await t.get(ref), data = s.exists() ? s.data() : {};
+    const seen = [...new Set([...(data.seen || []), String(id)])].slice(-180);
+    t.set(ref, { uid: cloud.user.uid, seen, updatedAt: F.serverTimestamp(), ...(data.readThrough ? { readThrough: data.readThrough } : {}) });
+  });
+}
+export async function markAllNoticesRead() {
+  const F = fb.F;
+  await F.setDoc(readRef(), { uid: cloud.user.uid, seen: [], readThrough: F.serverTimestamp(), updatedAt: F.serverTimestamp() }, { merge: true });
+}
+export function watchPeriodMeta(period, onMeta, onError = () => {}) {
+  if (!cloud.user || !fb || !/^\\d{4}-\\d{2}$/.test(period)) return () => {};
+  return fb.F.onSnapshot(pdoc(period), (s) => onMeta(s.exists() ? s.data() : null, s.metadata), onError);
 }
 
 export async function cloudPeriods() {
