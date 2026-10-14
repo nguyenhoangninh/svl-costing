@@ -891,6 +891,34 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('PC-P/PC-M: all systems equal → PASS', DQ.anomalyStatus(DQ.erpAnomalies(clean), null), 'PASS');
 }
 
+// ---- v1.14.30 STEP 1: each part (A PC-P/PC-M · B ZERO COST · C NEGATIVE/TEXT) is confirmed and cleared on its own
+{
+  const DQ = await import('../src/engine/dataquality.js');
+  const HP = ['PC No.', 'Product Code', 'Product Name', 'Current Complete Qty', 'Total Cost'];
+  const HM = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Material Name', 'Quantity', 'Total Cost'];
+  const ds = {
+    'PC-P-O': buildDataset([HP, ['PC-7', 'OLI-1', 'o', 4, 500], ['PC-8', 'OLI-2', 'o', 4, 300]], 'PC-P-O-202608.xlsx', P2),
+    'PC-M-O': { key: 'PC-M-O', headerRow: 1, header: HM, rows: [['PC-7', 'OLI-1', 'o', 'X1', 'x', 4, 494.39], ['PC-9', 'OLI-3', 'o', 'X2', 'x', 1, 50], ['PC-7', 'OLI-1', 'o', 'Z1', 'z', 2, 0], ['PC-7', 'OLI-1', 'o', 'N1', 'n', -1, 5]] },
+  };
+  const an = DQ.erpAnomalies(ds);
+  eq('v1.14.30 DQ parts: A = PC gaps, B = zero cost, C = negative', [an.parts.A.count, an.parts.B.count, an.parts.C.count], [an.recon.issues.length, 1, 1]);
+  eq('v1.14.30 DQ parts: all three start NOT CONFIRMED → BLOCK', ['A', 'B', 'C'].map((k) => DQ.partStatus(an, null, k)).concat(DQ.anomalyStatus(an, null)), ['NOT CONFIRMED', 'NOT CONFIRMED', 'NOT CONFIRMED', 'BLOCK - CONFIRM']);
+  const ackA = { A: { fp: an.parts.A.fp, count: an.parts.A.count, by: 'a@svl', at: '2026-10-14T09:00:00Z', note: 'PC lệch do xuất lệch giờ' } };
+  eq('v1.14.30 DQ parts: confirming A alone leaves B/C blocked', [DQ.partStatus(an, { parts: ackA }, 'A'), DQ.partStatus(an, { parts: ackA }, 'B'), DQ.anomalyStatus(an, { parts: ackA })], ['CONFIRMED', 'NOT CONFIRMED', 'BLOCK - CONFIRM']);
+  const ackAll = { parts: { ...ackA, B: { fp: an.parts.B.fp, count: 1, by: 'a@svl', at: 't', note: 'Hàng khách cấp' }, C: { fp: an.parts.C.fp, count: 1, by: 'a@svl', at: 't', note: 'Số âm do điều chỉnh kho' } } };
+  eq('v1.14.30 DQ parts: all three confirmed → REVIEW - CONFIRMED', DQ.anomalyStatus(an, ackAll), 'REVIEW - CONFIRMED');
+  const ds2 = { ...ds, 'PC-M-O': { key: 'PC-M-O', headerRow: 1, header: HM, rows: [['PC-7', 'OLI-1', 'o', 'X1', 'x', 4, 494.39], ['PC-9', 'OLI-3', 'o', 'X2', 'x', 1, 50], ['PC-7', 'OLI-1', 'o', 'Z1', 'z', 2, 0], ['PC-7', 'OLI-1', 'o', 'N1', 'n', -1, 5], ['PC-7', 'OLI-1', 'o', 'Z2', 'z', 3, 0]] } };
+  const an2 = DQ.erpAnomalies(ds2);
+  eq('v1.14.30 DQ parts: a new zero-cost line makes only B CHANGED (A, C stay confirmed)', [an2.parts.B.count, DQ.partStatus(an2, ackAll, 'B'), DQ.partStatus(an2, ackAll, 'A'), DQ.partStatus(an2, ackAll, 'C'), DQ.anomalyStatus(an2, ackAll)], [2, 'CHANGED', 'CONFIRMED', 'CONFIRMED', 'BLOCK - CONFIRM']);
+  const cleared = { parts: { ...ackAll.parts } }; delete cleared.parts.B;
+  eq('v1.14.30 DQ parts: clearing B re-blocks STEP 2; A and C keep their confirmation', [DQ.partStatus(an, cleared, 'B'), DQ.partStatus(an, cleared, 'A'), DQ.partStatus(an, cleared, 'C'), DQ.anomalyStatus(an, cleared)], ['NOT CONFIRMED', 'CONFIRMED', 'CONFIRMED', 'BLOCK - CONFIRM']);
+  const clean = DQ.erpAnomalies({ 'PC-P-O': ds['PC-P-O'], 'PC-M-O': { key: 'PC-M-O', headerRow: 1, header: HM, rows: [['PC-7', 'OLI-1', 'o', 'X1', 'x', 4, 500], ['PC-8', 'OLI-2', 'o', 'X3', 'x', 4, 300], ['PC-7', 'OLI-1', 'o', 'Z1', 'z', 2, 0]] } });
+  eq('v1.14.30 DQ parts: a part with no abnormal line is NONE and does not block', [DQ.partStatus(clean, null, 'A'), DQ.partStatus(clean, null, 'C'), DQ.anomalyStatus(clean, { parts: { B: { fp: clean.parts.B.fp, count: clean.parts.B.count, by: 'x', at: 't', note: 'n' } } })], ['NONE', 'NONE', 'REVIEW - CONFIRMED']);
+  const legacy = DQ.ackParts({ fp: an.fp, by: 'a@svl', at: 't', note: 'bản cũ' }, an);
+  eq('v1.14.30 DQ parts: a v1.14.29 single-fp confirmation converts to parts for the same list', [Object.keys(legacy).sort(), DQ.anomalyStatus(an, { fp: an.fp, by: 'a@svl', at: 't', note: 'bản cũ' })], [['A', 'B', 'C'], 'REVIEW - CONFIRMED']);
+  eq('v1.14.30 DQ parts: a v1.14.29 confirmation of an older list is not converted', DQ.anomalyStatus(an2, { fp: an.fp, by: 'a@svl', at: 't', note: 'bản cũ' }), 'BLOCK - CONFIRM');
+}
+
 // ---- v1.14.26 STEP 4.4: FIFO sales find the lot by PC No. + product when the FG layer carries another source period; Sep → Oct roll
 {
   const FPx = await import('../src/engine/fgprod.js');

@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.30 (14/10/2026):** (1) STEP 1 · Xác nhận bất thường tách **theo từng phần**: A (PC-P vs PC-M), B (SL ≠ 0 nhưng Total Cost = 0), C (số âm / sai kiểu). Mỗi phần có nút **Xác nhận** và **Xóa xác nhận** riêng; phần đổi danh sách sau khi xác nhận sẽ chuyển sang CHANGED và phải xác nhận lại. STEP 2 chỉ chạy khi cả ba phần đã xác nhận hoặc không còn bất thường. Bản xác nhận của v1.14.29 vẫn được nhận cho đúng danh sách cũ.
+
 > **v1.14.29 (14/10/2026):** (1) STEP 2 · Tiêu hao chọn **theo từng dòng Stock Out** (không theo mã vật tư), có ô lọc; chỉ có hiệu lực trong kỳ. (2) STEP 5.2 · Chế độ STRICT_DATE: tiêu dùng FG là sự kiện theo ngày cùng bán hàng và rework (không còn ưu tiên trước); chế độ MONTHLY vẫn ưu tiên tiêu dùng trước bán hàng.
 >
 > **v1.14.28 (14/10/2026):** (1) STEP 2 · Vật tư đánh dấu **tiêu hao** (consumption): không phân bổ vào lô PC-P, ghi thẳng **Nợ 632 / Có 152**; đối chiếu Stock Out = phân bổ + tiêu hao. (2) Sổ FG Rework (2B) · Trạng thái **TIÊU HAO NỘI BỘ** (CONSUMPTION): FG xuất dùng nội bộ được tính FIFO ở STEP 5.2 **trước** giá vốn bán hàng trong tháng, ghi **Nợ 632 / Có 155**; không đi qua 154 rework. (3) STEP 1 · Cảnh báo bất thường tách 3 thẻ màu: A · chênh PC-P / PC-M (xanh), B · SL ≠ 0 nhưng Total Cost = 0 (vàng), C · số âm / sai kiểu (đỏ).

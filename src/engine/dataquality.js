@@ -66,6 +66,10 @@ export function pcpPcmRecon(datasets) {
   return out;
 }
 
+/** v1.14.30: three confirmable parts – A (PC-P vs PC-M), B (SL ≠ 0 but Total Cost = 0), C (negative / text). Each is confirmed separately. */
+export const DQ_PARTS = { A: 'Chênh lệch PC-P và PC-M', B: 'Vật tư SL ≠ 0 nhưng Total Cost = 0', C: 'Vật tư số âm hoặc sai kiểu dữ liệu' };
+const lineFp = (l) => [l.report, l.type, l.row, l.mat, l.qty, l.amt].join('|');
+
 /** All abnormal lines of the period's material reports + summary per report / type and a fingerprint of the list. */
 export function erpAnomalies(datasets) {
   const lines = [];
@@ -78,13 +82,43 @@ export function erpAnomalies(datasets) {
   }
   const summary = [...groups.values()].map((g) => ({ report: g.report, type: g.type, label: g.label, lines: g.lines, materials: g.mats.size, sample: [...g.mats].slice(0, 12).join(', ') }));
   const recon = pcpPcmRecon(datasets || {});
-  const fpLines = lines.length ? fpRows(lines, (l) => [l.report, l.type, l.row, l.mat, l.qty, l.amt].join('|')) : '';
+  const fpLines = lines.length ? fpRows(lines, lineFp) : '';
+  const zero = lines.filter((l) => l.type === 'ZERO COST'), neg = lines.filter((l) => l.type !== 'ZERO COST');
+  const parts = {
+    A: { count: recon.issues.length, fp: recon.fp },
+    B: { count: zero.length, fp: zero.length ? fpRows(zero, lineFp) : '' },
+    C: { count: neg.length, fp: neg.length ? fpRows(neg, lineFp) : '' },
+  };
   return { lines, summary, materials: new Set(lines.map((l) => `${l.report.slice(-1)}|${l.mat}`)).size, recon, issues: lines.length + recon.issues.length,
-    fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '' };
+    fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
+}
+
+/**
+ * Confirmations per part. ack.parts = { A|B|C: { fp, count, by, at, note } }.
+ * An ack written before v1.14.30 (single fp for everything) still counts for the parts it covered.
+ */
+export function ackParts(ack, an) {
+  if (!ack) return {};
+  if (ack.parts) return { ...ack.parts };
+  if (ack.fp && an && ack.fp === an.fp) {
+    const out = {};
+    for (const k of Object.keys(DQ_PARTS)) if (an.parts && an.parts[k] && an.parts[k].count) out[k] = { fp: an.parts[k].fp, count: an.parts[k].count, by: ack.by, at: ack.at, note: ack.note };
+    return out;
+  }
+  return {};
+}
+
+/** NONE (no abnormal line in the part) · CONFIRMED · CHANGED (confirmed earlier, list changed since) · NOT CONFIRMED */
+export function partStatus(an, ack, key) {
+  const p = an && an.parts ? an.parts[key] : null;
+  if (!p || !p.count) return 'NONE';
+  const c = ackParts(ack, an)[key];
+  if (!c) return 'NOT CONFIRMED';
+  return c.fp === p.fp ? 'CONFIRMED' : 'CHANGED';
 }
 
 /** PASS (no abnormal line and PC-P = PC-M) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since). */
 export function anomalyStatus(an, ack) {
   if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length))) return 'PASS';
-  return ack && ack.fp === an.fp ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
+  return Object.keys(DQ_PARTS).every((k) => ['NONE', 'CONFIRMED'].includes(partStatus(an, ack, k))) ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
 }
