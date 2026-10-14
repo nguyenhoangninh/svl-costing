@@ -1,4 +1,4 @@
-import { isNoticeRead, unreadCount } from '../engine/notifications.js';
+import { isNoticeRead } from '../engine/notifications.js';
 
 // Header notification center. All text comes from escaped text nodes, never from raw Firestore HTML.
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -13,11 +13,11 @@ export function createNotificationUI({ store, toast, navigate }) {
   let user = '', unsubscribeRows = null, unsubscribeReads = null;
   let rows = [], reads = { seen: [] }, first = true, known = new Set(), open = false, filter = 'all', current = '', error = '';
   const clean = () => { if (unsubscribeRows) unsubscribeRows(); if (unsubscribeReads) unsubscribeReads(); unsubscribeRows = null; unsubscribeReads = null; };
-  const unseen = (n) => !isNoticeRead(n, reads);
+  const unseen = (n) => String(n.actor).toLowerCase() !== user && !isNoticeRead(n, reads);
   function draw() {
     root.hidden = !user;
     if (!user) { root.innerHTML = ''; return; }
-    const count = unreadCount(rows, reads);
+    const count = rows.filter(unseen).length;
     const subset = rows.filter((n) => {
       if (filter === 'unread') return unseen(n);
       if (filter === 'current') return n.period === current;
