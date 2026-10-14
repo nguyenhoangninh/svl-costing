@@ -224,8 +224,15 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
       t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
     });
   } catch (e) {
-    // nothing committed: remove the chunks this attempt wrote (best effort, admins only)
-    if (isAdmin()) for (const id of written) { if (!referenced(old, id)) await F.deleteDoc(cdoc(period, id)).catch(() => {}); }
+    // v1.14.36 (fix, found by test/e2e-cloud.mjs): a lost reply does NOT mean the commit failed. Remove this attempt's chunks
+    // only when the pointer proves the commit did not land; if the pointer cannot be read, keep them (orphans are harmless,
+    // deleting chunks that a committed revision references is data loss).
+    let landed = true;
+    try {
+      const now = await F.getDoc(pdoc(period));
+      landed = now.exists() && (now.data().rev || 0) === meta.rev && now.data().manifestHash === manifestHash;
+    } catch { landed = true; }
+    if (!landed && isAdmin()) for (const id of written) { if (!referenced(old, id)) await F.deleteDoc(cdoc(period, id)).catch(() => {}); }
     throw e;
   }
   // Do not sweep superseded content-addressed chunks: immutable revision manifests may still reference them.

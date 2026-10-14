@@ -53,5 +53,9 @@ ok('ENH-09 close success confirmed by the close timestamp (no double apply)', ph
 ok('ENH-10 CLOSE re-reads the previous period before the gate', phase3Js.includes('if (A.refreshPrevDrift) await A.refreshPrevDrift();'));
 ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes('op.closedAt && !isClosedIn(prevD, p)'));
 
+// v1.14.37 (found by the browser cloud run)
+ok('lost reply does not delete chunks of a committed revision (pointer checked first)', store.includes('const now = await F.getDoc(pdoc(period));') && store.includes('if (!landed && isAdmin())'));
+ok('cloud save keeps chunks when the pointer cannot be read', store.includes('} catch { landed = true; }'));
+
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
