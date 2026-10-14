@@ -49,7 +49,8 @@ export function ccInfo(S, D4 = null) {
 }
 
 /** Post the STEP 4.3 final layer of this month into the YTD table (called after STEP 4 / FIFO and before CLOSE). */
-export function postCurrent(S, { silent = false } = {}) {
+/** defer (v1.14.36, ENH-09): CLOSE stages the posting and writes its audit line only after the cloud has committed the close. */
+export function postCurrent(S, { silent = false, defer = false } = {}) {
   if (closedNow(S)) return false;
   const d = S.d; const D4 = P2.derive(S).d4;
   if (!D4.fl) { if (!silent) A.toast('Chưa có kết quả STEP 4.3 (Phân bổ giá thành).', 'block'); return false; }
@@ -61,7 +62,9 @@ export function postCurrent(S, { silent = false } = {}) {
   if (cur && cur.period === S.period && cur.key === key && (cur.salesAt || '') === salesAt) { if (!silent) A.toast('Bảng tổng hợp đã khớp STEP 4.3 và FIFO.', 'pass'); return false; }
   const sm = FP.summarize(rows, S.period);
   d.fgProd = { ...(d.fgProd || {}), year: S.period.slice(0, 4), current: { period: S.period, rows, key, sales, salesAt, step4RunAt: d.step4 ? d.step4.runAt : '', step4Freshness: D4.freshness, postedAt: nowISO(), by: A.who() } };
-  A.audit('STEP 4.4 - POST FG PRODUCTION', `${S.period}: ${rows.length} lô · SL ${A.fmtNum(sm.cur.qty)} · ${A.fmtNum(sm.cur.total)} VND · FIFO ${sales.length} dòng phân bổ`);
+  const posted = `${S.period}: ${rows.length} lô · SL ${A.fmtNum(sm.cur.qty)} · ${A.fmtNum(sm.cur.total)} VND · FIFO ${sales.length} dòng phân bổ`;
+  if (defer) return posted;
+  A.audit('STEP 4.4 - POST FG PRODUCTION', posted);
   A.markDirty('fgProd', 'audit');
   if (!silent) A.toast(`Đã chuyển ${rows.length} lô thành phẩm kỳ ${S.period} (${A.fmtNum(sm.cur.total)} VND) vào bảng lũy kế.`, 'pass');
   return true;

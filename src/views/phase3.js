@@ -1,5 +1,6 @@
 // Phase 3 views: STEP 5 — Opening FG, FIFO COGS + FG Rework FIFO (5B), FG History & month close.
 import * as F5 from '../engine/step5.js';
+import * as SP from '../engine/syncpolicy.js';
 import * as TPL from '../engine/templates.js';
 import * as F4 from '../engine/step4.js';
 import * as P2 from './phase2.js';
@@ -791,9 +792,11 @@ const cloudTransitionMessage = (op, err) => {
 };
 
 export async function doClose() {
-  const S = A.S; const d = S.d; const D5 = derive(S, P2.derive(S));
+  const S = A.S; const d = S.d;
   // audit F-16: closing is an approval step – administrators only (reopen already is)
   if (!A.isAdmin()) { A.toast('Chỉ quản trị viên được CLOSE MONTH. Người lập chuẩn bị số liệu; quản trị viên kiểm tra và đóng kỳ.', 'review'); return; }
+  if (A.refreshPrevDrift) await A.refreshPrevDrift(); // ENH-10: the previous period is re-read now, not at the last screen refresh
+  const D5 = derive(S, P2.derive(S));
   if (D5.closeReason) { A.toast('CLOSE MONTH bị chặn: ' + D5.closeReason, 'block'); return; }
   if (A.cloudOn() && A.cloudMeta) {
     try {
@@ -808,33 +811,44 @@ export async function doClose() {
   let msg = `Đóng kỳ kế toán ${S.period}?\n\nFinal Production Status: ${recon.finalStatus}\nMonth Close Gate: ${recon.closeGate}\nFG History: PASS\nBatch 7: PASS`;
   if (recon.finalStatus.includes('REVIEW') || recon.closeGate.includes('REVIEW')) msg += '\n\nKỳ này còn mục REVIEW. Xác nhận đã được quản lý review trước khi đóng.';
   if (!confirm(msg)) return;
-  const prevArchive = d.rwArchive, prevClosedEver = d.closedEver;
+  const before = { fgProd: d.fgProd, closed: d.closed, closedEver: d.closedEver, rwArchive: d.rwArchive };
   const exceptions = [];
   for (const [no, r] of Object.entries(recon.rows || {})) if (String(r && r.status || '').startsWith('REVIEW')) exceptions.push({ control: 'REC-' + no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.result ?? '', diff: r.diff ?? '', note: r.note || '' });
   for (const r of (D5.controls && D5.controls.rows) || []) if (String(r.status || '').startsWith('REVIEW')) exceptions.push({ control: 'CC-' + r.no, label: r.label || '', status: r.status, expected: r.expected ?? '', result: r.actual ?? r.result ?? '', diff: r.diff ?? '', note: r.rule || '' });
   if (D5.tie && D5.tie.diffs) exceptions.push({ control: 'FAST', label: 'FAST reconciliation', status: D5.tie.status, result: D5.tie.rows.filter((r) => r.status === 'DIFF').map((r) => `${r.acc}:${r.diff}`).join('; '), note: D5.tie.approval ? D5.tie.approval.note : '' });
   if (d.nrvDecision) exceptions.push({ control: 'NRV', label: 'NRV decision', status: d.nrvDecision.status, result: d.nrvDecision.amount, note: d.nrvDecision.note || '', ref: d.nrvDecision.ref || '' });
-  FGP.postCurrent(S, { silent: true }); // STEP 4.4: the closed month's production is in the YTD table rolled into next month
+  // ENH-09 (v1.14.36): prepare locally → commit to the cloud → finalize. Nothing reaches the audit trail before the commit,
+  // and a failed commit rolls back every blob the close touched (including the FG history posting).
+  const fgText = FGP.postCurrent(S, { silent: true, defer: true }); // STEP 4.4: the closed month's production is in the YTD table rolled into next month
+  if (fgText) A.markDirty('fgProd'); // saved while the period is still OPEN: a CLOSED period accepts only the close blobs
   d.closedEver = true;
   d.closed = { period: S.period, closedAt: nowISO(), closedBy: A.who(), status: recon.finalStatus, closeGate: recon.closeGate, runAt: d.step5.runAt, note: `FG History PASS; Close Gate=${recon.closeGate}; Batch7=PASS`, exceptions };
   d.rwArchive = F5.archiveReworkWIP(d.register, S.period);
   const arcCost = d.rwArchive.reduce((a, r) => a + num(r.carryCost), 0);
-  A.audit('STEP 5 - CLOSE MONTH', `${recon.finalStatus}; ${recon.closeGate}; FG HISTORY PASS`);
-  A.audit('STEP 5B - REWORK WIP CARRY-FORWARD', `Rows=${d.rwArchive.length}; carrying cost=${A.fmtNum(arcCost, 2)}`);
-  A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
-  // audit F-25: with cloud sync, the close only stands once the cloud has committed it
-  if (A.cloudOn()) {
-    A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
-    const r = await A.syncNow();
-    if (!r.ok) {
-      d.closed = null; d.closedEver = prevClosedEver; d.rwArchive = prevArchive;
-      A.audit('STEP 5 - CLOSE MONTH FAILED', `Cloud chưa xác nhận: ${r.error}`);
-      A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
-      A.toast(cloudTransitionMessage('CHƯA đóng kỳ', { message: r.error }), 'block');
-      A.render(); return;
-    }
+  const trail = [];
+  if (fgText) trail.push(['STEP 4.4 - POST FG PRODUCTION', fgText]);
+  trail.push(['STEP 5 - CLOSE MONTH', `${recon.finalStatus}; ${recon.closeGate}; FG HISTORY PASS`], ['STEP 5B - REWORK WIP CARRY-FORWARD', `Rows=${d.rwArchive.length}; carrying cost=${A.fmtNum(arcCost, 2)}`]);
+  const doneMsg = `Kỳ ${S.period} đã ĐÓNG${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Rework WIP chuyển kỳ: ${d.rwArchive.length} dòng / ${A.fmtNum(arcCost)} VND. Bước tiếp: tạo kỳ ${nextP(S.period)} → Roll forward.`;
+  if (!A.cloudOn()) {
+    for (const [a, t] of trail) A.audit(a, t);
+    A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
+    A.toast(doneMsg, 'pass'); A.render(); return;
   }
-  A.toast(`Kỳ ${S.period} đã ĐÓNG${A.cloudOn() ? ' (cloud đã xác nhận)' : ''}. Rework WIP chuyển kỳ: ${d.rwArchive.length} dòng / ${A.fmtNum(arcCost)} VND. Bước tiếp: tạo kỳ ${nextP(S.period)} → Roll forward.`, 'pass');
+  A.markDirty('closed', 'closedEver', 'rwArchive');
+  A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
+  const r = await A.syncNow();
+  // the reply can be lost after the cloud has committed: the close timestamp confirms it, so nothing is applied twice
+  const committed = r.ok || SP.closeCommitted(await A.cloudMeta(S.period).catch(() => null), d.closed.closedAt);
+  if (!committed) {
+    d.fgProd = before.fgProd; d.closed = before.closed; d.closedEver = before.closedEver; d.rwArchive = before.rwArchive;
+    A.markDirty('closed', 'closedEver', 'rwArchive', 'fgProd');
+    A.audit('STEP 5 - CLOSE MONTH FAILED', `Cloud chưa xác nhận: ${r.error}`);
+    A.toast(cloudTransitionMessage('CHƯA đóng kỳ', { message: r.error }), 'block');
+    A.render(); return;
+  }
+  for (const [a, t] of trail) A.audit(a, t);
+  A.markDirty('audit');
+  A.toast(doneMsg, 'pass');
   A.render();
 }
 export async function doReopen() {

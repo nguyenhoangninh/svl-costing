@@ -7,6 +7,7 @@ import { recheckRegisterRow } from '../src/engine/step2.js';
 import { splitBooks, bookOf } from '../src/engine/revenue.js';
 import * as FP from '../src/engine/fgprod.js';
 import * as AQ from '../src/engine/auditqueue.js';
+import * as SP from '../src/engine/syncpolicy.js';
 
 let n = 0, fail = 0;
 const eq = (label, got, want) => { n++; const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) { fail++; console.log(`✗ ${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); } };
@@ -1122,6 +1123,12 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('ENH-08 event ids are unique', new Set([0, 1, 2, 3, 4].map(() => AQ.newEventId())).size, 5);
   eq('ENH-08 detail capped at 2000 chars', AQ.makeAuditEvent({ period: 'p', action: 'a', detail: 'z'.repeat(3000), eventId: 'e3' }).detail.length, 2000);
 }
+
+// ---- wave 3 (ENH-07 / ENH-09 / ENH-10): retry policy, outbox, commit confirmation
+eq('ENH-07 retry delays 2s,4s,8s … capped at 60s', [1, 2, 3, 4, 5, 6, 9].map((k) => SP.retryDelayMs(k)), [2000, 4000, 8000, 16000, 32000, 60000, 60000]);
+eq('ENH-07 retry stops after the limit', [SP.shouldRetry(0), SP.shouldRetry(1), SP.shouldRetry(SP.RETRY_LIMIT), SP.shouldRetry(SP.RETRY_LIMIT + 1)], [false, true, true, false]);
+eq('ENH-07 outbox lists other periods only, sorted, unique', SP.outboxOthers(['2026-10', '2026-08', '2026-08', '', '2026-09'], '2026-10'), ['2026-08', '2026-09']);
+eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP.closeCommitted({ summary: { closed: 'T1' } }, 'T1'), SP.closeCommitted({ summary: { closed: 'T0' } }, 'T1'), SP.closeCommitted(null, 'T1'), SP.closeCommitted({ summary: { closed: null } }, 'T1')], [true, false, false, false]);
 
 // ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 

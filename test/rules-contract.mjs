@@ -40,5 +40,18 @@ ok('ENH-04 cloudDelete removes the pointer in a transaction before sweeping chun
 ok('ENH-04 cloudDelete refuses to sweep under a pointer saved meanwhile', store.includes('vừa được lưu lại trên cloud trong lúc xoá'));
 ok('ENH-05 render has no offline bypass for local accounting data', !appJs.includes('!store.cloud.offline') && appJs.includes('(store.cloud.enabled && !store.cloud.user)'));
 
+// v1.14.36 (audit wave 3)
+const phase3Js = phase3;
+const fgprodJs = fs.readFileSync(new URL('../src/views/fgprod.js', import.meta.url), 'utf8');
+ok('ENH-07 automatic push retries with backoff and stops after the limit', app.includes('SP.retryDelayMs(retryN)') && app.includes('SP.shouldRetry(retryN)'));
+ok('ENH-07 status names other periods still waiting for the cloud', app.includes('chờ đồng bộ kỳ') && app.includes('SP.outboxOthers(S.outbox, S.period)'));
+ok('ENH-07 period being left is pushed before switching (user decides on failure)', app.includes('const r = await syncNow();\n    if (!r.ok && !r.skipped && !confirm(`Kỳ ${S.period} CHƯA lên được cloud'));
+ok('ENH-09 FG posting is deferred until the close is committed', fgprodJs.includes('defer = false') && phase3Js.includes('{ silent: true, defer: true }'));
+ok('ENH-09 close audit lines are written only after the cloud commit', (() => { const a = phase3Js.indexOf('export async function doClose'); const b = phase3Js.indexOf('export async function doReopen'); const seg = phase3Js.slice(a, b); return seg.indexOf('await A.syncNow()') > 0 && seg.lastIndexOf('for (const [a, t] of trail) A.audit(a, t);') > seg.indexOf('await A.syncNow()'); })());
+ok('ENH-09 failed close rolls back the FG posting as well', phase3Js.includes('d.fgProd = before.fgProd;'));
+ok('ENH-09 close success confirmed by the close timestamp (no double apply)', phase3Js.includes('SP.closeCommitted(await A.cloudMeta(S.period)'));
+ok('ENH-10 CLOSE re-reads the previous period before the gate', phase3Js.includes('if (A.refreshPrevDrift) await A.refreshPrevDrift();'));
+ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes('op.closedAt && !isClosedIn(prevD, p)'));
+
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
