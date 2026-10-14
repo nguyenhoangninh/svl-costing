@@ -24,6 +24,8 @@ jobs:
         run: node test/synth.mjs
       - name: Live notifications unit tests
         run: node test/notifications.mjs
+      - name: Notification permissions compatibility contracts
+        run: node test/notification-fallback.mjs
       - name: Firestore accounting-retention contract tests
         run: node test/rules-contract.mjs
       - name: Release / PWA / security contract tests

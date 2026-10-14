@@ -337,6 +337,34 @@ export function watchNotifications(onRows, onError = () => {}) {
     (snapshot) => onRows(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })), snapshot.metadata),
     onError);
 }
+/**
+ * Compatibility feed for sites whose new notification-specific Firestore rules
+ * have not been deployed yet. The costing period collection is already readable
+ * by every authorized user. This feed contains REVISION metadata only, not actions
+ * or accounting blobs; it cannot claim which Step was edited or approved.
+ */
+export function watchPeriodActivity(onRows, onError = () => {}) {
+  if (!cloud.user || !fb) return () => {};
+  const F = fb.F;
+  const q = F.query(F.collection(fb.fs, CLOUD_COLLECTION), F.orderBy('updatedAt', 'desc'), F.limit(80));
+  return F.onSnapshot(q, (snapshot) => {
+    const rows = snapshot.docs.map((doc) => {
+      const d = doc.data(), period = doc.id, summary = d.summary || {};
+      const closed = !!summary.closed;
+      return {
+        id: period + '_' + (d.rev || 0), period, rev: d.rev || 0,
+        actor: String(d.updatedBy || '').toLowerCase(), actorUid: '',
+        createdAt: d.updatedAt,
+        kind: closed ? 'warning' : 'info',
+        category: 'cloud-revision', view: closed ? 'close' : 'cc',
+        title: closed ? 'Kỳ giá thành đã đóng trên Cloud' : 'Kỳ giá thành đã được cập nhật',
+        detail: 'Revision #' + (d.rev || 0) + ' đã lưu trên Cloud. Chế độ tương thích không có chi tiết thao tác / Step.',
+      };
+    });
+    onRows(rows, snapshot.metadata);
+  }, onError);
+}
+
 function readRef() {
   if (!cloud.user) throw new Error('Chưa đăng nhập để xem thông báo.');
   return fb.F.doc(fb.fs, 'svl_costing_notification_reads', cloud.user.uid);

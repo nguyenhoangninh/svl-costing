@@ -10,9 +10,28 @@ const ICON = { critical: '!', warning: '!', info: 'i' };
 export function createNotificationUI({ store, toast, navigate }) {
   const root = document.getElementById('notice-root');
   if (!root) throw new Error('Thiếu #notice-root');
-  let user = '', unsubscribeRows = null, unsubscribeReads = null;
+  let user = '', uid = '', unsubscribeRows = null, unsubscribeReads = null;
+  let compatibleFeed = false, localReads = false;
   let rows = [], reads = { seen: [] }, first = true, known = new Set(), open = false, filter = 'all', current = '', error = '';
   const clean = () => { if (unsubscribeRows) unsubscribeRows(); if (unsubscribeReads) unsubscribeReads(); unsubscribeRows = null; unsubscribeReads = null; };
+  // Only UI receipt state is cached locally, never costing/notification details.
+  const localKey = () => 'svl.notice.read.' + uid;
+  const loadLocalReads = () => {
+    try { const v = JSON.parse(localStorage.getItem(localKey()) || '{}'); return v && Array.isArray(v.seen) ? v : { seen: [] }; }
+    catch { return { seen: [] }; }
+  };
+  const saveLocalReads = () => { try { localStorage.setItem(localKey(), JSON.stringify(reads)); } catch { /* private mode */ } };
+  const setLocalReadMode = () => {
+    if (localReads) return;
+    localReads = true; reads = loadLocalReads(); draw();
+  };
+  const localMarkRead = (id) => {
+    reads = { ...reads, seen: [...new Set([...(reads.seen || []), String(id)])].slice(-180) };
+    saveLocalReads(); draw();
+  };
+  const localMarkAll = () => {
+    reads = { seen: [], readThrough: new Date().toISOString() }; saveLocalReads(); draw();
+  };
   const unseen = (n) => String(n.actor).toLowerCase() !== user && !isNoticeRead(n, reads);
   function draw() {
     root.hidden = !user;
@@ -41,6 +60,8 @@ export function createNotificationUI({ store, toast, navigate }) {
           </select>
           <button type="button" data-notice="allread" class="notice-readall" ${count ? '' : 'disabled'}>Đọc tất cả</button>
         </div>
+        ${compatibleFeed ? `<div class="notice-compat" role="status"><b>Chế độ tương thích:</b> đang theo dõi revision Cloud, chưa có chi tiết chỉnh sửa hoặc Step. Admin cần publish Firestore Rules v1.14.43 để bật đầy đủ thông báo realtime.</div>` : ''}
+        ${localReads ? `<div class="notice-compat">Trạng thái đã đọc đang lưu trên thiết bị này; chưa đồng bộ giữa các thiết bị.</div>` : ''}
         ${error ? `<div class="notice-error">Không kết nối được thông báo: ${esc(error)}</div>` : ''}
         <div class="notice-list" role="list">
           ${subset.length ? subset.map((n) => `<button type="button" role="listitem" class="notice-item ${esc(n.kind)} ${unseen(n) ? 'unread' : ''}" data-notice="item" data-id="${esc(n.id)}">
@@ -57,11 +78,14 @@ export function createNotificationUI({ store, toast, navigate }) {
   }
   function setUser(next) {
     const email = String(next && next.email || '').toLowerCase();
-    if (email === user) return;
-    clean(); user = email; rows = []; reads = { seen: [] }; known = new Set(); first = true; open = false; error = '';
+    const id = String(next && next.uid || '');
+    if (email === user && id === uid) return;
+    clean(); user = email; uid = id; rows = []; reads = { seen: [] }; known = new Set();
+    first = true; open = false; error = ''; compatibleFeed = false; localReads = false;
     draw();
     if (!email) return;
-    unsubscribeRows = store.watchNotifications((newRows, metadata) => {
+    const onRows = (newRows, metadata) => {
+      if (user !== email || uid !== id) return;
       const fresh = !first && !metadata.fromCache
         ? newRows.filter((n) => !known.has(n.id) && String(n.actor).toLowerCase() !== user).slice(0, 3)
         : [];
@@ -71,8 +95,31 @@ export function createNotificationUI({ store, toast, navigate }) {
         if (n.kind === 'critical') toast(`Kỳ ${n.period}: ${n.title}`, 'block');
         else toast(`Kỳ ${n.period}: ${n.title}`, n.kind === 'warning' ? 'review' : 'info');
       }
-    }, (e) => { error = e.message || String(e); draw(); });
-    unsubscribeReads = store.watchNotificationReads((state) => { reads = state || { seen: [] }; draw(); }, (e) => { error = e.message || String(e); draw(); });
+    };
+    const onNoticeError = (e) => {
+      if (user !== email || uid !== id) return;
+      if (e && e.code === 'permission-denied' && !compatibleFeed) {
+        // Old rules predate notification collections. Use the EXISTING period read
+        // permission for a generic revision-only feed; never widen access rules.
+        compatibleFeed = true; first = true; known = new Set(); rows = [];
+        if (unsubscribeRows) unsubscribeRows();
+        unsubscribeRows = store.watchPeriodActivity(onRows, (cause) => {
+          if (user !== email || uid !== id) return;
+          error = cause.message || String(cause); draw();
+        });
+        draw(); return;
+      }
+      error = e.message || String(e); draw();
+    };
+    unsubscribeRows = store.watchNotifications(onRows, onNoticeError);
+    unsubscribeReads = store.watchNotificationReads((state) => {
+      if (user !== email || uid !== id || localReads) return;
+      reads = state || { seen: [] }; draw();
+    }, (e) => {
+      if (user !== email || uid !== id) return;
+      if (e && e.code === 'permission-denied') setLocalReadMode();
+      else { error = e.message || String(e); draw(); }
+    });
   }
   root.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-notice]');
@@ -82,12 +129,18 @@ export function createNotificationUI({ store, toast, navigate }) {
     if (act === 'toggle') { open = !open; draw(); }
     if (act === 'close') { open = false; draw(); }
     if (act === 'allread') {
-      try { await store.markAllNoticesRead(); } catch (x) { toast('Chưa đồng bộ trạng thái đã đọc: ' + x.message, 'review'); }
+      if (localReads) localMarkAll();
+      else try { await store.markAllNoticesRead(); }
+        catch (x) { if (x.code === 'permission-denied') { setLocalReadMode(); localMarkAll(); } else toast('Chưa đồng bộ trạng thái đã đọc: ' + x.message, 'review'); }
     }
     if (act === 'item') {
       const n = rows.find((x) => x.id === btn.dataset.id);
       if (!n) return;
-      try { if (unseen(n)) await store.markNoticeRead(n.id); } catch (x) { toast('Chưa đánh dấu được thông báo: ' + x.message, 'review'); }
+      if (unseen(n)) {
+        if (localReads) localMarkRead(n.id);
+        else try { await store.markNoticeRead(n.id); }
+          catch (x) { if (x.code === 'permission-denied') { setLocalReadMode(); localMarkRead(n.id); } else toast('Chưa đánh dấu được thông báo: ' + x.message, 'review'); }
+      }
       open = false; draw();
       await navigate({ period: n.period, view: n.view || 'cc' });
     }
