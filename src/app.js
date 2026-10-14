@@ -9,6 +9,8 @@ import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
 import * as store from './store.js';
 import { APP_VERSION } from './config.js';
+import * as NT from './engine/notifications.js';
+import { createNotificationUI } from './ui/notifications.js';
 import * as P2 from './views/phase2.js';
 import * as P3 from './views/phase3.js';
 import * as TRV from './views/trace.js';
@@ -31,6 +33,46 @@ function emptyData() { return { datasets: {}, importLog: {}, importAck: null, st
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
+const notices = createNotificationUI({
+  store, toast,
+  navigate: async ({ period, view }) => {
+    if (period && period !== S.period) await openPeriod(period);
+    if (period && period !== S.period) return;
+    const target = view || 'cc';
+    if (location.hash === '#' + target) { S.view = target; render(); } else location.hash = target;
+  },
+});
+let stopLivePeriod = null;
+function showLiveConflict() {
+  app()?.querySelector('#live-conflict')?.remove();
+  if (!S.remoteConflict || !app()) return;
+  const b = document.createElement('section');
+  b.id = 'live-conflict'; b.className = 'live-conflict'; b.setAttribute('role', 'alert');
+  b.innerHTML = `<p><b>Cloud có revision mới (#${esc(S.remoteConflict.rev)}).</b> ${esc(S.remoteConflict.updatedBy || 'Người dùng khác')} đã cập nhật kỳ ${esc(S.period)}${S.remoteConflict.closed ? ' và ĐÓNG KỲ' : ''}. Dữ liệu trên màn hình có thể đã cũ; hệ thống chặn chỉnh sửa để tránh ghi đè.</p>
+    <button class="btn" data-act="refresh-remote" type="button">Kiểm tra & tải bản Cloud</button>`;
+  app().prepend(b);
+}
+function stopPeriodWatch() { if (stopLivePeriod) stopLivePeriod(); stopLivePeriod = null; }
+function startPeriodWatch(period) {
+  stopPeriodWatch();
+  if (!store.cloud.user || !period) return;
+  stopLivePeriod = store.watchPeriodMeta(period, async (meta, metadata) => {
+    if (!meta || metadata.fromCache || period !== S.period) return;
+    const rev = Number(meta.rev || 0);
+    if (!rev) return;
+    // A listener can see our own save before local cloudRev is committed; wait for the writer.
+    if (S.sync === 'saving') await new Promise((r) => setTimeout(r, 900));
+    if (period !== S.period) return;
+    const localRev = Number((await store.localGet(lk(period, 'cloudRev'))) || 0);
+    if (rev <= localRev) return;
+    const alertKey = period + ':' + rev;
+    if (S.remoteConflict && S.remoteConflict.key === alertKey) return;
+    S.remoteConflict = { key: alertKey, rev, updatedBy: meta.updatedBy, closed: !!(meta.summary && meta.summary.closed) };
+    S.sync = 'conflict'; S.syncMsg = 'Có bản Cloud mới hơn #' + rev + '. Cần kiểm tra trước khi tiếp tục.';
+    clearTimeout(syncTimer); renderSync(); showLiveConflict();
+    toast(`Kỳ ${period} có thay đổi trên Cloud (rev #${rev})${S.remoteConflict.closed ? ' – đã đóng kỳ' : ''}. Hãy tải phiên bản mới trước khi thao tác.`, 'block');
+  }, (e) => { console.warn('live period watch', e); });
+}
 
 // ======================= worker =======================
 let worker = null, wid = 0; const pending = new Map();
@@ -138,6 +180,9 @@ async function pushCloudOnce() {
   if (!S.period) return { ok: false, error: 'Chưa chọn kỳ.' };
   if (!store.canEdit()) return { ok: false, error: 'Tài khoản chỉ có quyền xem.' };
   const p = S.period, data = S.d, seq = S.editSeq || 0;
+  if (S.remoteConflict && S.remoteConflict.key.startsWith(p + ':')) {
+    return { ok: false, conflict: true, error: 'Cloud đã có revision mới. Tải lại bản Cloud trước khi ghi.' };
+  }
   const meta0 = await store.cloudMeta(p).catch(() => null);
   const cloudClosed = !!(meta0 && meta0.summary && meta0.summary.closed), localClosed = isClosed();
   if (cloudClosed && !store.isAdmin()) { S.sync = 'synced'; S.syncMsg = 'Kỳ đã đóng trên cloud – chỉ quản trị viên ghi được.'; renderSync(); return { ok: false, error: 'Kỳ đã đóng trên cloud; chỉ quản trị viên được ghi.' }; }
@@ -158,7 +203,13 @@ async function pushCloudOnce() {
     // firestore.rules (v1.10.0 did not allow summary.step5 to change in the REOPEN revision). The live step5 status follows
     // in the next normal save, which the rules allow once the period is OPEN.
     const summary = reopen ? { ...meta0.summary, closed: null, everClosed: true } : live;
-    const meta = await store.cloudSave(p, blobs, summary, (m) => { S.syncMsg = m; renderSync(); }, baseRev, reopen ? { keepAllExcept: ['closed'] } : {});
+    const notice = NT.buildCommitNotice({
+      period: p, rev: (meta0 && meta0.rev || 0) + 1,
+      actor: store.cloud.user.email, actorUid: store.cloud.user.uid, previous: meta0,
+      summary, audit: data.audit, changed: true,
+    });
+    const meta = await store.cloudSave(p, blobs, summary, (m) => { S.syncMsg = m; renderSync(); }, baseRev,
+      reopen ? { keepAllExcept: ['closed'], notice } : { notice });
     await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
     if ((S.editSeq || 0) === seq && !reopen) await store.localDel(lk(p, 'unsynced'));
     S.sync = (S.editSeq || 0) === seq && !reopen ? 'synced' : 'pending'; S.syncMsg = '';
@@ -192,6 +243,8 @@ async function approvalWrite(op, payload) {
 }
 async function openPeriod(p, { preferCloud = false } = {}) {
   await saveChain;
+  stopPeriodWatch();
+  S.remoteConflict = null;
   // ENH-07: push the period being left while its data is still loaded; if the cloud refuses, the user decides
   if (S.period && p !== S.period && store.cloud.user && store.canEdit() && (await store.localGet(lk(S.period, 'unsynced')))) {
     const r = await syncNow();
@@ -232,6 +285,8 @@ async function openPeriod(p, { preferCloud = false } = {}) {
   }
   await refreshPeriods();
   S.prevDrift = [];
+  notices.setPeriod(p);
+  startPeriodWatch(p);
   render();
   checkPrevDrift();
 }
@@ -293,6 +348,10 @@ function derivedNow() { const p2 = P2.derive(S); return { ...p2, d5: P3.derive(S
 
 // ======================= permissions =======================
 function guardEdit() {
+  if (S.remoteConflict) {
+    toast('Cloud đã có bản mới. Hãy bấm “Kiểm tra & tải bản Cloud” trước khi chỉnh sửa / chạy Step.', 'block');
+    return false;
+  }
   if (store.canEdit()) return true;
   toast(store.cloud.enabled && !store.cloud.user ? 'Đăng nhập Google để chỉnh sửa dữ liệu.' : 'Tài khoản của bạn chỉ có quyền xem. Nhờ quản trị viên cấp quyền Chỉnh sửa nếu cần.', 'review');
   return false;
@@ -475,6 +534,7 @@ function render() {
   app().innerHTML = '';
   view(app());
   cardTables(app());
+  showLiveConflict();
   app().focus({ preventScroll: true });
 }
 
@@ -1454,6 +1514,16 @@ document.addEventListener('click', async (e) => {
   if (WRITE_ACTS.has(act) && !guardEdit()) return;
   if (P3.CLOSED_BLOCK.has(act) && isClosed()) { toast(`Kỳ ${S.period} đã đóng – không chạy lại được. Quản trị viên có thể mở lại kỳ ở màn hình 5.3.`, 'review'); return; }
   switch (act) {
+    case 'refresh-remote': {
+      if (!S.remoteConflict) break;
+      const yes = confirm(`Kỳ ${S.period} trên Cloud đã thay đổi. Tải bản Cloud sẽ thay thế dữ liệu trên màn hình và bỏ các thay đổi CHƯA đồng bộ trên máy này.\n\nBạn đã kiểm tra và muốn tiếp tục?`);
+      if (!yes) break;
+      clearTimeout(syncTimer);
+      await saveChain;
+      try { await openPeriod(S.period, { preferCloud: true }); toast('Đã tải lại kỳ từ Cloud.', 'pass'); }
+      catch (err) { toast('Không tải được Cloud: ' + (err.message || err), 'block'); }
+      break;
+    }
     case 'signin': try { await store.signIn(); } catch (err) { toast('Đăng nhập lỗi: ' + err.message, 'block'); } break;
     case 'signout': {
       const uns = await unsyncedPeriods();
@@ -1765,6 +1835,8 @@ P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approv
   if (last && isPeriod(last)) await openPeriod(last); else if (S.periods[0]) await openPeriod(S.periods[0]); else render();
   if (store.cloud.enabled) {
     store.initCloud(async (u) => {
+      notices.setUser(u);
+      if (!u) stopPeriodWatch();
       renderShell();
       accessDraft = null;
       if (u) { await refreshPeriods(); if (S.period) await openPeriod(S.period); else if (S.periods[0]) await openPeriod(S.periods[0]); }
