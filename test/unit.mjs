@@ -896,6 +896,7 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('template sales: example 2 (B/L in October) is recognised in October', sv.db.rows.map((r) => r.month), [9, 10]);
   // v1.14.57: ED Number and Provision Reversal are read by header name and kept on the saved line
   eq('template sales: ED Number and Provision Reversal carried to the Sales Database', sv.db.rows.map((r) => [r.edNo, r.provRev]), [['ED-306012345678', null], ['ED-306012349999', 1250000]]);
+  eq('template sales: Customer - Item Code carried to the Sales Database', sv.db.rows.map((r) => r.custItem), ['TRV-DOONA-SS', '48-22-8442']);
   eq('template sales: guide sheet alone is not a sales table', /Không tìm thấy sheet doanh thu/.test(thrown(() => F4x.importSales(guideOnly(sales), 'g.xlsx', 'MONTHLY', P9))), true);
   // Returns (TK 5212 / 5213)
   const rets = T.returnsTemplate(P9);
