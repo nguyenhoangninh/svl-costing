@@ -107,6 +107,48 @@ service cloud.firestore {
         allow delete: if canWrite() && periodOpen(period) && (resource.data.requestedByEmail == myEmail() || isAdmin());
       }
     }
+    // Live Notifications: one immutable event created inside the SAME transaction as the
+    // committed period revision. A browser cannot emit an event for an uncommitted revision.
+    match /svl_costing_notifications/{id} {
+      allow read: if canRead();
+      allow create: if canWrite()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actor == myEmail()
+        && request.resource.data.period is string
+        && request.resource.data.rev is int
+        && request.resource.data.rev > 0
+        && request.resource.data.kind in ['info', 'warning', 'critical']
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 160
+        && request.resource.data.detail is string
+        && request.resource.data.detail.size() <= 500
+        && request.resource.data.period.matches('^[0-9]{4}-[0-9]{2}
+    match /svl_costing_audit/{id} {
+      allow read: if canRead();
+      // v1.14.35 (ENH-08): an ACTOR event must name the signed-in uid and email that performed it; UNVERIFIED events are uploaded by the signed-in user.
+      allow create: if canWrite() && request.resource.data.by == myEmail()
+        && (request.resource.data.get('attribution', 'LEGACY') != 'ACTOR' || (request.resource.data.actorUid == request.auth.uid && request.resource.data.actorEmail == myEmail()));
+      allow update, delete: if false;
+    }
+  }
+}
+)
+        && getAfter(periodPath(request.resource.data.period)).data.rev == request.resource.data.rev
+        && getAfter(periodPath(request.resource.data.period)).data.updatedBy == request.auth.token.email
+        && getAfter(periodPath(request.resource.data.period)).data.updatedAt == request.resource.data.clientAt;
+      allow update, delete: if false;
+    }
+    // Read/unread state is private to the signed-in user, shared between their devices.
+    match /svl_costing_notification_reads/{uid} {
+      allow read: if canRead() && request.auth.uid == uid;
+      allow create, update: if canRead() && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'seen', 'readThrough', 'updatedAt'])
+        && request.resource.data.get('seen', []) is list
+        && request.resource.data.get('seen', []).size() <= 180;
+      allow delete: if false;
+    }
+
     // Append-only audit trail: anyone who can write data can add own events; nobody can change or delete them.
     match /svl_costing_audit/{id} {
       allow read: if canRead();
