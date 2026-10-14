@@ -26,6 +26,8 @@ jobs:
         run: node test/notifications.mjs
       - name: Notification permissions compatibility contracts
         run: node test/notification-fallback.mjs
+      - name: Firestore Rules lexical / structural sanity check
+        run: node test/rules-syntax.mjs
       - name: Firestore accounting-retention contract tests
         run: node test/rules-contract.mjs
       - name: Release / PWA / security contract tests
