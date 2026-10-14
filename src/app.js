@@ -1,6 +1,7 @@
 // SVL Costing Web — application shell (state, persistence, views)
 import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, utxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
+import * as SP from './engine/syncpolicy.js';
 import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS, confirmConsFg, undoConsFg, consFgEligible, consFgConfirmed, consFgPendingCount } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
@@ -110,8 +111,21 @@ function scheduleCloud() {
   if (!S.period) { S.sync = 'synced'; renderSync(); return; }
   if (S.sync === 'conflict') { renderSync(); return; }
   S.sync = 'pending'; renderSync();
-  clearTimeout(syncTimer);
-  syncTimer = setTimeout(async () => { const r = await pushCloud(); if (!r.ok) toast((r.conflict ? 'Xung đột cloud: ' : 'Chưa lưu được lên cloud: ') + r.error, 'block'); }, 1500);
+  clearTimeout(syncTimer); clearTimeout(retryTimer);
+  syncTimer = setTimeout(autoPush, 1500);
+}
+/** ENH-07 (v1.14.36): a failed automatic push is retried with exponential backoff and never reported as SYNCED. */
+let retryTimer = null, retryN = 0;
+async function autoPush() {
+  if (!S.period || !(await store.localGet(lk(S.period, 'unsynced')))) { retryN = 0; return; } // nothing waiting: no empty revision
+  const r = await pushCloud();
+  if (r.ok) { retryN = 0; clearTimeout(retryTimer); return; }
+  if (r.conflict) { toast('Xung đột cloud: ' + r.error, 'block'); return; }
+  retryN++;
+  if (retryN === 1) toast('Chưa lưu được lên cloud: ' + r.error + ' – sẽ tự thử lại.', 'block');
+  if (!SP.shouldRetry(retryN)) { toast('Chưa đồng bộ được sau nhiều lần thử. Bấm Đồng bộ khi có mạng.', 'block'); return; }
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(autoPush, SP.retryDelayMs(retryN));
 }
 /** Push now (no debounce) and report whether the cloud committed it. */
 async function syncNow() { await saveChain; clearTimeout(syncTimer); return pushCloud(); }
@@ -165,6 +179,11 @@ function summaryForCloud() {
 
 async function openPeriod(p, { preferCloud = false } = {}) {
   await saveChain;
+  // ENH-07: push the period being left while its data is still loaded; if the cloud refuses, the user decides
+  if (S.period && p !== S.period && store.cloud.user && store.canEdit() && (await store.localGet(lk(S.period, 'unsynced')))) {
+    const r = await syncNow();
+    if (!r.ok && !r.skipped && !confirm(`Kỳ ${S.period} CHƯA lên được cloud: ${r.error}\n\nOK = chuyển sang kỳ ${p}; thay đổi của kỳ ${S.period} vẫn được giữ trên máy và đẩy lên khi mở lại kỳ này.\nHuỷ = ở lại kỳ ${S.period}.`)) { render(); return; }
+  }
   S.period = p; S.d = await loadLocal(p);
   localStorage.setItem('svl.period', p);
   if (S.sync === 'conflict') { S.sync = 'local'; S.syncMsg = ''; }
@@ -214,6 +233,8 @@ async function loadPeriodData(p) {
 const hiddenList = () => (store.cloud.enabled ? store.cloud.hiddenPeriods || [] : (() => { try { return JSON.parse(localStorage.getItem('svl.hiddenPeriods') || '[]'); } catch { return []; } })());
 async function refreshPeriods() {
   const local = (await store.localGet('periods')) || [];
+  S.outbox = [];
+  for (const p of local) if (p !== S.period && (await store.localGet(lk(p, 'unsynced')))) S.outbox.push(p);
   let cloudP = [];
   try { cloudP = await store.cloudPeriods(); } catch { /* offline */ }
   S.periodInfo = Object.fromEntries(cloudP.map((x) => [x.period, { closed: !!(x.summary && x.summary.closed), everClosed: !!(x.summary && (x.summary.everClosed || x.summary.closed)), updatedAt: x.updatedAt, updatedBy: x.updatedBy, cloud: true }]));
@@ -319,7 +340,9 @@ function renderSync() {
   const el = $('#sync'); if (!el) return;
   const map = { local: ['Chỉ lưu trên máy này', 's-info'], pending: ['Chờ đồng bộ…', 's-rerun'], saving: [S.syncMsg || 'Đang lưu lên cloud…', 's-rerun'], synced: ['Đã đồng bộ cloud', 's-pass'], readonly: ['Chỉ xem – không lưu thay đổi', 's-info'], error: ['Lỗi đồng bộ: ' + S.syncMsg, 's-block'], conflict: ['Xung đột cloud – ' + S.syncMsg, 's-block'] };
   if (!navigator.onLine) { el.className = 'sync pill s-review'; el.textContent = 'Offline'; el.title = 'Không có mạng'; return; }
-  const [t, c] = store.SANDBOX ? ['SANDBOX – dữ liệu thử, không đồng bộ cloud', 's-review'] : map[S.sync] || map.local;
+  let [t, c] = store.SANDBOX ? ['SANDBOX – dữ liệu thử, không đồng bộ cloud', 's-review'] : map[S.sync] || map.local;
+  const waiting = store.cloud.user ? SP.outboxOthers(S.outbox, S.period) : [];
+  if (waiting.length) { t = `${t} · chờ đồng bộ kỳ ${waiting.join(', ')}`; if (c === 's-pass') c = 's-review'; }
   el.className = `sync pill ${c}`; el.textContent = t; el.title = t;
 }
 function cpTable(rows) {
@@ -1071,6 +1094,7 @@ async function checkPrevDrift() {
       const prevD = await loadPeriodData(p);
       if (op && wipFp(prevD.step3) !== op.wipFp) out.push(`Closing WIP kỳ ${p} đã thay đổi sau khi chuyển sang Opening WIP kỳ ${S.period} – roll forward lại.`);
       else if (op && !op.closedAt && isClosedIn(prevD, p)) out.push(`Opening WIP được chuyển khi kỳ ${p} chưa đóng; kỳ ${p} nay đã đóng – roll forward lại để dùng số chính thức.`);
+      else if (op && op.closedAt && !isClosedIn(prevD, p)) out.push(`Kỳ ${p} đã MỞ LẠI sau khi số dư được chuyển sang kỳ ${S.period} – đóng lại kỳ ${p}, rồi roll forward lại trước khi đóng kỳ ${S.period}.`);
       if (bs && bfFp(bfRowsOf(prevD, p)) !== bs.bfFp) out.push(`Rework WIP cuối kỳ ${p} khác số đã chuyển sang B/F kỳ ${S.period}${isClosedIn(prevD, p) ? '' : ' (kỳ trước chưa đóng)'}.`);
     } catch { /* previous period not available on this device */ }
   }
@@ -1710,13 +1734,14 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloading) { reloading = true; location.reload(); } });
 }
 window.addEventListener('online', () => { renderSync(); toast('Đã có mạng trở lại.', 'pass'); if (store.cloud.user) scheduleCloud(); });
+window.addEventListener('online', () => { retryN = 0; renderSync(); if (S.sync === 'error') scheduleCloud(); });
 window.addEventListener('offline', () => { renderSync(); toast('Mất kết nối mạng – xem được dữ liệu trên máy, thay đổi sẽ đồng bộ khi có mạng.', 'review'); });
 
 P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), parseNum, dupStatus: () => P3.dupStatus(S), render, derived: derivedNow, latestImport: () => step1Status(datasetsMeta()).latestImport });
 TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
 RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render });
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
-P3.install({ cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+P3.install({ refreshPrevDrift: () => checkPrevDrift(), cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 
 // ======================= boot =======================
 (async function boot() {
