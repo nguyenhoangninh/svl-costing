@@ -247,15 +247,32 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
     ...opts.notice, period, rev: meta.rev, actor: cloud.user.email.toLowerCase(),
     actorUid: cloud.user.uid, clientAt: meta.updatedAt, createdAt: F.serverTimestamp(),
   } : null;
+  const commitRevision = (includeNotice) => F.runTransaction(fb.fs, async (t) => {
+    const s2 = await t.get(pdoc(period));
+    const r2 = s2.exists() ? s2.data().rev || 0 : 0;
+    if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
+    t.set(pdoc(period), meta);
+    t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
+    if (includeNotice) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
+  });
   try {
-    await F.runTransaction(fb.fs, async (t) => {
-      const s2 = await t.get(pdoc(period));
-      const r2 = s2.exists() ? s2.data().rev || 0 : 0;
-      if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
-      t.set(pdoc(period), meta);
-      t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
-      if (announcement) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
-    });
+    try {
+      await commitRevision(announcement && cloud.noticesSupported !== false);
+    } catch (firstError) {
+      // Safe migration: if the new notification Rules have NOT been deployed yet, do not block
+      // accounting saves/CLOSE. Retry the immutable revision WITHOUT a notification and surface a
+      // warning; no optimistic event is emitted. A genuine period/rules permission error still fails.
+      if (!announcement || firstError.code !== 'permission-denied') throw firstError;
+      const check = await F.getDoc(pdoc(period)).catch(() => null);
+      if (check && check.exists() && check.data().rev === meta.rev && check.data().manifestHash === manifestHash) {
+        // The commit landed; do not retry an already-committed revision.
+      } else {
+        await commitRevision(false);
+        cloud.noticesSupported = false;
+        meta.noticeDisabled = true;
+        console.warn('Notification rules not active; costing revision committed without notice.');
+      }
+    }
   } catch (e) {
     // v1.14.36 (fix, found by test/e2e-cloud.mjs): a lost reply does NOT mean the commit failed. Remove this attempt's chunks
     // only when the pointer proves the commit did not land; if the pointer cannot be read, keep them (orphans are harmless,
