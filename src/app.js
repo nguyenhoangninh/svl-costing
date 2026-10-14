@@ -557,6 +557,7 @@ function render() {
   if (!S.period && S.view !== 'settings') { app().innerHTML = viewWelcome(); return; }
   app().innerHTML = '';
   view(app());
+  zoneSections(app());
   cardTables(app());
   showLiveConflict();
   app().focus({ preventScroll: true });
@@ -641,27 +642,31 @@ function kpi(label, val, strong, opts = {}) {
 /** v1.14.54: overview figures in two groups (WIP, thành phẩm) with the check behind each figure. */
 function overviewKpis(st, s3) {
   const f = (v) => fmtNum(v), has = (v) => typeof v === 'number' && isFinite(v);
-  const op = S.d.opening && S.d.opening.stats ? S.d.opening.stats.totalAmt : null;
+  const op0 = S.d.opening && S.d.opening.stats ? S.d.opening.stats.totalAmt : null;
   const inA = s3 ? s3.summary.inAmt : null, outA = s3 ? s3.summary.outAmt : null, clERP = s3 ? s3.summary.closingAmt : null;
   const fin = st.p2.d3b ? st.p2.d3b.wf.finalClosing : null;
-  const roll = has(op) && has(inA) && has(outA) && has(clERP) ? op + inA - outA - clERP : null;
+  const roll = has(op0) && has(inA) && has(outA) && has(clERP) ? op0 + inA - outA - clERP : null;
   const chk = (d, okText) => (d === null ? '' : Math.abs(d) < 1 ? `<i class="ok">✓ ${okText}</i>` : `<i class="warn">Lệch ${f(d)}</i>`);
   const res = st.d5 && st.d5.res ? st.d5.res.totals : null;
   const prodA = st.p2.d4 && st.p2.d4.fl ? st.p2.d4.fl.totals.totalCost : null;
   const avail = res ? num(res.openA) + num(res.prodA) : null;
   const pct = (a, b) => (has(a) && b ? `${(a / b * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} %` : '');
+  const rw = res ? num(res.rwTot) : 0;
+  const op = (x) => `<i class="op" aria-hidden="true">${x}</i>`;
   return `<div class="kpi-groups">
-    <section class="kpi-group"><h3>WIP · sản phẩm dở dang <small>Đầu kỳ + vào − ra = cuối kỳ ERP</small></h3><div class="kpis">
-      ${kpi('Opening WIP', op, false, { tone: 'base', sub: op === null ? 'Chưa nhập (3A)' : 'Số dư đầu kỳ' })}
-      ${kpi('WIP vào (MI + Stock Out)', inA, false, { tone: 'in', sub: s3 ? 'Xuất NVL vào sản xuất' : 'Chưa chạy STEP 3A' })}
-      ${kpi('WIP ra (PC + MR + Stock Out)', outA, false, { tone: 'out', sub: s3 ? 'Kết chuyển và nhập lại' : 'Chưa chạy STEP 3A' })}
-      ${kpi('Closing WIP ERP', clERP, false, { tone: 'base', sub: roll === null ? 'Chưa đủ số liệu' : chk(roll, 'khớp đầu kỳ + vào − ra') })}
+    <section class="kpi-group"><h3>WIP · sản phẩm dở dang</h3><div class="kpis kpi-flow">
+      ${kpi('Opening WIP', op0, false, { tone: 'base', sub: op0 === null ? 'Chưa nhập (3A)' : 'Số dư đầu kỳ' })}${op('+')}
+      ${kpi('WIP vào (MI + Stock Out)', inA, false, { tone: 'in', sub: s3 ? 'Xuất NVL vào sản xuất' : 'Chưa chạy STEP 3A' })}${op('−')}
+      ${kpi('WIP ra (PC + MR + Stock Out)', outA, false, { tone: 'out', sub: s3 ? 'Kết chuyển và nhập lại' : 'Chưa chạy STEP 3A' })}${op('=')}
+      ${kpi('Closing WIP ERP', clERP, false, { tone: 'base', sub: roll === null ? 'Chưa đủ số liệu' : chk(roll, 'khớp đầu kỳ + vào − ra') })}${op('→')}
       ${kpi('Closing WIP cuối (sau 3B)', fin, true, { tone: 'res', sub: has(fin) && has(clERP) ? (Math.abs(fin - clERP) < 1 ? 'Không điều chỉnh 3B' : `Điều chỉnh 3B: ${fin - clERP > 0 ? '+' : ''}${f(fin - clERP)}`) : 'Chưa chạy STEP 3B' })}
     </div></section>
-    <section class="kpi-group"><h3>Thành phẩm · giá vốn <small>FG đầu kỳ + nhập kho − giá vốn = FG cuối kỳ</small></h3><div class="kpis">
-      ${kpi('Giá thành SX (STEP 4)', prodA, true, { tone: 'in', sub: prodA === null ? 'Chưa chạy STEP 4' : 'Nhập kho thành phẩm (155)' })}
-      ${kpi('Giá vốn FIFO (STEP 5)', res ? res.cogsA : null, true, { tone: 'out', sub: res ? `${pct(res.cogsA, avail)} FG khả dụng` : 'Chưa chạy STEP 5' })}
-      ${kpi('FG cuối kỳ', res ? res.closeA : null, false, { tone: 'res', sub: res ? `FG đầu kỳ ${f(res.openA)}` : 'Chưa chạy STEP 5' })}
+    <section class="kpi-group"><h3>Thành phẩm · giá vốn</h3><div class="kpis kpi-flow">
+      ${kpi('FG đầu kỳ', res ? res.openA : null, false, { tone: 'base', sub: res ? 'Lớp FIFO đầu kỳ (5.1)' : 'Chưa chạy STEP 5' })}${op('+')}
+      ${kpi('Giá thành SX (STEP 4)', prodA, true, { tone: 'in', sub: prodA === null ? 'Chưa chạy STEP 4' : 'Nhập kho thành phẩm (155)' })}${op('−')}
+      ${kpi('Giá vốn FIFO (STEP 5)', res ? res.cogsA : null, true, { tone: 'out', sub: res ? `${pct(res.cogsA, avail)} FG khả dụng` : 'Chưa chạy STEP 5' })}${op('−')}
+      ${kpi('Chuyển rework (5B)', res ? rw : null, false, { tone: 'out', sub: res ? 'FG xuất đi rework' : 'Chưa chạy STEP 5' })}${op('=')}
+      ${kpi('FG cuối kỳ', res ? res.closeA : null, false, { tone: 'res', sub: res ? 'Tồn kho thành phẩm (155)' : 'Chưa chạy STEP 5' })}
     </div></section>
   </div>`;
 }
@@ -1872,6 +1877,27 @@ function headLabels(t) {
   return Array.from({ length: n }, (_, k) => [...new Set(grid.map((r) => r[k]).filter(Boolean))].join(' · '));
 }
 /** Phone layout: checkpoint tables become label/value cards (labels taken from the table header). */
+/** v1.14.56: each h2 section of a page becomes a tinted zone (like the STEP 1 cards A/B/C); tones cycle blue → amber → green → violet.
+ *  Existing nodes are moved, not re-created, so mounted tables and listeners keep working. */
+const ZONE_TONES = ['blue', 'amber', 'green', 'violet'];
+function zoneSections(root) {
+  const page = root.querySelector('section.page'); if (!page) return;
+  let zone = null, n = 0;
+  const tone = () => `z-${ZONE_TONES[n++ % ZONE_TONES.length]}`;
+  for (const el of [...page.children]) {
+    if (el.tagName === 'H2') { zone = document.createElement('section'); zone.className = `zone ${tone()}`; page.insertBefore(zone, el); zone.appendChild(el); continue; }
+    if (el.matches('header.ph, .dq-cards, .kpi-groups')) { zone = null; continue; }
+    if (el.matches('.tabs') && !zone) { zone = document.createElement('section'); zone.className = `zone ${tone()}`; page.insertBefore(zone, el); zone.appendChild(el); continue; } // a tab bar opens a zone for its tables
+    if (el.querySelector('h2')) { // a wrapper that holds its own headed block(s): the block that starts with h2 becomes the zone
+      zone = null;
+      const headed = (b) => b.firstElementChild && b.firstElementChild.tagName === 'H2' && !b.matches('details, .dq-card, .card');
+      if (headed(el)) el.classList.add('zone', tone());
+      else for (const b of el.children) if (headed(b)) b.classList.add('zone', tone());
+      continue;
+    }
+    if (zone) zone.appendChild(el);
+  }
+}
 function cardTables(root) {
   for (const t of root.querySelectorAll('table.cp')) {
     if (t.classList.contains('el')) continue;
