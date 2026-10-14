@@ -919,6 +919,31 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('v1.14.30 DQ parts: a v1.14.29 confirmation of an older list is not converted', DQ.anomalyStatus(an2, { fp: an.fp, by: 'a@svl', at: 't', note: 'bản cũ' }), 'BLOCK - CONFIRM');
 }
 
+// ---- v1.14.31 2B: FG tiêu dùng nội bộ – chọn, xác nhận (lý do bắt buộc), chờ RUN FIFO, hoàn tác
+{
+  const C = await import('../src/engine/step2.js');
+  const row = (o) => ({ active: 'Y', rid: 'R1', rwType: 'NORMAL', rwStatus: 'OPEN', pcNo: null, outFG: 'FG1', compDate: null, compQty: null, scrapQty: null, issueQty: 5, fifoStatus: 'PASS', fifoCost: 100, erpRef: 120, issueDate: 46000, fg: 'FG1', fgName: 'x', dispNote: null, inputCheck: 'PASS', ...o });
+  const rows = () => [row({ rid: 'R1' }), row({ rid: 'R2', rwStatus: 'HOLD', issueQty: 3 }), row({ rid: 'R3', rwStatus: 'COMPLETED', pcNo: 'PC9', compQty: 5 }), row({ rid: 'R4', active: 'B/F' }), row({ rid: 'R5' })];
+  const r0 = rows();
+  eq('2B consumption: only active rows not yet finalised are eligible (OPEN, HOLD)', r0.map((r) => C.consFgEligible(r)), [true, true, false, false, true]);
+  const bad = C.confirmConsFg(r0, ['R1', 'R2'], 'ab', 'a@svl', '2026-10-14T01:00:00Z');
+  eq('2B consumption: reason under 5 characters blocks the confirmation, nothing changes', [bad.ok, r0[0].rwStatus, r0[1].rwStatus], [false, 'OPEN', 'HOLD']);
+  eq('2B consumption: empty selection blocks the confirmation', C.confirmConsFg(r0, [], 'Dùng làm mẫu', 'a', 't').ok, false);
+  eq('2B consumption: a completed row in the selection blocks the whole confirmation', [C.confirmConsFg(r0, ['R1', 'R3'], 'Dùng làm mẫu', 'a', 't').ok, r0[0].rwStatus], [false, 'OPEN']);
+  eq('2B consumption: a B/F row cannot be selected', C.confirmConsFg(r0, ['R4'], 'Dùng làm mẫu', 'a', 't').ok, false);
+  const ok = C.confirmConsFg(r0, ['R1', 'R2'], '  Dùng làm mẫu thử nội bộ ', 'a@svl', '2026-10-14T01:00:00Z');
+  eq('2B consumption: confirm sets CONSUMPTION, reason and who/when; FIFO cost is reset until STEP 5.2 runs', [ok.ok, r0[0].rwStatus, r0[0].dispNote, r0[0].dispBy, r0[0].fifoStatus, r0[0].fifoCost, r0[1].rwStatus], [true, 'CONSUMPTION', 'Dùng làm mẫu thử nội bộ', 'a@svl', 'NOT COSTED - RUN STEP 5.2', 0, 'CONSUMPTION']);
+  eq('2B consumption: rows outside the selection keep their status', [r0[4].rwStatus, r0[2].rwStatus], ['OPEN', 'COMPLETED']);
+  eq('2B consumption: confirmed rows need no PC / output FG / completion data (input check PASS)', [r0[0].inputCheck, r0[0].pcNo, r0[0].compQty], ['PASS', null, null]);
+  eq('2B consumption: confirmed rows are not eligible again', C.confirmConsFg(r0, ['R1'], 'Dùng làm mẫu', 'a', 't').ok, false);
+  eq('2B consumption: pending count until STEP 5.2 prices them', C.consFgPendingCount(r0), 2);
+  r0[0].fifoStatus = 'PASS'; r0[0].fifoCost = 420;
+  eq('2B consumption: a priced row leaves the pending count', C.consFgPendingCount(r0), 1);
+  const u = C.undoConsFg(r0[1], 'a@svl', 't');
+  eq('2B consumption: undo returns the row to OPEN and asks for a new FIFO run', [u.ok, r0[1].rwStatus, r0[1].dispNote, r0[1].fifoStatus], [true, 'OPEN', null, 'NOT COSTED - RUN STEP 5.2']);
+  eq('2B consumption: undo on a row that is not consumption is refused', C.undoConsFg(r0[2], 'a', 't').ok, false);
+}
+
 // ---- v1.14.26 STEP 4.4: FIFO sales find the lot by PC No. + product when the FG layer carries another source period; Sep → Oct roll
 {
   const FPx = await import('../src/engine/fgprod.js');

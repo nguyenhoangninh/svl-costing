@@ -450,6 +450,43 @@ export function recheckRegisterRow(row) {
   return row;
 }
 
+// ---- v1.14.31: FG tiêu dùng nội bộ (CONSUMPTION) – thao tác riêng ở khối 2B: chọn dòng, lưu nháp, xác nhận, hoàn tác.
+// Dòng CONSUMPTION không cần PC rework, FG đầu ra, ngày hoàn thành, SL hoàn thành / hỏng: engine chỉ đọc Active, trạng thái, SL xuất, ngày xuất.
+export const CONS_FG_NOT_COSTED = 'NOT COSTED - RUN STEP 5.2';
+const CONS_FG_FINAL = ['COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF', 'CONSUMPTION'];
+/** Có thể chọn làm tiêu dùng nội bộ: đang hoạt động trong kỳ và chưa có kết quả cuối (OPEN / HOLD / chưa xử lý). */
+export const consFgEligible = (r) => utxt(r.active) === 'Y' && !CONS_FG_FINAL.includes(utxt(r.rwStatus));
+export const consFgConfirmed = (r) => utxt(r.active) === 'Y' && utxt(r.rwStatus) === 'CONSUMPTION';
+/** Số dòng tiêu dùng nội bộ chưa được tính giá (cần chạy RUN FIFO STEP 5.2 để ghi Nợ 632 / Có 155). */
+export const consFgPendingCount = (rows) => rows.filter((r) => consFgConfirmed(r) && utxt(r.fifoStatus).startsWith('NOT COSTED')).length;
+
+/**
+ * Xác nhận các dòng đã chọn làm tiêu dùng nội bộ. Kiểm tra trước, không đổi gì nếu lỗi.
+ * Trả về { ok, error, rows }. Giá được tính lại khi chạy RUN FIFO (STEP 5.2), không tính ở đây.
+ */
+export function confirmConsFg(rows, rids, reason, by, at) {
+  const note = txt(reason).trim();
+  const set = new Set(rids);
+  if (!set.size) return { ok: false, error: 'Chưa tick dòng nào để xác nhận.' };
+  if (note.length < 5) return { ok: false, error: 'Nhập lý do (ít nhất 5 ký tự) trước khi xác nhận.' };
+  const hit = rows.filter((r) => set.has(r.rid));
+  if (hit.length !== set.size) return { ok: false, error: 'Có dòng không còn trong sổ kỳ này – tải lại màn hình.' };
+  if (hit.some((r) => !consFgEligible(r))) return { ok: false, error: 'Có dòng đã xử lý hoặc đã là tiêu dùng nội bộ – tải lại màn hình.' };
+  for (const r of hit) {
+    Object.assign(r, { rwStatus: 'CONSUMPTION', dispNote: note, dispBy: by, dispAt: at, fifoStatus: CONS_FG_NOT_COSTED, fifoQty: 0, fifoCost: 0 });
+    recheckRegisterRow(r);
+  }
+  return { ok: true, rows: hit };
+}
+
+/** Hoàn tác: dòng tiêu dùng nội bộ trở về OPEN và phải tính lại giá ở STEP 5.2. */
+export function undoConsFg(row, by, at) {
+  if (!consFgConfirmed(row)) return { ok: false, error: 'Dòng này không ở trạng thái tiêu dùng nội bộ.' };
+  Object.assign(row, { rwStatus: 'OPEN', dispNote: null, dispBy: by, dispAt: at, fifoStatus: CONS_FG_NOT_COSTED, fifoQty: 0, fifoCost: 0 });
+  recheckRegisterRow(row);
+  return { ok: true };
+}
+
 /** RW_UpdateStep2Control — Stock Out classification block on 03_STOCK_OUT_ALLOCATION J4:N9. */
 export function step2Classification(datasets, period, step2, register) {
   const raw = rawStockOutAmounts(datasets, period);
