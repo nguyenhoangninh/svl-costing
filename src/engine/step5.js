@@ -18,6 +18,11 @@ export const LEDGER_FIELDS = ['seq', 'lid', 'source', 'srcPeriod', 'pc', 'date',
 export const LEDGER_HEADERS = ['Seq', 'Layer ID', 'Source', 'Source Period', 'PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Unit', 'Qty In', 'RM', '622', '627', 'Total', 'Total / Unit', 'Qty Out', 'RM Out', '622 Out', '627 Out', 'Total Out', 'Qty Remaining', 'Total Remaining', 'Flag'];
 export const SALES_FIELDS = ['seq', 'date', 'inv', 'cust', 'prod', 'name', 'qty', 'usd', 'vnd', 'type', 'remark', 'def', 'ovr', 'fin', 'fq', 'rm', 'c622', 'c627', 'tot', 'unit', 'status', 'msg', 'key', 'dbRow', 'origInv'];
 export const SALES_HEADERS = ['Seq', 'Invoice Date', 'SI Invoice No.', 'Customer', 'Product Code', 'Product Name', 'Quantity', 'Amount (USD)', 'Amount (VND)', 'Transaction Type', 'Remark', 'Default Treatment', 'Override Treatment', 'Final Treatment', 'FIFO Qty', 'RM COGS', '622 COGS', '627 COGS', 'Total COGS', 'Unit COGS', 'Status', 'Message', 'Line Key', 'Sales DB Row', 'Original Invoice (return)'];
+// v1.14.57: Sales_COGS on screen and in the export also shows ED Number and Provision Reversal (after Remark).
+// SALES_FIELDS / SALES_HEADERS stay in the workbook order (golden comparison in test/verify5.mjs).
+const RK = SALES_FIELDS.indexOf('remark') + 1;
+export const SALES_VIEW_FIELDS = [...SALES_FIELDS.slice(0, RK), 'edNo', 'provRev', ...SALES_FIELDS.slice(RK)];
+export const SALES_VIEW_HEADERS = [...SALES_HEADERS.slice(0, RK), 'ED Number', 'Provision Reversal', ...SALES_HEADERS.slice(RK)];
 export const RETURN_FIELDS = RET.RETURN_FIELDS;
 export const RETURN_HEADERS = RET.RETURN_HEADERS;
 export const DETAIL_FIELDS = ['seq', 'prod', 'line', 'lid', 'source', 'pc', 'date', 'layerQty', 'qty', 'rm', 'a622', 'a627', 'tot', 'unit', 'take', 'left'];
@@ -235,7 +240,7 @@ export function runFIFO(ctx) {
     const d = saleDate(r); // Bill (B/L) date when present, else invoice date (owner decision 02/10/2026)
     if (d === null) { if (utxt(r.product) || num(r.qty) !== 0) undated.push({ book, dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), qty: num(r.qty), vnd: num(r.amtVND), rawDate: r.invDate === null || r.invDate === undefined ? '' : String(r.invDate) }); return; }
     if (d < pStart || d > pEnd) return;
-    const s = { seq: S.length + 1, book, acc: bookOf(r), date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
+    const s = { seq: S.length + 1, book, acc: bookOf(r), date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), edNo: s5t(r.edNo), provRev: r.provRev === null || r.provRev === undefined || r.provRev === '' ? null : num(r.provRev), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
     s.key = lineKey(r, d, keyCount);
     if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
     else if (!s.prod && s.qty !== 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(s.type)) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
@@ -527,7 +532,7 @@ export function runFIFO(ctx) {
   }
   let sumLineA = 0;
   const sales = S.map((s) => {
-    const o = { seq: s.seq, book: s.book, acc: s.acc, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
+    const o = { seq: s.seq, book: s.book, acc: s.acc, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, edNo: s.edNo, provRev: s.provRev, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
     else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv, matchedOrigInv: s.matchedOrigInv, matchMode: s.matchMode, returnLid: s.returnLid });
     if (s.vmsg) o.vmsg = s.vmsg; // v1.14.50: validation warning of the sale line (checkpoint 09b detail)

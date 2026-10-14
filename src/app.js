@@ -1569,7 +1569,7 @@ async function exportAll() {
   if (r5) {
     const dt = (rows, fs) => rows.map((r) => { const o = { ...r }; for (const f of fs) if (typeof o[f] === 'number') o[f] = serialToISO(o[f]); return o; });
     tbl('05_FG_LEDGER', P3.F5.LEDGER_FIELDS, P3.F5.LEDGER_HEADERS, dt(r5.ledger, ['date']));
-    tbl('05_SALES_COGS', P3.F5.SALES_FIELDS, P3.F5.SALES_HEADERS, dt(r5.sales, ['date']));
+    tbl('05_SALES_COGS', P3.F5.SALES_VIEW_FIELDS, P3.F5.SALES_VIEW_HEADERS, dt(r5.sales, ['date']));
     if (r5.returnRegister && r5.returnRegister.length) {
       const rf = ['seq', 'date', 'returnInv', 'customer', 'product', 'productName', 'originalInv', 'returnQty', 'cogsRM', 'cogs622', 'cogs627', 'cogsTotal', 'layerId', 'status', 'message'];
       const rh = ['Seq', 'Return Date', 'Return Invoice', 'Customer', 'Product', 'Product Name', 'Original Invoice', 'Return Qty', 'RM Reversal', '622 Reversal', '627 Reversal', 'COGS Reversal', 'Returned FG Layer', 'Status', 'Message'];

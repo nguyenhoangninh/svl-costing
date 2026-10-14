@@ -431,7 +431,7 @@ export function viewFIFO(el) {
   const box = el.querySelector('#t5');
   if (!res) { box.innerHTML = A.emptyNote('Chưa chạy FIFO COGS.'); return; }
   if (tab === 'sales') {
-    const cols = colsOf(F5.SALES_FIELDS, F5.SALES_HEADERS, { date: 'date', qty: 'qty', usd: 'num', vnd: 'num', fq: 'qty', rm: 'num', c622: 'num', c627: 'num', tot: 'num', unit: 'num', status: 'status', seq: 'int', dbRow: 'int' }, { name: 220, msg: 260, key: 300, cust: 180 });
+    const cols = colsOf(F5.SALES_VIEW_FIELDS, F5.SALES_VIEW_HEADERS, { date: 'date', qty: 'qty', usd: 'num', vnd: 'num', provRev: 'num', fq: 'qty', rm: 'num', c622: 'num', c627: 'num', tot: 'num', unit: 'num', status: 'status', seq: 'int', dbRow: 'int' }, { name: 220, msg: 260, key: 300, cust: 180, edNo: 150, provRev: 140 });
     const ov = d.fifoOverrides || {};
     const rows = res.sales.filter((s) => s.book !== 'RETURNS').map((s) => ({ ...s, ovr: ov[s.key] || '' }));
     const ci = cols.findIndex((x) => x.key === 'ovr'); cols[ci] = { ...cols[ci], editable: edit, options: ['FIFO COGS', 'NO COGS', 'REVIEW'] };

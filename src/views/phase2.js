@@ -613,13 +613,13 @@ export function migratePhase2(g, S, period) {
   const sg = g['04_SALES_IMPORT'];
   if (sg) {
     const rows = [];
-    for (let r = 5; r < sg.length; r++) { const x = sg[r] || []; if (x[0] === null && x[3] === null) continue; const o = {}; F.SALES_FIELDS.forEach((f, i) => { o[f] = x[i] ?? null; }); Object.assign(o, { txnKey: x[14], validStat: x[15], validMsg: x[16], saveStat: x[17], savedAt: serialToIsoTs(x[18]), batchID: x[19], sourceFile: x[20], importedAt: serialToIsoTs(x[21]), sourceRow: x[22] }); rows.push(o); }
+    for (let r = 5; r < sg.length; r++) { const x = sg[r] || []; if (x[0] === null && x[3] === null) continue; const o = {}; F.SALES_WB_FIELDS.forEach((f, i) => { o[f] = x[i] ?? null; }); Object.assign(o, { txnKey: x[14], validStat: x[15], validMsg: x[16], saveStat: x[17], savedAt: serialToIsoTs(x[18]), batchID: x[19], sourceFile: x[20], importedAt: serialToIsoTs(x[21]), sourceRow: x[22] }); rows.push(o); }
     d.salesImport = { status: ttxt(cell(sg, 2, 2)), rows, mode: ttxt(cell(sg, 2, 6)) || 'YTD', period, fileName: rows[0] ? rows[0].sourceFile : '', importedAt: rows[0] ? rows[0].importedAt : '' };
   }
   const dg = g['04_SALES_DATA'];
   if (dg) {
     const rows = [];
-    for (let r = 5; r < dg.length; r++) { const x = dg[r] || []; if (x[0] === null && x[3] === null) continue; const o = {}; F.SALES_FIELDS.forEach((f, i) => { o[f] = x[i] ?? null; }); Object.assign(o, { include: x[14], validResult: x[15], txnKey: x[16], batchID: x[17], sourceFile: x[18], savedAt: serialToIsoTs(x[19]), sourceRow: x[20] }); rows.push(o); }
+    for (let r = 5; r < dg.length; r++) { const x = dg[r] || []; if (x[0] === null && x[3] === null) continue; const o = {}; F.SALES_WB_FIELDS.forEach((f, i) => { o[f] = x[i] ?? null; }); Object.assign(o, { include: x[14], validResult: x[15], txnKey: x[16], batchID: x[17], sourceFile: x[18], savedAt: serialToIsoTs(x[19]), sourceRow: x[20] }); rows.push(o); }
     d.salesDB = { rows, savedAt: serialToIsoTs(cell(dg, 2, 2)), latestInvoice: cell(dg, 2, 4) };
   }
   const og = g['04_SO_PRICE'];
