@@ -279,6 +279,8 @@ export function runFIFO(ctx) {
 
   // FIFO allocation
   const D = []; let shortProducts = 0; const undatedUsed = new Set();
+  // v1.14.50: each shortage behind checkpoint 08 (sale line, consumption, or product) – shown in the STEP 5 checkpoint detail
+  const shortList = [];
   const rwByProd = new Map(), rwPlan = [];
   // v1.14.29: FG consumption in STRICT_DATE is an issue event like sales / rework (date order); in MONTHLY it is a pre-pass (below)
   const consByProd = new Map();
@@ -314,7 +316,7 @@ export function runFIFO(ctx) {
         c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.takes.push({ lid: l.lid, qty: d.qty });
         nd -= take;
       }
-      if (nd > TOLQ) { c.short = nd; shortProducts++; }
+      if (nd > TOLQ) { c.short = nd; shortProducts++; shortList.push({ kind: 'CONS', prod, ref: String(r.rid || r.doc || ''), date: dt, need: num(r.issueQty), fifo: num(r.issueQty) - nd, short: nd, note: 'Tiêu dùng nội bộ FG: không đủ lớp FG' }); }
       consPlan.push(c);
     }
   }
@@ -332,6 +334,7 @@ export function runFIFO(ctx) {
           s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
           nd -= take;
         }
+        if (nd > TOLQ) shortList.push({ kind: 'SALE', prod, inv: s.inv, cust: s.cust, date: s.date, need: s.qty, fifo: s.fq, short: nd, note: 'Hết lớp FG của tháng (đã dùng cho hoá đơn trước)' });
         if (nd > TOLQ) { short += nd; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (FG of the month used up by earlier invoices); `; } else s.status = 'OK';
       }
       if (short > TOLQ) shortProducts++;
@@ -347,7 +350,7 @@ export function runFIFO(ctx) {
           nd -= take;
         }
       }
-      if (nd > TOLQ) shortProducts++;
+      if (nd > TOLQ) { shortProducts++; shortList.push({ kind: 'PRODUCT', prod, need: need.get(prod), fifo: need.get(prod) - nd, short: nd, note: 'Thiếu FG cho cả kỳ (chế độ PRORATA)' }); }
       let cq = 0, crm = 0, c622 = 0, c627 = 0, ct = 0;
       list.forEach((s, li) => {
         if (li < list.length - 1) {
@@ -411,7 +414,7 @@ export function runFIFO(ctx) {
           c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.takes.push({ lid: l.lid, qty: d.qty });
           ndc -= take;
         }
-        if (ndc > TOLQ) { c.short = ndc; short = true; }
+        if (ndc > TOLQ) { c.short = ndc; short = true; shortList.push({ kind: 'CONS', prod, ref: String((ctx.register.rows[x.e.i] || {}).rid || (ctx.register.rows[x.e.i] || {}).doc || ''), date: x.d, need: x.e.qty, fifo: x.e.qty - ndc, short: ndc, note: 'Tiêu dùng nội bộ FG: không đủ lớp FG ngày ≤ ngày xuất' }); }
         consPlan.push(c);
         continue;
       }
@@ -438,6 +441,7 @@ export function runFIFO(ctx) {
       }
       if (x.k === 'S') {
         const s = x.s;
+        if (nd > TOLQ) shortList.push({ kind: 'SALE', prod, inv: s.inv, cust: s.cust, date: s.date, need: s.qty, fifo: s.fq, short: nd, note: 'Không có lớp FG ngày ≤ ngày hoá đơn' });
         if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; }
         else s.status = 'OK';
         if (s.fq > TOLQ && s.inv) RET.mergeOrigin(originNow, { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
@@ -567,6 +571,7 @@ export function runFIFO(ctx) {
     ledger, sales, returnRegister: returnControl.rows, returnControl, detail, closing, summary: sum, totals, rec, sumDetA, sumLineA, step4Qty, step4Cost,
     stats: { monthlySplit: mode === 'MONTHLY' ? monthlySplit : '', lines: S.length, products: need.size, reviewLines, shortProducts, nrv, negLayers, advisory, undatedLayers: undatedUsed.size, returns: retN, sellRate },
     undated,
+    shortList: shortList.sort((a, b) => b.short - a.short).slice(0, 2000),
     // internal (dropped before saving): layers for the rework pass
     _sorted: sorted, _rwPlan: mode !== 'MONTHLY' ? rwPlan : null, _consPlan: consPlan,
   };

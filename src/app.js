@@ -515,7 +515,7 @@ function renderShell() {
         <span class="stop-t"><b>${esc(n.label)}</b><small>${esc(n.key ? rs[n.key] : n.sub)}</small></span></a>`).join('')}
     </nav>
     <nav class="tools" aria-label="Công cụ">${TOOLS.map((t) => `<a href="#${t.id}" class="${S.view === t.id ? 'on' : ''}">${esc(t.label)}</a>`).join('')}</nav>
-    <div class="ver">${esc(APP_VERSION)}</div>`;
+    `;
   const hp = $('#hdr-period');
   if (hp) hp.innerHTML = S.periods.map((p) => `<option ${p === S.period ? 'selected' : ''}>${p}</option>`).join('');
   const u = store.cloud.user;
@@ -721,7 +721,7 @@ VIEWS.step1 = (el) => {
   const mc = materialIssueCosts(S.d.datasets, S.period, mcO); // v1.14.43: đơn giá xuất NVL (MI-M) và dòng bất thường
   const mcSec = `<h2>Đơn giá xuất NVL trong kỳ (MI-M)</h2>
     <div class="row"><label>Ngưỡng lệch (%) <input id="mc-dev" type="number" min="1" step="1" value="${Math.round(mcO.dev * 100)}" style="width:90px"></label>
-    <label>Thành tiền tối thiểu (VND) <input id="mc-min" type="number" min="0" step="100000" value="${mcO.minCost}" style="width:150px"></label>
+    <label>Thành tiền tối thiểu (VND) <input id="mc-min" type="text" inputmode="numeric" autocomplete="off" value="${fmtNum(mcO.minCost)}" style="width:150px"></label>
     <button class="btn ghost" id="mc-reset" type="button">Mặc định</button></div>
     ${mc.materials.length ? `<p class="muted">Đơn giá = Total Cost ÷ SL xuất (dòng SL > 0). Đơn giá BQ = tổng cost ÷ tổng SL của các dòng có cost. Đơn giá chuẩn = trung vị các đơn giá dòng. Bất thường: dòng có thành tiền ≥ ${fmtNum(mcO.minCost)} VND lệch > ${Math.round(mcO.dev * 100)}% so với đơn giá chuẩn. Thiếu cost: dòng SL > 0 nhưng Total Cost = 0 (không tính vào BQ). Ngưỡng chỉ ảnh hưởng bảng này, không ảnh hưởng tính giá thành.</p>
     <p class="muted">${fmtNum(mc.summary.materials)} vật tư · ${fmtNum(mc.summary.flagged)} vật tư bất thường · ${fmtNum(mc.summary.missingCost)} vật tư thiếu cost · ${fmtNum(mc.summary.flaggedLines)} dòng lệch · ${fmtNum(mc.summary.zeroCostLines)} dòng cost = 0${mc.missing.length ? ` · chưa có MI-M hệ ${esc(mc.missing.join(', '))}` : ''}</p>
@@ -754,7 +754,7 @@ VIEWS.step1 = (el) => {
   }
   const mcDev = $('#mc-dev'), mcMin = $('#mc-min');
   const mcApply = () => {
-    const dv = Number(mcDev && mcDev.value), mn = Number(mcMin && mcMin.value);
+    const dv = Number(mcDev && mcDev.value), mn = Number(String(mcMin ? mcMin.value : '').replace(/[^\d]/g, ''));
     if (!(dv > 0) || !(mn >= 0) || !Number.isFinite(dv) || !Number.isFinite(mn)) { toast('Ngưỡng lệch phải > 0 và thành tiền tối thiểu ≥ 0.', 'review'); return; }
     setMcOpts({ dev: dv / 100, minCost: mn });
   };

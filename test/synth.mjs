@@ -108,6 +108,10 @@ const M = run('MONTHLY'), St = run('STRICT_DATE');
 
 // ---------- invariants
 let fails = 0; const ok = (label, cond, info = '') => { if (!cond) { fails++; console.log(`✗ ${label} ${info}`); } };
+// v1.14.50: checkpoint 08 detail — every counted shortage is listed (none without a count, none with zero quantity)
+ok('shortList empty exactly when checkpoint 08 is 0 (MONTHLY and STRICT_DATE)', [M, St].every(({ res }) => (res.shortList.length === 0) === (res.stats.shortProducts === 0)), `M=${M.res.shortList.length}/${M.res.stats.shortProducts} St=${St.res.shortList.length}/${St.res.stats.shortProducts}`);
+ok('shortList rows all carry a positive shortage', [M, St].every(({ res }) => res.shortList.every((x) => x.short > 0 && x.prod)));
+ok('STRICT_DATE: distinct products in shortList = checkpoint 08', new Set(St.res.shortList.map((x) => x.prod)).size === St.res.stats.shortProducts, `${new Set(St.res.shortList.map((x) => x.prod)).size} vs ${St.res.stats.shortProducts}`);
 // v1.14.16: the FG rework Stock Out (SPX-100, Item Type FG) is not a WIP material row
 ok('STEP 3A lists no FG-only Stock Out code', !s3.rows.some((r) => r.code === 'SPX-100'), s3.rows.map((r) => r.code).join(','));
 ok('STEP 3A counts the excluded FG Stock Out line', s3.fgStockOutLinesExcluded === 1, String(s3.fgStockOutLinesExcluded));
