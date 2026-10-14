@@ -151,6 +151,7 @@ const SALES_BASE = [
   ['Customer', 'Nên có', 'Tên khách hàng.', 'Chữ'],
   ['Product Number', 'Bắt buộc*', 'Mã thành phẩm đầy đủ như trên PC-P. *Bắt buộc với dòng có số lượng.', 'Chữ, không viết tắt'],
   ['Product Name', 'Nên có', 'Tên thành phẩm.', 'Chữ'],
+  ['Customer - Item Code', 'Không', 'Mã hàng theo khách hàng (item code / part no. của khách). Lưu cùng dòng và hiển thị ở Sales_COGS (STEP 5.2).', 'Chữ'],
   ['Transaction Type', 'Nên có', 'Loại giao dịch: NORMAL SALE, SALES RETURN, CREDIT NOTE, FOC, SAMPLE, ADJUSTMENT, NON-PRODUCT REVENUE, OTHER. Bỏ trống = NORMAL SALE (dòng số dương).', 'Đúng một trong các giá trị bên trái'],
   ['Quantity', 'Bắt buộc*', 'Số lượng. Bán hàng: dương. Hàng trả lại: ÂM. Để trống với dòng chỉ có tiền (giảm giá, điều chỉnh).', 'Số'],
   ['Unit Price (USD)', 'Nên có', 'Đơn giá USD. App kiểm tra SL × đơn giá ≈ Amount (USD), lệch > 0,5% sẽ cảnh báo.', 'Số; "34,6" được hiểu là 34.6'],
@@ -164,15 +165,15 @@ const SALES_BASE = [
 ];
 const withEx = (base, ex) => base.map((c, i) => [...c, ex[0][i], ex[1][i]]);
 export const SALES_COLS = withEx(SALES_BASE, [
-  ['2026-09-08', '2026-09-10', 'SI-2609-001', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'NORMAL SALE', 150, 137.78, 20667, 26040, 538168680, '', 'ED-306012345678', '', ''],
-  ['2026-09-28', '2026-10-02', 'SI-2609-045', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', 'NORMAL SALE', 1000, 9.5, 9500, 26100, 247950000, '', 'ED-306012349999', 1250000, 'B/L tháng 10 → doanh thu tháng 10'],
+  ['2026-09-08', '2026-09-10', 'SI-2609-001', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'TRV-DOONA-SS', 'NORMAL SALE', 150, 137.78, 20667, 26040, 538168680, '', 'ED-306012345678', '', ''],
+  ['2026-09-28', '2026-10-02', 'SI-2609-045', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', '48-22-8442', 'NORMAL SALE', 1000, 9.5, 9500, 26100, 247950000, '', 'ED-306012349999', 1250000, 'B/L tháng 10 → doanh thu tháng 10'],
 ]);
 export const RETURN_COLS = withEx(SALES_BASE, [
-  ['2026-09-20', '', 'CN-2609-001', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', 'SALES RETURN', -10, 9.5, -95, 26100, -2479500, 'SI-2608-031', '', '', 'Hàng lỗi trả về'],
-  ['2026-09-25', '', 'CN-2609-002', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', 'CREDIT NOTE', '', '', -500, 26040, -13020000, '', '', '', 'Giảm giá theo thoả thuận'],
+  ['2026-09-20', '', 'CN-2609-001', 1, 'Techtronic Trading Ltd.', 'OLI-4810VU', '20 INCH LARGER M-TOTE', '48-22-8442', 'SALES RETURN', -10, 9.5, -95, 26100, -2479500, 'SI-2608-031', '', '', 'Hàng lỗi trả về'],
+  ['2026-09-25', '', 'CN-2609-002', 1, 'Traveler Innovations Limited', 'SP101-10-043-003', 'Doona Infant Car Seat – Sahara Sand', '', 'CREDIT NOTE', '', '', -500, 26040, -13020000, '', '', '', 'Giảm giá theo thoả thuận'],
 ]);
 const salesSheet = (name, title, period, cols, help) => ({
-  name, keep: true, header: 4, cols: [13, 13, 15, 10, 28, 20, 34, 18, 11, 13, 14, 12, 16, 18, 18, 16, 26],
+  name, keep: true, header: 4, cols: [13, 13, 15, 10, 28, 20, 34, 20, 18, 11, 13, 14, 12, 16, 18, 18, 16, 26],
   aoa: [
     [title],
     [`Kỳ giá thành: ${period} · Điền từ dòng 5 · Tiêu đề dòng 4 KHÔNG đổi tên · Hướng dẫn chi tiết và ví dụ: sheet ${GUIDE_SHEET}. ${help}`],
