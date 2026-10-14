@@ -4,10 +4,10 @@ import { ruleSummary } from './step2report.js';
 
 const abs = Math.abs;
 export const FALLBACK_REVIEW = 0.05;
-/** Amount allocated through the broad STEP 2 fallbacks ('O fallback ALL', 'S other -> equal T+O'). */
+/** Amount allocated through the broad STEP 2 fallbacks ('O fallback ALL', 'S other -> equal T+O', R6 on R5a–c or RM Cost basis). */
 export function fallbackAlloc(s2) {
   let a = 0;
-  for (const d of (s2 && s2.detail) || []) { const note = String(d[17] || ''); if (note.includes('fallback ALL') || d[16] === 'FALLBACK EQUAL' || d[16] === 'FALLBACK RM COST') a += num(d[15]); }
+  for (const d of (s2 && s2.detail) || []) { const note = String(d[17] || ''); if (note.includes('fallback ALL') || ['FALLBACK EQUAL', 'FALLBACK RM COST', 'FALLBACK R5 BASIS'].includes(d[16])) a += num(d[15]); }
   return a;
 }
 function overall(rows, nextOk, nextBad) {

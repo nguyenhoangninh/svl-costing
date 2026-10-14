@@ -17,6 +17,7 @@ import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
 import { step2ReportSheets, ruleSummary, ruleOf } from './engine/step2report.js';
+import { materialIssueCosts, MATCOST_DEV, MATCOST_MIN_COST } from './engine/matcost.js';
 import * as TPL from './engine/templates.js';
 import * as DQ from './engine/dataquality.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
@@ -703,6 +704,12 @@ function dqSection(dq) {
 }
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
+  const mc = materialIssueCosts(S.d.datasets, S.period); // v1.14.43: đơn giá xuất NVL (MI-M) và dòng bất thường
+  const mcSec = `<h2>Đơn giá xuất NVL trong kỳ (MI-M)</h2>
+    ${mc.materials.length ? `<p class="muted">Đơn giá = Total Cost ÷ SL xuất (dòng SL > 0). Đơn giá BQ = tổng cost ÷ tổng SL của các dòng có cost. Đơn giá chuẩn = trung vị các đơn giá dòng. Bất thường: dòng có thành tiền ≥ ${fmtNum(MATCOST_MIN_COST)} VND lệch > ${Math.round(MATCOST_DEV * 100)}% so với đơn giá chuẩn. Thiếu cost: dòng SL > 0 nhưng Total Cost = 0 (không tính vào BQ).</p>
+    <p class="muted">${fmtNum(mc.summary.materials)} vật tư · ${fmtNum(mc.summary.flagged)} vật tư bất thường · ${fmtNum(mc.summary.missingCost)} vật tư thiếu cost · ${fmtNum(mc.summary.flaggedLines)} dòng lệch · ${fmtNum(mc.summary.zeroCostLines)} dòng cost = 0${mc.missing.length ? ` · chưa có MI-M hệ ${esc(mc.missing.join(', '))}` : ''}</p>
+    <div id="t-mc"></div>
+    <h2>Dòng xuất lệch bất thường</h2><div id="t-mc-lines"></div>` : `<p class="muted">Chưa có dữ liệu MI-M trong kỳ ${esc(S.period)}.</p>`}`;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 1 · Import dữ liệu ERP</h1><p class="lead">Chọn các file báo cáo ERP của kỳ ${esc(S.period)} (PC-P, PC-M, MI-P, MI-M, STOCK OUT, MR-P, MR-M cho hệ T, S, O). Tên file phải chứa loại báo cáo, hệ và kỳ, ví dụ <code>PC-M-T-202608.xlsx</code>. Import lại cùng báo cáo sẽ thay thế dữ liệu cũ.</p></div>
     <div class="result"><span>Kết quả</span>${pill(c.result)}<small>${esc(c.coreReady)} báo cáo · ${esc(c.sysReady)} hệ</small></div></header>
@@ -714,6 +721,7 @@ VIEWS.step1 = (el) => {
     </div>
     <div id="plan"></div>
     ${dqSection(c.dq)}
+    ${mcSec}
     ${c.dateIssues && c.dateIssues.length ? `<div class="alert review"><b>Có dòng ngày ngoài kỳ ${esc(S.period)}</b> – kiểm tra file xuất ERP trước khi chạy STEP 2:<ul>${c.dateIssues.map((x) => `<li>${esc(x.key)}: ${fmtNum(x.n)} dòng (${esc(x.months.join(', '))})${x.amt ? ` · ${fmtNum(x.amt)} VND` : ''}</li>`).join('')}</ul></div>` : ''}
     <div class="grid3">${ERPS.map((e) => { const b = st.s1.bySys[e]; return `<div class="sys sys-${e}"><b>Hệ ${e}</b>${pill(b.status)}<span>${b.files} file · ${fmtNum(b.rows)} dòng</span><small>${fmtTs(b.lastImport)}</small></div>`; }).join('')}</div>
     <h2>Danh mục 21 báo cáo bắt buộc</h2>
@@ -726,6 +734,21 @@ VIEWS.step1 = (el) => {
   if (c.dq && c.dq.recon && c.dq.recon.issues.length && $('#t-pcrec')) {
     const pcols = DQ.PCR_FIELDS.map((f, i) => ({ key: f, label: DQ.PCR_HEADERS[i], type: ['pcp', 'pcm', 'diff'].includes(f) ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 260 : f === 'erp' ? 50 : ['pcp', 'pcm', 'diff'].includes(f) ? 170 : 130 }));
     mountTable($('#t-pcrec'), { columns: pcols, rows: c.dq.recon.issues, filterKey: 'type', height: 300, totals: ['pcp', 'pcm', 'diff'], onExport: exportTable('01_DOI_CHIEU_PCP_PCM', pcols) });
+  }
+  if (mc.materials.length && $('#t-mc')) {
+    const mcCols = [{ key: 'erp', label: 'Hệ', width: 60 }, { key: 'code', label: 'Mã VT', width: 130 }, { key: 'name', label: 'Tên vật tư', width: 300 }, { key: 'unit', label: 'ĐVT', width: 70 },
+      { key: 'nLines', label: 'Số dòng', type: 'int', width: 90 }, { key: 'qty', label: 'SL xuất', type: 'qty', width: 120 }, { key: 'cost', label: 'Giá trị xuất', type: 'num', width: 150 },
+      { key: 'bq', label: 'Đơn giá BQ', type: 'num', width: 130 }, { key: 'ref', label: 'Đơn giá chuẩn', type: 'num', width: 130 }, { key: 'uMin', label: 'Đơn giá thấp nhất', type: 'num', width: 140 }, { key: 'uMax', label: 'Đơn giá cao nhất', type: 'num', width: 140 },
+      { key: 'nDev', label: 'Dòng lệch', type: 'int', width: 90 }, { key: 'maxDev', label: 'Lệch lớn nhất', type: 'pct', width: 120 }, { key: 'nZero', label: 'Dòng cost = 0', type: 'int', width: 120 },
+      { key: 'flag', label: 'Trạng thái', type: 'status', width: 190 }];
+    mountTable($('#t-mc'), { columns: mcCols, rows: mc.materials, filterKey: 'flag', height: 420, totals: ['cost'], onExport: exportTable('01_DON_GIA_XUAT_NVL_MI_M', mcCols) });
+  }
+  if (mc.lines.length && $('#t-mc-lines')) {
+    const lnCols = [{ key: 'erp', label: 'Hệ', width: 60 }, { key: 'mi', label: 'MI No.', width: 130 }, { key: 'dateISO', label: 'Ngày', width: 100 }, { key: 'mo', label: 'MO No.', width: 130 },
+      { key: 'code', label: 'Mã VT', width: 130 }, { key: 'name', label: 'Tên vật tư', width: 280 }, { key: 'lot', label: 'Lot', width: 120 }, { key: 'qty', label: 'SL xuất', type: 'qty', width: 110 },
+      { key: 'cost', label: 'Thành tiền', type: 'num', width: 150 }, { key: 'unitCost', label: 'Đơn giá dòng', type: 'num', width: 140 }, { key: 'ref', label: 'Đơn giá chuẩn', type: 'num', width: 130 },
+      { key: 'dev', label: 'Lệch so với chuẩn', type: 'pct', width: 150 }, { key: 'flag', label: 'Trạng thái', type: 'status', width: 170 }];
+    mountTable($('#t-mc-lines'), { columns: lnCols, rows: mc.lines, filterKey: 'erp', height: 360, totals: ['cost'], onExport: exportTable('01_DONG_XUAT_NVL_LECH_MI_M', lnCols) });
   }
   const dqCols = () => DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
   if (c.dq && c.dq.lines.length) {

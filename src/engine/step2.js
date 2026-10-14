@@ -72,6 +72,7 @@ function loadPCPool(ds, erp, pool) {
       // v1.14.19 (audit P0-01): a text date ('05/10/2026') was read by num() as 0 → undated lot in STRICT_DATE.
       date: cDate >= 0 ? (typeof r[cDate] === 'number' ? r[cDate] : cellDateSerial(r[cDate]) || 0) : 0, sub: cSub >= 0 ? txt(r[cSub]) : '', unit: cUnit >= 0 ? txt(r[cUnit]) : '',
       allocT: 0, allocS: 0, allocO: 0, alloc: 0, src: '',
+      allocR5: 0, // v1.14.43: amount this lot received from R5a / R5b / R5c (basis of R6 "S khác")
     });
   }
 }
@@ -107,7 +108,7 @@ export const STEP2_RULES = [
   [6, 'O', 'JOB CODE VE* (kèm SVL-VE)', 'O', 'PC-P-O Location VE*', 'Total Cost', '', 'Allocate'],
   [7, 'O', 'Còn lại', 'O', 'All PC-P-O', 'Total Cost (PC RM Cost)', '', 'Fallback'],
   [8, 'S', 'DS*/DN* | VE* | MK*', 'T / O', 'T SP* | O VE* | O MK*', 'Total Cost', '', 'Allocate'],
-  [9, 'S', 'Other / Blank', 'T + O', 'All PC-P', 'Total Cost (PC RM Cost)', '', 'Fallback'],
+  [9, 'S', 'Other / Blank', 'T + O', 'All PC-P', 'Total Cost (tỷ lệ R5a–c; dự phòng PC RM Cost)', '', 'Fallback'],
 ];
 
 export const STEP2_DETAIL_HEADERS = ['Source ERP', 'Source Key', 'Source Key Type', 'Source Rows', 'Source Stock Out', 'Family', 'Target ERP', 'Target Match', 'PC No.', 'MO No.', 'Product Code', 'Product Name', 'PC Location', 'PC RM Cost', 'Allocation %', 'Allocated Stock Out', 'Status', 'Note'];
@@ -170,7 +171,11 @@ export function runStep2(datasets, period, opts = {}) {
   // consumption: src (col 0) includes it, col 3 = posted directly to 632 (not allocated)
   for (const c of consMap.values()) { const s = sum[c.erp] || sum.O; s[0] += c.amt; s[3] += c.amt; }
   const consumption = [...consMap.values()].map((c) => ({ erp: c.erp, code: c.code, name: c.name, rows: c.rows, amt: c.amt })).sort((a, b) => a.erp.localeCompare(b.erp) || b.amt - a.amt);
-  for (const g of groups) {
+  // v1.14.43 (FAMILY): Stock Out "S khác" (R6) is spread by the amount each lot already received from R5a/R5b/R5c,
+  // so those groups are allocated first. WORKBOOK keeps its legacy order and equal split.
+  const isR6 = (g) => g.erp === 'S' && !['DOONA', 'VETO', 'MK'].includes(g.fam);
+  const orderedGroups = oRule === 'WORKBOOK' ? groups : [...groups.filter((g) => !isR6(g)), ...groups.filter(isR6)];
+  for (const g of orderedGroups) {
     const srcERP = g.erp, srcAmt = g.cost;
     let allocated = 0, unalloc = 0, totalW = 0, cand = 0, forceEqual = false, broad = false, note = '', status = 'ALLOCATED';
     let targetERP = '', field = '', tKey = '';
@@ -207,10 +212,18 @@ export function runStep2(datasets, period, opts = {}) {
         if (g.fam === 'DOONA') { targetERP = 'T'; field = 'PRODUCT PREFIX'; tKey = 'SP'; note = 'S DS/DN -> T SP*.'; }
         else if (g.fam === 'VETO') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'VE'; note = 'S VE -> O VE*.'; }
         else if (g.fam === 'MK') { targetERP = 'O'; field = 'LOCATION PREFIX'; tKey = 'MK'; note = 'S MK -> O MK*.'; }
-        else { targetERP = 'T+O'; field = 'ALL'; tKey = 'ALL'; broad = true; forceEqual = oRule === 'WORKBOOK'; note = forceEqual ? 'S other -> equal T+O.' : 'S other -> T+O theo PC RM Cost.'; }
+        else { targetERP = 'T+O'; field = 'ALL'; tKey = 'ALL'; broad = true; forceEqual = oRule === 'WORKBOOK'; note = forceEqual ? 'S other -> equal T+O.' : 'S other -> T+O theo tỷ lệ R5a/R5b/R5c.'; }
       }
+      // weight basis: EQUAL (WORKBOOK), R5 (R6 in FAMILY, when R5a–c put an amount on an eligible lot), COST (PC RM Cost)
+      const elig = (p) => matches(targetERP, field, tKey, p);
+      let basis = forceEqual ? 'EQUAL' : 'COST';
+      if (status === 'ALLOCATED' && targetERP === 'T+O' && !forceEqual) {
+        if (pool.reduce((a, p) => a + (elig(p) ? p.allocR5 : 0), 0) > 0) basis = 'R5';
+        else { note = 'S other -> T+O theo PC RM Cost.' + ' Dự phòng: chưa có phân bổ R5a–c cho lô nhận trong kỳ.'; }
+      }
+      const weight = (p) => (basis === 'EQUAL' ? 1 : basis === 'R5' ? p.allocR5 : p.cost);
       if (status === 'ALLOCATED') {
-        for (const p of pool) if (matches(targetERP, field, tKey, p)) { cand++; if (forceEqual) totalW += 1; else if (p.cost > 0) totalW += p.cost; }
+        for (const p of pool) if (elig(p)) { cand++; const w = weight(p); if (w > 0) totalW += w; }
       }
       if (status !== 'ALLOCATED' || cand === 0 || totalW === 0) {
         unalloc = srcAmt;
@@ -222,13 +235,14 @@ export function runStep2(datasets, period, opts = {}) {
       } else {
         for (const p of pool) {
           if (!matches(targetERP, field, tKey, p)) continue;
-          const W = forceEqual ? 1 : p.cost;
+          const W = weight(p);
           if (W > 0) {
             const pct = W / totalW, a = srcAmt * pct;
             allocated += a; p.alloc += a;
             if (!('+' + p.src.toUpperCase() + '+').includes('+' + srcERP + '+')) p.src = p.src ? p.src + '+' + srcERP : srcERP;
             if (srcERP === 'T') p.allocT += a; else if (srcERP === 'S') p.allocS += a; else p.allocO += a;
-            const st = forceEqual ? 'FALLBACK EQUAL' : broad ? 'FALLBACK RM COST' : 'ALLOCATED';
+            if (srcERP === 'S' && targetERP !== 'T+O') p.allocR5 += a; // R5a / R5b / R5c basis for R6
+            const st = forceEqual ? 'FALLBACK EQUAL' : basis === 'R5' ? 'FALLBACK R5 BASIS' : broad ? 'FALLBACK RM COST' : 'ALLOCATED';
             detail.push([srcERP, g.key, g.type, g.rows, srcAmt, g.fam, p.erp, tKey, p.pcNo, p.mo, p.prod, p.name, p.loc, p.cost, pct, a, st, note]);
           }
         }
