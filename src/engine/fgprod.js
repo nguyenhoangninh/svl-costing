@@ -141,8 +141,10 @@ export function consumptionFromStep5(res, period) {
   for (const d of res.detail || []) {
     if (!num(d.qty)) continue;
     const l = led.get(ttxt(d.lid)) || {}; const sl = d.line ? sales.get(d.line) : null;
-    out.push({ month: period, kind: 'SALE', lotPeriod: ttxt(d.srcPeriod ?? l.srcPeriod), pc: ttxt(d.pc), prod: utxt(d.prod), lid: ttxt(d.lid),
-      inv: sl ? ttxt(sl.inv) : '(bình quân tháng)', cust: sl ? ttxt(sl.cust) : '', sdate: sl ? sl.date : null, qty: num(d.qty), tot: num(d.tot) });
+    // v1.14.28: FG consumption (tiêu dùng nội bộ) is its own kind – it is not a sale and has no invoice
+    const cons = d.kind === 'CONS';
+    out.push({ month: period, kind: cons ? 'CONSUME' : 'SALE', lotPeriod: ttxt(d.srcPeriod ?? l.srcPeriod), pc: ttxt(d.pc), prod: utxt(d.prod), lid: ttxt(d.lid),
+      inv: cons ? '(tiêu dùng nội bộ)' : sl ? ttxt(sl.inv) : '(bình quân tháng)', cust: cons ? 'Tiêu dùng nội bộ' : sl ? ttxt(sl.cust) : '', sdate: sl ? sl.date : null, qty: num(d.qty), tot: num(d.tot) });
   }
   for (const r of (res.rework && res.rework.rows) || []) {
     if (!num(r.qty) || !ttxt(r.lid)) continue;
@@ -163,7 +165,7 @@ export function ytdSales(fp, period) {
  * Records whose lot is not in the table (opening FG from before the year / not uploaded) are returned as `unmatched`.
  */
 export function allocate(rows, sales) {
-  const idx = new Map(), byPc = new Map(); const lots = rows.map((r) => ({ ...r, soldQty: num(r.soldQty0), soldTot: num(r.soldTot0), rwQty: 0, rwTot: 0, months: {}, invs: new Set() }));
+  const idx = new Map(), byPc = new Map(); const lots = rows.map((r) => ({ ...r, soldQty: num(r.soldQty0), soldTot: num(r.soldTot0), rwQty: 0, rwTot: 0, csQty: 0, csTot: 0, months: {}, invs: new Set() }));
   lots.forEach((r) => {
     const k = lotKey(r.period, r.pc, r.prod); if (r.pc && !idx.has(k)) idx.set(k, r);
     // v1.14.26: PC numbers are unique (PC-YYMM-nnn), so a lot is also found by PC No. + product when the FG layer carries
@@ -174,7 +176,9 @@ export function allocate(rows, sales) {
   for (const x of sales || []) {
     const r = idx.get(lotKey(x.lotPeriod, x.pc, x.prod)) || (x.pc ? byPc.get(`${utxt(x.pc)}|${utxt(x.prod)}`) : null);
     if (!r) { unmatched.push(x); continue; }
-    if (x.kind === 'REWORK') { r.rwQty += num(x.qty); r.rwTot += num(x.tot); } else { r.soldQty += num(x.qty); r.soldTot += num(x.tot); r.invs.add(x.inv); }
+    if (x.kind === 'REWORK') { r.rwQty += num(x.qty); r.rwTot += num(x.tot); }
+    else if (x.kind === 'CONSUME') { r.csQty += num(x.qty); r.csTot += num(x.tot); } // v1.14.28: internal consumption, not a sale
+    else { r.soldQty += num(x.qty); r.soldTot += num(x.tot); r.invs.add(x.inv); }
     r.months[x.month] = num(r.months[x.month]) + num(x.qty);
   }
   for (const r of lots) {

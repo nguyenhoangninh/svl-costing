@@ -86,7 +86,7 @@ export function step2Controls(st) {
   const fgAmt = reg ? reg.rows.reduce((a, r) => a + (+r.erpRef || 0), 0) : 0;
   const blocks = reg ? reg.rows.filter((r) => String(r.inputCheck || '').startsWith('BLOCK')).length : 0;
   const rows = [
-    cp('01', 'Source = Allocated + Unallocated', t.src, t.alloc + t.unalloc, t.alloc + t.unalloc - t.src, abs(t.alloc + t.unalloc - t.src) < 0.01 ? 'PASS' : 'CHECK', 'STOCK OUT ALLOCATION – dòng TOTAL'),
+    cp('01', 'Source = Allocated + Unallocated + Consumption', t.src, t.alloc + t.unalloc + (t.cons || 0), t.alloc + t.unalloc + (t.cons || 0) - t.src, abs(t.alloc + t.unalloc + (t.cons || 0) - t.src) < 0.01 ? 'PASS' : 'CHECK', 'STOCK OUT ALLOCATION – dòng TOTAL (Consumption = tiêu hao NVL → 632)'),
     cp('02', 'Stock Out chưa phân bổ', 0, t.unalloc, t.unalloc, abs(t.unalloc) < 0.01 ? 'PASS' : 'REVIEW', 'Phải bằng 0'),
     cp('03', 'Trạng thái engine phân bổ', 'PASS', s2.status, '', s2.status === 'PASS' ? 'PASS' : 'CHECK', 'Kết quả engine STEP 2'),
     cp('04', 'Kỳ STEP 2 = kỳ báo cáo', period, s2.period, '', s2.period === period ? 'PASS' : 'BLOCK', 'Chặn lệch kỳ'),

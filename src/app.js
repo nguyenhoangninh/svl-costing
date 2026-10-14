@@ -1,7 +1,7 @@
 // SVL Costing Web — application shell (state, persistence, views)
 import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
-import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
+import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutMaterials, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
@@ -20,13 +20,13 @@ import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'importAck', 'step2', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
+const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, consumeCfg: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -517,12 +517,18 @@ function emptyNote(msg, href, cta) { return `<div class="empty"><p>${esc(msg)}</
 function journal(st) {
   const s3 = S.d.step3; if (!s3) return '';
   const S3 = s3.summary;
-  const je = [['JE01', '154', '152', 'Xuất NVL vào WIP – MI', S3.miAmt], ['JE02', '154', '152', 'Xuất NVL vào WIP – Stock Out', S3.soAmt], ['JE05', '152', '154', 'Nhập lại NVL từ WIP – MR', S3.mrAmt]];
+  // v1.14.28: RM consumption (tiêu hao) is posted straight to 632, not through the WIP / PC lots
+  const consAmt = (S.d.step2 && num(S.d.step2.total.cons)) || 0;
+  const je = [['JE01', '154', '152', 'Xuất NVL vào WIP – MI', S3.miAmt], ['JE02', '154', '152', 'Xuất NVL vào WIP – Stock Out (không gồm tiêu hao)', S3.soAmt - consAmt]];
+  if (consAmt) je.push(['JE02B', '632', '152', 'Tiêu hao NVL – xuất thẳng vào 632', consAmt]);
+  je.push(['JE05', '152', '154', 'Nhập lại NVL từ WIP – MR', S3.mrAmt]);
   const s4 = S.d.step4, fl = st && st.p2.d4 && st.p2.d4.fl;
   if (s4 && !s4.blocked) je.push(['JE03', '154', '622', 'Kết chuyển nhân công trực tiếp', s4.alloc622], ['JE04', '154', '627', 'Kết chuyển chi phí SX chung', s4.alloc627]);
   if (fl) je.push(['JE06', '155', '154', 'Nhập kho thành phẩm theo giá thành STEP 4', fl.totals.totalCost]);
   const r5 = st && st.d5 && st.d5.res;
-  if (r5) je.push(['JE07', '632', '155', 'Giá vốn hàng bán theo FIFO', r5.totals.cogsA]);
+  // v1.14.28: JE07 = sales COGS; FG consumption (tiêu dùng nội bộ) is a separate line, booked before sales in STEP 5.2
+  if (r5) je.push(['JE07', '632', '155', 'Giá vốn hàng bán theo FIFO', r5.totals.cogsA - (r5.totals.consA || 0)]);
+  if (r5 && r5.totals.consA) je.push(['JE07B', '632', '155', 'Tiêu dùng nội bộ FG theo FIFO (tiêu hao)', r5.totals.consA]);
   if (r5 && r5.rework) je.push(['JE08', '154', '155', 'FG xuất đi rework (giá trị FIFO)', r5.rework.fifoCost]);
   return `<h2>Bút toán đề xuất</h2><table class="cp"><thead><tr><th>JE</th><th>Nợ</th><th>Có</th><th>Diễn giải</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>
     ${je.map((j) => `<tr><td>${j[0]}</td><td>${j[1]}</td><td>${j[2]}</td><td>${esc(j[3])}</td><td class="r">${fmtNum(j[4])}</td></tr>`).join('')}</tbody></table>
@@ -530,30 +536,44 @@ function journal(st) {
 }
 
 // ---------- STEP 1 ----------
-/** v1.14.25–26: STEP 1 ERP data check – PC-P vs PC-M per system and abnormal material lines; confirmed by a user before STEP 2. */
+/** v1.14.28: STEP 1 ERP check split into three colour-coded cards: A (PC-P vs PC-M, info), B (SL ≠ 0 but Total Cost = 0, review), C (negative / text, block). One confirm bar covers all. */
 function dqSection(dq) {
   if (!dq) return '';
   const rc = dq.recon || { bySys: [], issues: [] };
   const nL = dq.lines.length, nR = rc.issues.length;
   if (!nL && !nR) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
+  const zeroLines = dq.lines.filter((l) => l.type === 'ZERO COST'), negLines = dq.lines.filter((l) => l.type !== 'ZERO COST');
+  const zeroSum = dq.summary.filter((g) => g.type === 'ZERO COST'), negSum = dq.summary.filter((g) => g.type !== 'ZERO COST');
   const ack = S.d.importAck; const ok = dq.status === 'REVIEW - CONFIRMED';
   const changed = ack && !ok ? `<p><b>Danh sách đã thay đổi</b> sau lần xác nhận ${fmtTs(ack.at)} của ${esc(ack.by)} (dữ liệu ERP được import lại) – cần xác nhận lại.</p>` : '';
-  const recon = rc.bySys.length ? `<h3 style="margin:12px 0 6px">1 · Đối chiếu PC-P và PC-M theo hệ ${pill(nR ? 'CHECK' : 'PASS')}</h3>
+  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : ''].filter(Boolean).join(' · ');
+  const cardA = rc.bySys.length ? `<section class="dq-card dq-info">
+    <h3>A · Chênh lệch PC-P và PC-M ${pill(nR ? 'CHECK' : 'PASS')}</h3>
     <p class="muted">Total Cost của lô trên PC-P phải bằng tổng Total Cost vật tư của lô trên PC-M (theo PC No. và Product Code). Lệch nghĩa là hai báo cáo không được xuất cùng thời điểm hoặc có chứng từ chưa đủ.</p>
     <table class="cp"><thead><tr><th>Hệ</th><th class="r">Total Cost PC-P</th><th class="r">Tổng PC-M</th><th class="r">Chênh PC-M − PC-P</th><th class="r">Số PC (P / M)</th><th class="r">PC lệch</th><th class="r">Chỉ có ở PC-M</th><th class="r">Chỉ có ở PC-P</th><th>Trạng thái</th></tr></thead><tbody>
       ${rc.bySys.map((x) => `<tr><td><span class="erp erp-${x.erp}">${x.erp}</span></td><td class="r">${fmtNum(x.pcp)}</td><td class="r">${fmtNum(x.pcm)}</td><td class="r">${fmtNum(x.diff, Math.abs(x.diff) < 1000 && x.diff ? 2 : 0)}</td><td class="r">${fmtNum(x.pcsP)} / ${fmtNum(x.pcsM)}</td><td class="r">${fmtNum(x.gaps)}</td><td class="r">${fmtNum(x.onlyM)}</td><td class="r">${fmtNum(x.onlyP)}</td><td>${pill(x.status)}</td></tr>`).join('')}
-    </tbody></table>${nR ? '<div id="t-pcrec"></div><p class="muted">Cách xử lý: xuất lại PC-P và PC-M cùng lúc từ ERP rồi import lại. Nếu chênh lệch nhỏ đã được giải trình, STEP 3 có chức năng "Điều chỉnh PC-P theo PC-M" (có lưu số gốc để hoàn tác).</p>' : ''}` : '';
-  const lines = nL ? `<h3 style="margin:12px 0 6px">2 · Dòng vật tư bất thường (PC-M / MI-M / MR-M) ${pill('CHECK')}</h3>
+    </tbody></table>${nR ? '<div id="t-pcrec"></div><p class="muted">Cách xử lý: xuất lại PC-P và PC-M cùng lúc từ ERP rồi import lại. Nếu chênh lệch nhỏ đã được giải trình, STEP 3 có chức năng "Điều chỉnh PC-P theo PC-M" (có lưu số gốc để hoàn tác).</p>' : ''}
+  </section>` : '';
+  const cardB = zeroLines.length ? `<section class="dq-card dq-warn">
+    <h3>B · Vật tư SL ≠ 0 nhưng Total Cost = 0 ${pill('CHECK')}</h3>
     <p class="muted">STEP 3B không định giá được vật tư có SL nhưng Total Cost = 0 (ví dụ hàng khách cấp, hàng chưa có giá). Rà soát với ERP / kho: sửa và import lại, hoặc xác nhận là đúng thực tế.</p>
     <table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
-      ${dq.summary.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
-    </tbody></table><div id="t-dq"></div>` : '';
-  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', nL ? `${fmtNum(nL)} dòng vật tư bất thường (${fmtNum(dq.materials)} vật tư)` : ''].filter(Boolean).join(' · ');
+      ${zeroSum.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
+    </tbody></table><div id="t-dq-zero"></div>
+  </section>` : '';
+  const cardC = negLines.length ? `<section class="dq-card dq-block">
+    <h3>C · Vật tư số âm hoặc sai kiểu dữ liệu ${pill('BLOCK')}</h3>
+    <p class="muted">Số lượng hoặc Total Cost âm, hoặc ô là chữ thay vì số. Phải sửa trên ERP rồi import lại; danh sách này cần được xác nhận trước khi chạy STEP 2.</p>
+    <table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
+      ${negSum.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
+    </tbody></table><div id="t-dq-neg"></div>
+  </section>` : '';
   return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Kiểm tra dữ liệu ERP: ${head} ${pill(ok ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h2>
     <p><b>STEP 2 chỉ chạy được sau khi kết quả kiểm tra đã được rà soát và xác nhận.</b></p>${changed}
     ${ok ? `<p>Đã xác nhận bởi <b>${esc(ack.by)}</b> lúc ${fmtTs(ack.at)}: ${esc(ack.note)}</p>` : ''}
-    <div class="row"><button class="btn ${ok ? 'ghost' : ''}" type="button" data-act="dq-confirm">${ok ? 'Xác nhận lại' : 'Xác nhận đã rà soát'}</button><span class="muted">Danh sách chi tiết có lọc và Xuất Excel ở từng mục bên dưới.</span></div>
-    ${recon}${lines}</div>`;
+    <div class="row"><button class="btn ${ok ? 'ghost' : ''}" type="button" data-act="dq-confirm">${ok ? 'Xác nhận lại' : 'Xác nhận đã rà soát'}</button><span class="muted">Mỗi nhóm có màu riêng; danh sách chi tiết có lọc và Xuất Excel trong từng thẻ.</span></div>
+  </div>
+  <div class="dq-cards">${cardA}${cardB}${cardC}</div>`;
 }
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
@@ -581,9 +601,11 @@ VIEWS.step1 = (el) => {
     const pcols = DQ.PCR_FIELDS.map((f, i) => ({ key: f, label: DQ.PCR_HEADERS[i], type: ['pcp', 'pcm', 'diff'].includes(f) ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 260 : f === 'erp' ? 50 : ['pcp', 'pcm', 'diff'].includes(f) ? 170 : 130 }));
     mountTable($('#t-pcrec'), { columns: pcols, rows: c.dq.recon.issues, filterKey: 'type', height: 300, totals: ['pcp', 'pcm', 'diff'], onExport: exportTable('01_DOI_CHIEU_PCP_PCM', pcols) });
   }
-  if (c.dq && c.dq.lines.length && $('#t-dq')) {
-    const cols = DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
-    mountTable($('#t-dq'), { columns: cols, rows: c.dq.lines, filterKey: 'type', height: 360, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_BAT_THUONG', cols) });
+  const dqCols = () => DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
+  if (c.dq && c.dq.lines.length) {
+    const zero = c.dq.lines.filter((l) => l.type === 'ZERO COST'), neg = c.dq.lines.filter((l) => l.type !== 'ZERO COST');
+    if (zero.length && $('#t-dq-zero')) mountTable($('#t-dq-zero'), { columns: dqCols(), rows: zero, filterKey: 'type', height: 300, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_SL_KHAC0_TOTAL_COST_0', dqCols()) });
+    if (neg.length && $('#t-dq-neg')) mountTable($('#t-dq-neg'), { columns: dqCols(), rows: neg, filterKey: 'type', height: 300, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_AM_HOAC_SAI_KIEU', dqCols()) });
   }
   const handle = (files) => importERP([...files]);
   $('#f-files').addEventListener('change', (e) => handle(e.target.files));
@@ -638,6 +660,25 @@ async function importERP(files) {
 }
 
 // ---------- STEP 2 ----------
+/** v1.14.28: RM materials marked "tiêu hao" (item codes) – posted Nợ 632 / Có 152 and kept out of PC-P lots. */
+const consumeRMList = () => (S.d.consumeCfg && Array.isArray(S.d.consumeCfg.rm) ? S.d.consumeCfg.rm : []);
+function consumptionSection(s2) {
+  const hasSO = ['T', 'O', 'S'].some((e) => S.d.datasets[`STOCK OUT-${e}`]);
+  if (!hasSO) return '';
+  const cands = stockOutMaterials(S.d.datasets, S.period);
+  const sel = new Set(consumeRMList());
+  const selAmt = cands.filter((c) => sel.has(c.code)).reduce((a, c) => a + c.amt, 0);
+  const stale = s2 && JSON.stringify([...(s2.consumeRM || [])].sort()) !== JSON.stringify([...sel].sort());
+  return `<h2>Tiêu hao NVL (consumption)</h2>
+    <p class="muted">Vật tư đánh dấu <b>tiêu hao</b> không phân bổ vào lô PC-P; số tiền ghi thẳng <b>Nợ 632 / Có 152</b> (tiêu dùng nội bộ). Đổi lựa chọn rồi <b>chạy lại STEP 2</b> để áp dụng.</p>
+    ${stale ? '<div class="alert review">Danh sách tiêu hao đã thay đổi sau lần chạy STEP 2 gần nhất – chạy lại STEP 2 để cập nhật số liệu.</div>' : ''}
+    ${s2 && s2.consumption ? `<div class="kpis">${kpi('Tiêu hao → 632 (Có 152)', s2.total.cons || 0)}${kpiN('Số vật tư tiêu hao', s2.consumption.length)}${kpi('Đã chọn (kỳ này)', selAmt)}</div>` : ''}
+    <details ${sel.size ? 'open' : ''}><summary>Chọn vật tư tiêu hao · ${fmtNum(cands.length)} vật tư Stock Out kỳ này · đã chọn ${fmtNum(sel.size)} mã</summary>
+    ${cands.length ? `<table class="cp s2-cons"><thead><tr><th>Tiêu hao</th><th>Item Code</th><th>Tên vật tư</th><th>Hệ</th><th class="r">Số dòng</th><th class="r">Stock Out (VND)</th></tr></thead><tbody>
+      ${cands.map((c) => `<tr><td><input type="checkbox" data-cons="${esc(c.code)}" ${sel.has(c.code) ? 'checked' : ''} aria-label="Tiêu hao ${esc(c.code)}"></td><td>${esc(c.code)}</td><td>${esc(c.name)}</td><td>${esc(c.erps)}</td><td class="r">${fmtNum(c.rows)}</td><td class="r">${fmtNum(c.amt)}</td></tr>`).join('')}
+    </tbody></table>` : emptyNote('Chưa có dòng Stock Out vật tư (non-FG) trong kỳ.')}
+    </details>`;
+}
 VIEWS.step2 = (el) => {
   const st = statusAll(); const s2 = S.d.step2;
   const cls = s2 ? step2Classification(S.d.datasets, S.period, s2, S.d.register) : null;
@@ -645,6 +686,7 @@ VIEWS.step2 = (el) => {
     <header class="ph"><div><h1>STEP 2 · Phân bổ Stock Out vào lô PC</h1><p class="lead">Stock Out NVL được phân bổ vào các lô PC-P theo quy tắc khách hàng / job code / location. Stock Out thành phẩm (FG) không phải NVL — được tách sang sổ Rework (2B).</p></div>
       <div class="result"><span>Kết quả</span>${pill(st.s2c.status)}<small>${esc(st.s2c.okText)}</small></div></header>
     <div class="row"><button class="btn" data-act="run-step2" type="button">Chạy STEP 2</button>${s2 ? `<button class="btn ghost" data-act="s2-report" type="button">Xuất Excel tổng hợp phân bổ</button><span class="muted">Lần chạy gần nhất ${fmtTs(s2.runAt)}</span>` : ''}${s2 && st.s2c.rows.some((r) => String(r.status).startsWith('BLOCK - APPROVAL')) ? `<button class="btn danger ghost" data-act="approve-step2-fallback" type="button" ${canEditPeriod() ? '' : 'disabled'}>Xác nhận fallback &gt;5%</button>` : ''}</div>
+    ${consumptionSection(s2)}
     ${s2 ? `
     <div class="s2-stack">
       <div class="s2-block"><h2>Đối chiếu theo hệ nguồn</h2><table class="cp s2-rec"><thead><tr><th rowspan="2">Hệ nguồn</th><th class="r" rowspan="2">Stock Out nguồn</th><th class="r" colspan="3" style="text-align:center">Đã phân bổ vào lô PC của hệ</th><th class="r" rowspan="2">Tổng đã phân bổ</th><th class="r" rowspan="2">Chưa phân bổ</th><th class="r" rowspan="2">Chênh lệch</th><th rowspan="2">Trạng thái</th></tr>
@@ -661,6 +703,7 @@ VIEWS.step2 = (el) => {
         <tr><td>NVL / non-FG đủ điều kiện</td><td class="r">${v(cls.rmEligible)}</td><td>SL FG rework</td><td class="r">${fmtNum(cls.fgQty)}</td></tr>
         <tr><td>FG Rework – giá ERP (memo)</td><td class="r">${v(cls.fgRef)}</td><td>FG phân bổ vào PC</td><td class="r">${v(cls.fgAllocated)}</td></tr>
         <tr><td>NVL đã phân bổ vào PC</td><td class="r">${v(cls.allocatedRM)}</td><td>Kiểm tra phân loại</td><td>${pill(cls.classCheck)}</td></tr>
+        <tr><td>NVL tiêu hao (Nợ 632 / Có 152)</td><td class="r">${v(cls.consumedRM)}</td><td></td><td></td></tr>
         <tr><td>Chênh lệch phân bổ NVL</td><td class="r">${v(cls.rmDiff)}</td><td>Cổng STEP 2</td><td>${pill(cls.gate)}</td></tr>
       </tbody></table></div>
     </div>
@@ -671,6 +714,16 @@ VIEWS.step2 = (el) => {
     <h2>Chi tiết phân bổ</h2><p class="muted"><label>Lọc theo rule: <select id="s2-rule"><option value="">Tất cả rule</option>${ruleSummary(s2).map((r) => `<option value="${esc(r.code)}">${esc(r.code)} · ${esc(r.label)}${r.used ? '' : ' (không phát sinh)'}</option>`).join('')}</select></label></p><div id="t-detail"></div>
     <h2>Kết quả theo lô PC-P (T và O)</h2><div id="t-pc"></div>` : emptyNote('Chưa có kết quả. Cần đủ PC-P-T, PC-P-O và STOCK OUT T/S/O rồi bấm Chạy STEP 2.')}
   </section>`;
+  el.querySelectorAll('[data-cons]').forEach((cb) => cb.addEventListener('change', (e) => {
+    if (!guardMutate()) { e.target.checked = !e.target.checked; return; }
+    const code = e.target.dataset.cons, on = e.target.checked;
+    const set = new Set(consumeRMList()); if (on) set.add(code); else set.delete(code);
+    S.d.consumeCfg = { rm: [...set].sort(), by: who(), at: nowISO() };
+    audit('STEP 2 - TIÊU HAO NVL', `${code} · ${on ? 'BẬT tiêu hao (Nợ 632 / Có 152)' : 'TẮT tiêu hao (phân bổ vào lô PC)'} · ${who()}`);
+    markDirty('consumeCfg', 'audit');
+    toast(`Đã lưu lựa chọn tiêu hao ${code}. Chạy lại STEP 2 để áp dụng.`, 'review');
+    render();
+  }));
   if (s2) {
     const dc = STEP2_DETAIL_HEADERS.map((h, i) => ({ key: i, label: h, type: [4, 13, 15].includes(i) ? 'num' : i === 14 ? 'pct' : i === 3 ? 'int' : i === 16 ? 'status' : 'text', width: [11].includes(i) ? 260 : [17].includes(i) ? 180 : [4, 13, 15].includes(i) ? 140 : 110 }));
     const rs = ruleSummary(s2);
@@ -717,7 +770,7 @@ function doStep2() {
     return;
   }
   try {
-    const s2 = runStep2(S.d.datasets, S.period);
+    const s2 = runStep2(S.d.datasets, S.period, { consumeRM: consumeRMList() });
     S.d.step2 = s2;
     const bf = S.d.register ? S.d.register.rows.filter((r) => r.active === 'B/F').map(bfFromRow) : (S.d.bfSeed || []);
     const bfSrc = S.d.register ? S.d.register.bfSrc : null;
@@ -744,7 +797,7 @@ VIEWS.rework = (el) => {
   </section>`;
   if (!reg) return;
   const types = { issueQty: 'qty', erpRef: 'num', compQty: 'qty', scrapQty: 'qty', fifoQty: 'qty', fifoCost: 'num', closingWIP: 'num', carryIn: 'num', bfQty: 'qty', bfCost: 'num', issueDate: 'date', compDate: 'date', srcRow: 'int', inputCheck: 'status', fifoStatus: 'status', lastFifoRun: 'date' };
-  const editable = { rwType: ['NORMAL', 'ABNORMAL'], rwStatus: ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF'], pcNo: null, outFG: null, compDate: null, compQty: null, scrapQty: null, note: null };
+  const editable = { rwType: ['NORMAL', 'ABNORMAL'], rwStatus: ['OPEN', 'HOLD', 'COMPLETED', 'RETURNED TO FG', 'WRITTEN OFF', 'CONSUMPTION'], pcNo: null, outFG: null, compDate: null, compQty: null, scrapQty: null, note: null };
   const cols = RW_FIELDS.map((f, i) => ({ key: f, label: RW_HEADERS[i], type: types[f] || 'text', width: f === 'rid' ? 250 : f === 'fgName' ? 240 : f === 'note' ? 200 : ['inputCheck', 'fifoStatus'].includes(f) ? 190 : 110, editable: f in editable, options: editable[f] || undefined }))
     .filter((c) => !['period'].includes(c.key));
   mountTable($('#t-rw'), {
@@ -1102,7 +1155,7 @@ async function migrateWorkbook(file) {
       S.d.register = { period, refreshedAt: '', rows: oldRows, stats: {} };
       audit('MIGRATE FROM EXCEL', `${file.name} · ${Object.keys(S.d.datasets).length} báo cáo ERP · Opening ${S.d.opening ? S.d.opening.rows.length : 0} dòng · Rework ${oldRows.length} dòng`);
       // re-run engine
-      const s2 = runStep2(S.d.datasets, period); S.d.step2 = s2;
+      const s2 = runStep2(S.d.datasets, period, { consumeRM: consumeRMList() }); S.d.step2 = s2;
       const bf = oldRows.filter((r) => r.active === 'B/F').map(bfFromRow);
       S.d.register = buildReworkRegister(S.d.datasets, period, oldRows, bf);
       let s3 = null, s3err = '';
@@ -1141,6 +1194,7 @@ async function exportAll() {
   const sheets = [];
   const s2 = S.d.step2, s3 = S.d.step3, reg = S.d.register, op = S.d.opening;
   if (s2) {
+    if (s2.consumption && s2.consumption.length) sheets.push({ name: '03B_TIEU_HAO_NVL', aoa: [['TIÊU HAO NVL – Nợ 632 / Có 152 (không phân bổ vào lô PC)'], ['Reporting Period', S.period, '', 'Run Time', s2.runAt], [], ['Hệ nguồn', 'Item Code', 'Tên vật tư', 'Số dòng', 'Tiêu hao (VND)'], ...s2.consumption.map((c) => [c.erp, c.code, c.name, c.rows, c.amt]), [], ['Tổng', '', '', '', s2.total.cons || 0]] });
     sheets.push({ name: '03_STOCK_OUT_ALLOCATION', aoa: [['STOCK OUT ALLOCATION TO PC-P'], ['Reporting Period', S.period, '', 'Run Time', s2.runAt], [], ['Source ERP', 'Source Stock Out', 'Allocated', 'Unallocated / WIP', 'Difference', 'Status'], ...[...s2.summary, s2.total].map((r) => [r.erp, r.src, r.alloc, r.unalloc, r.diff, r.status]), [], STEP2_DETAIL_HEADERS, ...s2.detail] });
     sheets.push({ name: 'PC-P_StockOut', aoa: [['ERP', 'PC No.', 'MO No.', 'Product Code', 'Product Name', 'Location', 'Current Complete Qty', 'Total Cost', 'Stock Out from T', 'Stock Out from S', 'Stock Out from O', 'Total Stock Out Allocated', 'RM Cost incl. Stock Out', 'ST Allocation Source'], ...s2.pc.map((p) => [p.erp, p.pcNo, p.mo, p.prod, p.name, p.loc, p.qty, p.cost, p.allocT, p.allocS, p.allocO, p.alloc, p.rmIncl, p.src || '-'])] });
   }
