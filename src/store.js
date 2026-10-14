@@ -287,6 +287,7 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   }
   // Do not sweep superseded content-addressed chunks: immutable revision manifests may still reference them.
   // Retention can be managed by a separate archival policy after the accounting retention period.
+  if (announcement && cloud.noticesSupported === false) meta.noticeDisabled = true;
   return meta;
 }
 function referenced(manifest, id) {
