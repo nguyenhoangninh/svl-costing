@@ -69,6 +69,22 @@ ok('an entry with both an invoice and a manual cost is refused before a request 
 ok('no Cloud Functions / callable code remains (Spark plan)', !store.includes('httpsCallable') && !app.includes('callFn') && !phase3.includes('httpsCallable') && !fs.existsSync(new URL('../functions', import.meta.url)));
 ok('approval module is precached for offline use', sw.includes("'./src/engine/approvals.js'"));
 
+// v1.14.43 Live Notifications (atomic revision event + private read state)
+ok('Notifications: event bound to a committed period revision',
+  rules.includes("getAfter(periodPath(request.resource.data.period)).data.rev == request.resource.data.rev")
+  && store.includes("if (announcement) t.set("));
+ok('Notifications: event actor bound to signed-in user',
+  rules.includes('request.resource.data.actorUid == request.auth.uid')
+  && rules.includes('request.resource.data.actor == myEmail()'));
+ok('Notifications: immutable history and role protected',
+  /match \\/svl_costing_notifications\\/\\{id\\}[\\s\\S]*allow update, delete: if false;/.test(rules));
+ok('Notifications: read state only accessible to owner',
+  rules.includes('match /svl_costing_notification_reads/{uid}')
+  && rules.includes('request.auth.uid == uid'));
+ok('Notifications: listeners query committed stream not uncommitted audit log',
+  store.includes("F.collection(fb.fs, 'svl_costing_notifications')")
+  && store.includes("F.orderBy('createdAt', 'desc')"));
+
 // v1.14.42 (Firestore rules published by CI from main; placeholder replaced only in the runner copy)
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const firebaseJson = JSON.parse(fs.readFileSync(new URL('../firebase.json', import.meta.url), 'utf8'));
