@@ -1375,6 +1375,7 @@ async function renderUsers() {
   if (!accessDraft) {
     try { const a = await store.getAccess(); accessDraft = { members: { ...(a.members || {}) }, updatedAt: a.updatedAt, updatedBy: a.updatedBy, dirty: false }; }
     catch (e) { box.innerHTML = `<h2>Người dùng &amp; phân quyền</h2><div class="alert block">Không đọc được danh sách: ${esc(e.message)}</div>`; return; }
+    if (!box.isConnected) return; // đã chuyển màn hình trong lúc đọc danh sách
   }
   const me = String(store.cloud.user.email).toLowerCase();
   const rows = Object.entries(accessDraft.members).sort((a, b) => a[0].localeCompare(b[0]));
@@ -1398,7 +1399,7 @@ async function renderUsers() {
     if (e === me && !store.cloud.isOwner && !confirm('Xoá chính bạn khỏi danh sách? Bạn sẽ mất quyền truy cập sau khi lưu.')) return;
     delete accessDraft.members[e]; accessDraft.dirty = true; renderUsers();
   }));
-  $('#f-user').addEventListener('submit', (ev) => {
+  box.querySelector('#f-user').addEventListener('submit', (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target); const e = String(f.get('email')).trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { toast('Email không hợp lệ.', 'block'); return; }
