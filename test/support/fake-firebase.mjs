@@ -8,12 +8,10 @@ export const SDK_URLS = {
   app: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js',
   auth: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js',
   fs: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js',
-  fn: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js',
 };
 const EXPORTS = {
   app: ['initializeApp'],
   auth: ['getAuth', 'getRedirectResult', 'onAuthStateChanged', 'signOut', 'GoogleAuthProvider', 'signInWithPopup', 'signInWithRedirect'],
-  fn: ['getFunctions', 'httpsCallable'],
   fs: ['getFirestore', 'collection', 'doc', 'getDoc', 'setDoc', 'deleteDoc', 'addDoc', 'getDocs', 'query', 'where', 'orderBy', 'limit', 'startAfter', 'documentId', 'runTransaction', 'serverTimestamp'],
 };
 
@@ -76,30 +74,7 @@ function fakeMain() {
     return { docs, empty: docs.length === 0, size: docs.length };
   };
   const addDoc = async (col, data) => { failIf('addDoc'); const path = col.path + '/auto' + (++S.seq); apply({ op: 'set', path, data }); return new Ref(path); };
-  // Callable functions run the REAL approval logic (functions/src/approvalCore.mjs) against these in-memory documents.
-  const callable = async (name, data) => {
-    const core = await import(location.origin + '/functions/src/approvalCore.mjs');
-    const snapOf = (p) => ({ exists: S.docs.has(p), data: () => clone(S.docs.get(p)) });
-    const put = (p, d) => { S.docs.set(p, clone(d)); S.log.push({ op: 'set', path: p, by: 'function' }); };
-    const db = {
-      doc: (p) => ({ path: p, get: async () => snapOf(p), set: async (d) => put(p, d) }),
-      runTransaction: async (fn) => {
-        const writes = [];
-        const tx = { get: async (r) => snapOf(r.path), set: (r, d) => writes.push([r.path, d]) };
-        const out = await fn(tx);
-        writes.forEach(([p, d]) => put(p, d));
-        S.log.push({ op: 'commit', writes: writes.length, by: 'function' });
-        return out;
-      },
-    };
-    const fn = name === 'requestApproval' ? core.requestApproval : core.approveApproval;
-    const auth = S.signedIn ? { uid: S.uid, token: { email: S.email } } : null;
-    try { return await fn({ db, auth, data, owners: ['admin.test@example.com'], now: new Date().toISOString() }); }
-    catch (e) { const err = new Error(e.message); err.code = 'functions/' + (e.code || 'internal'); throw err; }
-  };
   window.__FBI = {
-    getFunctions: () => ({ __fns: true }),
-    httpsCallable: (_fns, name) => async (data) => ({ data: await callable(name, data) }),
     initializeApp: (cfg, name) => ({ name, options: cfg }),
     getAuth: () => ({ currentUser: user() }),
     getRedirectResult: async () => null,

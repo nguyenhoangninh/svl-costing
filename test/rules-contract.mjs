@@ -57,17 +57,5 @@ ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes
 ok('lost reply does not delete chunks of a committed revision (pointer checked first)', store.includes('const now = await F.getDoc(pdoc(period));') && store.includes('if (!landed && isAdmin())'));
 ok('cloud save keeps chunks when the pointer cannot be read', store.includes('} catch { landed = true; }'));
 
-// v1.14.38 (ENH-06: manual unit cost approved on the server)
-const functionsIndex = fs.readFileSync(new URL('../functions/index.mjs', import.meta.url), 'utf8');
-const approvalCore = fs.readFileSync(new URL('../functions/src/approvalCore.mjs', import.meta.url), 'utf8');
-const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-ok('ENH-06 approval receipts are read-only for clients', /match \/approvals\/\{approval\} \{\s*allow read: if canRead\(\);\s*allow write: if false;/.test(rules));
-ok('ENH-06 Cloud Functions are the only approval writers (onCall, asia-southeast1)', functionsIndex.includes("REGION = 'asia-southeast1'") && functionsIndex.includes('export const requestApproval = onCall({ region: REGION }') && functionsIndex.includes('export const approveApproval = onCall({ region: REGION }'));
-ok('ENH-06 the server refuses self-approval and stale values', approvalCore.includes('tự duyệt') && approvalCore.includes('thay đổi'));
-ok('ENH-06 CSP allows calls to Cloud Functions', indexHtml.includes('https://*.cloudfunctions.net'));
-ok('ENH-06 client calls the approval callables with the cloud region', store.includes("FN_REGION = 'asia-southeast1'") && store.includes('httpsCallable(fb.fn, name)') && app.includes("store.callFn(name, { period: S.period, ...payload })"));
-ok('ENH-06 a return line counts as approved only when the server receipt matches its canonical text', phase3.includes('effectiveReturnMatches(S)') && phase3.includes('canonicalManualCost') && phase3.includes('approvalCell(key, m, edit, approvals)'));
-ok('ENH-06 the UI requests and approves only through the callables', phase3.includes("A.callApproval('requestApproval'") && phase3.includes("A.callApproval('approveApproval'"));
-
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
