@@ -69,5 +69,14 @@ ok('an entry with both an invoice and a manual cost is refused before a request 
 ok('no Cloud Functions / callable code remains (Spark plan)', !store.includes('httpsCallable') && !app.includes('callFn') && !phase3.includes('httpsCallable') && !fs.existsSync(new URL('../functions', import.meta.url)));
 ok('approval module is precached for offline use', sw.includes("'./src/engine/approvals.js'"));
 
+// v1.14.42 (Firestore rules published by CI from main; placeholder replaced only in the runner copy)
+const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const firebaseJson = JSON.parse(fs.readFileSync(new URL('../firebase.json', import.meta.url), 'utf8'));
+ok('firebase.json deploys firestore.rules only', firebaseJson.firestore && firebaseJson.firestore.rules === 'firestore.rules');
+ok('rules job runs only on push to main, after checks', /rules:\s*\n\s*needs: checks\s*\n\s*if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/.test(ci));
+ok('rules job pins firebase-tools (no floating version)', /firebase-tools@\d+\.\d+\.\d+ deploy --only firestore:rules --project svl-costing/.test(ci));
+ok('rules job refuses to publish while the placeholder is present', ci.includes('Placeholder vẫn còn trong firestore.rules') && ci.includes('grep -q "YOUR_EMAIL@gmail.com" firestore.rules'));
+ok('rules job never commits the owner email (runner copy only)', !/git (add|commit|push)/.test(ci.slice(ci.indexOf('  rules:'))));
+
 console.log(`\n${total - fail}/${total} Firestore/accounting retention contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

@@ -50,3 +50,39 @@ jobs:
           path: _site
       - id: deploy
         uses: actions/deploy-pages@v4
+
+  # Firestore rules (v1.14.42): published from main only, after all checks pass. The Pages deploy above does NOT publish
+  # rules. Until the FIREBASE_SA_JSON and OWNER_EMAIL secrets exist, this job only prints a notice and does nothing.
+  # The owner email replaces the placeholder in the runner copy only; the repository keeps the placeholder.
+  rules:
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare rules (owner email from secret, runner copy only)
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+          OWNER_EMAIL: ${{ secrets.OWNER_EMAIL }}
+        run: |
+          if [ -z "$SA_JSON" ] || [ -z "$OWNER_EMAIL" ]; then
+            echo "::notice::Chưa có secret FIREBASE_SA_JSON / OWNER_EMAIL: bỏ qua publish Firestore rules."
+            echo "SKIP_RULES=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          OWNER=$(printf '%s' "$OWNER_EMAIL" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+          if ! [[ "$OWNER" =~ ^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$ ]]; then
+            echo "::error::OWNER_EMAIL không đúng định dạng email."; exit 1
+          fi
+          printf '%s' "$SA_JSON" > "$RUNNER_TEMP/firebase-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+          sed -i "s/YOUR_EMAIL@gmail.com/$OWNER/" firestore.rules
+          if grep -q "YOUR_EMAIL@gmail.com" firestore.rules; then
+            echo "::error::Placeholder vẫn còn trong firestore.rules sau khi thay."; exit 1
+          fi
+      - name: Publish Firestore rules to project svl-costing
+        if: env.SKIP_RULES != '1'
+        run: npx --yes firebase-tools@15.31.0 deploy --only firestore:rules --project svl-costing --non-interactive
+      - name: Remove service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/firebase-sa.json"
