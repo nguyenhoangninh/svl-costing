@@ -77,7 +77,8 @@ ok('Notifications: event actor bound to signed-in user',
   rules.includes('request.resource.data.actorUid == request.auth.uid')
   && rules.includes('request.resource.data.actor == myEmail()'));
 ok('Notifications: immutable history and role protected',
-  /match \\/svl_costing_notifications\\/\\{id\\}[\\s\\S]*allow update, delete: if false;/.test(rules));
+  rules.includes('match /svl_costing_notifications/{id}')
+  && rules.slice(rules.indexOf('match /svl_costing_notifications/{id}'), rules.indexOf('match /svl_costing_notification_reads/{uid}')).includes('allow update, delete: if false;'));
 ok('Notifications: read state only accessible to owner',
   rules.includes('match /svl_costing_notification_reads/{uid}')
   && rules.includes('request.auth.uid == uid'));
