@@ -211,6 +211,10 @@ async function pushCloudOnce() {
     const meta = await store.cloudSave(p, blobs, summary, (m) => { S.syncMsg = m; renderSync(); }, baseRev,
       reopen ? { keepAllExcept: ['closed'], notice } : { notice });
     await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
+    if (meta.noticeDisabled && !S.noticeRuleWarned) {
+      S.noticeRuleWarned = true;
+      toast('Dữ liệu đã lên Cloud, nhưng chức năng chuông đang chờ cập nhật Firestore Rules. Đề nghị Admin kiểm tra việc publish rules.', 'review');
+    }
     if ((S.editSeq || 0) === seq && !reopen) await store.localDel(lk(p, 'unsynced'));
     S.sync = (S.editSeq || 0) === seq && !reopen ? 'synced' : 'pending'; S.syncMsg = '';
     renderSync();
