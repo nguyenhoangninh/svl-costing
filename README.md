@@ -1,6 +1,7 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.42 (14/10/2026):** Firestore rules được CI publish tự động khi merge vào `main` (job `rules` trong `.github/workflows/ci.yml`, cấu hình trong `firebase.json`). Job chỉ chạy sau khi `checks` đạt. Email chủ sở hữu lấy từ secret `OWNER_EMAIL` và chỉ thay placeholder trong bản sao trên runner; repo vẫn giữ placeholder. Khi chưa có secret, job chỉ báo notice và không làm gì. Cần cấu hình hai secret theo mục *Tự động publish rules* dưới đây.
 > **v1.14.41 (14/10/2026):** Duyệt đơn giá vốn nhập tay STEP 5R bằng **biên nhận Firestore** thay vì Cloud Functions (gói Spark). Biên nhận nằm ở `svl_costing_periods/{kỳ}/approvals`. Firestore rules kiểm tra định danh: người gửi yêu cầu được ghi vào biên nhận; chỉ một người dùng khác (đăng nhập Google, email đã xác minh) mới duyệt được; giá trị đã gửi không đổi được sau khi duyệt; người gửi hoặc quản trị viên mới xoá được; kỳ CLOSED không ghi được. Trình duyệt vẫn đối chiếu đơn giá với bản đã gửi, nên duyệt chỉ có hiệu lực cho đúng giá trị đó. Đơn giá nhập tay chỉ được dùng khi dòng không có hoá đơn gốc; nếu có cả hai, hệ thống từ chối lưu. Phê duyệt cũ không còn được tính: cần duyệt lại. Kiểm thử: `test/approvals-logic.mjs` (25/25), `test/e2e-approvals.mjs` (16/16, trình duyệt với Firebase giả lập). Firestore rules KHÔNG được kiểm thử thực thi trong môi trường này: cần publish và kiểm tra trên Firebase thật.
 > **v1.14.40 (14/10/2026):** Rà soát toàn bộ sau khi hoàn tác ENH-06 (gói Spark, không Cloud Functions). Mã nguồn sau revert khớp đúng trạng thái trước ENH-06. Sửa tài liệu: mục Governance và Bảo mật trước đây ghi kiểm soát maker-checker như được thực thi nghiêm ngặt, thực tế chỉ kiểm tra trên trình duyệt; nay ghi rõ là giới hạn đã biết. Thêm ghi chú gói Spark: hạn mức Firestore và rủi ro tạm ngưng khi vượt hạn mức. Không đổi logic nghiệp vụ.
 > **v1.14.39 (14/10/2026):** Hoàn tác ENH-06 (v1.14.38, PR #23) theo quyết định của anh: không nâng Firebase lên Blaze nên Cloud Functions không được dùng. Duyệt đơn giá nhập tay STEP 5R quay về phía máy khách như trước. Giữ nguyên các sửa lỗi của v1.14.37 và đợt 2, 3 audit. Quyết định: không dùng Blaze và không dùng Cloud Functions; ENH-06 không làm lại theo hướng máy chủ.
@@ -135,6 +136,21 @@ Engine ban đầu được port từ VBA v30.9 và vẫn giữ **legacy regressi
 **Gói Firebase: Spark (miễn phí), không nâng lên Blaze.** Ứng dụng chỉ dùng Authentication, Firestore và Firestore rules, nên chạy được trên Spark. Không có Cloud Functions; mọi kiểm soát phải nằm trong rules và trình duyệt. Hạn mức Firestore theo ví dụ trong tài liệu Firebase là khoảng 50.000 lượt đọc và 20.000 lượt ghi mỗi ngày; các hạn mức khác không được ghi ở trang đó. **Khi vượt hạn mức, Firebase tạm ngưng dịch vụ đó đến hết tháng**, nên cloud sync có thể dừng giữa kỳ. Hãy theo dõi **Firebase Console → Usage** trong tuần đầu sau khi publish rules.
 
 Khi đã cấu hình Firebase, **phải đăng nhập** mới xem / sửa được dữ liệu. Muốn thử nghiệm không ảnh hưởng dữ liệu thật, mở `…/svl-costing/?sandbox=1`: dùng một cơ sở dữ liệu riêng trên máy, không đồng bộ cloud.
+
+### Tự động publish rules (CI)
+
+Sau khi merge vào `main`, job `rules` publish `firestore.rules` lên project `svl-costing`. Cần một lần:
+
+1. Google Cloud Console → project `svl-costing` → **IAM & Admin → Service Accounts → Create service account** (ví dụ `ci-firestore-rules`).
+2. Cấp role **Firebase Rules Admin** (`roles/firebaserules.admin`). Nếu bước deploy báo thiếu quyền dịch vụ, thêm **Service Usage Consumer**.
+3. Trong service account → **Keys → Add key → Create new key → JSON**. Mở file JSON và copy toàn bộ nội dung.
+4. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   - `FIREBASE_SA_JSON`: nội dung file JSON ở bước 3.
+   - `OWNER_EMAIL`: email Google của chủ sở hữu (chữ thường).
+5. Xoá file JSON trên máy sau khi lưu secret. Không dán khoá vào chat, issue hay commit.
+6. Vào **Actions** → lần chạy gần nhất trên `main` → **Re-run jobs** để job `rules` chạy với secret mới.
+
+Kiểm tra: job `rules` phải hiện "Publish Firestore rules" thành công. Nếu thất bại, Firebase giữ nguyên rules cũ; xem log để biết lý do.
 
 ## Cài như ứng dụng trên iPhone / Android
 
