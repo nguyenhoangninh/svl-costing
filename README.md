@@ -1,6 +1,7 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.33 (14/10/2026):** STEP 4 · Kiểm tra cầu nối RM: WIP ra STEP 3 = RM lô PC + Stock Out phân bổ + **tiêu hao NVL (632/152)**. Trước đây kỳ có tiêu hao báo lệch đúng bằng khoản tiêu hao và STEP 4 dừng; nay chỉ dừng khi cầu nối thực sự không khớp. Bảng đối chiếu hiển thị rõ thành phần tiêu hao.
 > **v1.14.32 (14/10/2026):** (1) STEP 2 · Tiêu hao NVL: dòng đã tick được **tô màu**; có ô **Phân hệ** (T / S / O), tìm kiếm, nút chọn / bỏ chọn tất cả dòng đang hiện; tick vẫn lưu ngay và cập nhật tại chỗ (không mất vị trí cuộn). (2) Bảng **thống kê theo phân hệ**: số dòng Stock Out NVL, dòng tiêu hao, giá trị, % tiêu hao, và số đã ghi 632 / 152 ở lần chạy STEP 2 gần nhất. (3) Tiêu đề bảng cố định khi cuộn. (4) STEP 2B · Khối tiêu dùng nội bộ: dòng tick / đã xác nhận được tô màu, tiêu đề cố định, thanh lý do và nút đặt phía trên bảng.
 
 > **v1.14.31 (14/10/2026):** (1) STEP 2B · Tiêu dùng nội bộ (632 / 155) có **khối riêng** phía trên bảng: tick dòng FG, nhập lý do, **Lưu nháp** (chỉ lưu danh sách) hoặc **Xác nhận tiêu dùng nội bộ** (chuyển sang CONSUMPTION, ghi người / giờ, audit). Dòng đã xác nhận có **Hoàn tác**. Không cần PC rework, FG đầu ra, ngày hoàn thành hay SL hoàn thành / hỏng. (2) Dropdown Rework Status ở bảng 2B và form 5B không còn nhận CONSUMPTION; mọi thao tác tiêu dùng nội bộ đi qua khối trên. (3) Khối báo số dòng đang chờ RUN FIFO (STEP 5.2) để ghi giá.
