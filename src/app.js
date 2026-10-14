@@ -357,7 +357,7 @@ function datasetsMeta() {
 }
 function statusAll() {
   const s1 = step1Status(datasetsMeta());
-  const dq = DQ.erpAnomalies(S.d.datasets);
+  const dq = DQ.erpAnomalies(S.d.datasets, S.period);
   const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets), outOfPeriodRows(S.d.datasets, S.period), { ...dq, status: DQ.anomalyStatus(dq, S.d.importAck) });
   const ctx = { period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport, opening: S.d.opening, step3: S.d.step3, datasets: S.d.datasets };
   const p2 = S.period ? P2.derive(S) : { d3b: null, d4: null };
@@ -662,13 +662,14 @@ function dqSection(dq) {
   if (!dq) return '';
   const rc = dq.recon || { bySys: [], issues: [] };
   const nL = dq.lines.length, nR = rc.issues.length;
-  if (!nL && !nR) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
+  if (!nL && !nR && !(dq.mcLines || []).length) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
   const zeroLines = dq.lines.filter((l) => l.type === 'ZERO COST'), negLines = dq.lines.filter((l) => l.type !== 'ZERO COST');
+  const mcLines = dq.mcLines || [];
   const zeroSum = dq.summary.filter((g) => g.type === 'ZERO COST'), negSum = dq.summary.filter((g) => g.type !== 'ZERO COST');
   const ack = S.d.importAck; const ok = DQ.anomalyStatus(dq, ack) === 'REVIEW - CONFIRMED';
   const parts = DQ.ackParts(ack, dq);
   const st = (k) => DQ.partStatus(dq, ack, k);
-  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : ''].filter(Boolean).join(' · ');
+  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', mcLines.length ? `${fmtNum(mcLines.length)} dòng xuất NVL đơn giá bất thường` : ''].filter(Boolean).join(' · ');
   // confirmation bar of one part: status, who confirmed / what changed, confirm and clear buttons
   const bar = (k) => {
     const s = st(k);
@@ -698,13 +699,15 @@ function dqSection(dq) {
       ${zeroSum.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
     </tbody></table><div id="t-dq-zero"></div>
   </section>` : '';
-  const cardC = negLines.length ? `<section class="dq-card dq-block">
-    <h3>C · Vật tư số âm hoặc sai kiểu dữ liệu ${pill('BLOCK')}</h3>
-    <p class="muted">Số lượng hoặc Total Cost âm, hoặc ô là chữ thay vì số. Phải sửa trên ERP rồi import lại; danh sách này cần được xác nhận trước khi chạy STEP 2.</p>
+  // v1.14.48: C gồm dòng số âm / sai kiểu (phải sửa ERP) và dòng xuất NVL đơn giá bất thường (MI-M, ngưỡng mặc định); một nút xác nhận
+  const cardC = negLines.length || mcLines.length ? `<section class="dq-card dq-block">
+    <h3>C · Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường ${pill('BLOCK')}</h3>
+    <p class="muted">Số lượng hoặc Total Cost âm, hoặc ô là chữ thay vì số: phải sửa trên ERP rồi import lại. Đơn giá xuất NVL bất thường (MI-M): dòng có thành tiền ≥ 1.000.000 VND và đơn giá lệch > 30 % so với đơn giá chuẩn (trung vị đơn giá các dòng cùng vật tư, ĐVT trong kỳ); ngưỡng mặc định, không đổi theo ô ngưỡng trên màn hình. Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP 2.</p>
     ${bar('C')}
-    <table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
+    ${negLines.length ? `<table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
       ${negSum.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
-    </tbody></table><div id="t-dq-neg"></div>
+    </tbody></table><div id="t-dq-neg"></div>` : ''}
+    ${mcLines.length ? `<h4 class="dq-sub">Đơn giá xuất NVL bất thường (MI-M) · ${fmtNum(mcLines.length)} dòng</h4><div id="t-dq-mc"></div>` : ''}
   </section>` : '';
   return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Kiểm tra dữ liệu ERP: ${head} ${pill(ok ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h2>
     <p><b>STEP 2 chỉ chạy được khi mọi phần có bất thường đã được xác nhận.</b> Xác nhận từng phần trong thẻ bên dưới; có thể xóa xác nhận của từng phần để làm lại.</p>
@@ -723,7 +726,7 @@ VIEWS.step1 = (el) => {
     ${mc.materials.length ? `<p class="muted">Đơn giá = Total Cost ÷ SL xuất (dòng SL > 0). Đơn giá BQ = tổng cost ÷ tổng SL của các dòng có cost. Đơn giá chuẩn = trung vị các đơn giá dòng. Bất thường: dòng có thành tiền ≥ ${fmtNum(mcO.minCost)} VND lệch > ${Math.round(mcO.dev * 100)}% so với đơn giá chuẩn. Thiếu cost: dòng SL > 0 nhưng Total Cost = 0 (không tính vào BQ). Ngưỡng chỉ ảnh hưởng bảng này, không ảnh hưởng tính giá thành.</p>
     <p class="muted">${fmtNum(mc.summary.materials)} vật tư · ${fmtNum(mc.summary.flagged)} vật tư bất thường · ${fmtNum(mc.summary.missingCost)} vật tư thiếu cost · ${fmtNum(mc.summary.flaggedLines)} dòng lệch · ${fmtNum(mc.summary.zeroCostLines)} dòng cost = 0${mc.missing.length ? ` · chưa có MI-M hệ ${esc(mc.missing.join(', '))}` : ''}</p>
     <div id="t-mc"></div>
-    <h2>Dòng xuất lệch bất thường</h2><div id="t-mc-lines"></div>` : `<p class="muted">Chưa có dữ liệu MI-M trong kỳ ${esc(S.period)}.</p>`}`;
+    <p class="muted">Các dòng xuất lệch bất thường được liệt kê ở thẻ C phía trên (ngưỡng mặc định, cần xác nhận).</p>` : `<p class="muted">Chưa có dữ liệu MI-M trong kỳ ${esc(S.period)}.</p>`}`;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 1 · Import dữ liệu ERP</h1><p class="lead">Chọn các file báo cáo ERP của kỳ ${esc(S.period)} (PC-P, PC-M, MI-P, MI-M, STOCK OUT, MR-P, MR-M cho hệ T, S, O). Tên file phải chứa loại báo cáo, hệ và kỳ, ví dụ <code>PC-M-T-202608.xlsx</code>. Import lại cùng báo cáo sẽ thay thế dữ liệu cũ.</p></div>
     <div class="result"><span>Kết quả</span>${pill(c.result)}<small>${esc(c.coreReady)} báo cáo · ${esc(c.sysReady)} hệ</small></div></header>
@@ -767,12 +770,12 @@ VIEWS.step1 = (el) => {
       { key: 'flag', label: 'Trạng thái', type: 'status', width: 190 }];
     mountTable($('#t-mc'), { columns: mcCols, rows: mc.materials, filterKey: 'flag', height: 420, totals: ['cost'], onExport: exportTable('01_DON_GIA_XUAT_NVL_MI_M', mcCols) });
   }
-  if (mc.lines.length && $('#t-mc-lines')) {
+  if (c.dq && c.dq.mcLines && c.dq.mcLines.length && $('#t-dq-mc')) {
     const lnCols = [{ key: 'erp', label: 'Hệ', width: 60 }, { key: 'mi', label: 'MI No.', width: 130 }, { key: 'dateISO', label: 'Ngày', width: 100 }, { key: 'mo', label: 'MO No.', width: 130 },
       { key: 'code', label: 'Mã VT', width: 130 }, { key: 'name', label: 'Tên vật tư', width: 280 }, { key: 'lot', label: 'Lot', width: 120 }, { key: 'qty', label: 'SL xuất', type: 'qty', width: 110 },
       { key: 'cost', label: 'Thành tiền', type: 'num', width: 150 }, { key: 'unitCost', label: 'Đơn giá dòng', type: 'num', width: 140 }, { key: 'ref', label: 'Đơn giá chuẩn', type: 'num', width: 130 },
       { key: 'dev', label: 'Lệch so với chuẩn', type: 'pct', width: 150 }, { key: 'flag', label: 'Trạng thái', type: 'status', width: 170 }];
-    mountTable($('#t-mc-lines'), { columns: lnCols, rows: mc.lines, filterKey: 'erp', height: 360, totals: ['cost'], onExport: exportTable('01_DONG_XUAT_NVL_LECH_MI_M', lnCols) });
+    mountTable($('#t-dq-mc'), { columns: lnCols, rows: c.dq.mcLines, filterKey: 'erp', height: 360, totals: ['cost'], onExport: exportTable('01_DONG_XUAT_NVL_LECH_MI_M', lnCols) });
   }
   const dqCols = () => DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
   if (c.dq && c.dq.lines.length) {
@@ -1000,7 +1003,7 @@ VIEWS.step2 = (el) => {
 };
 
 function doStep2() {
-  const dq = DQ.erpAnomalies(S.d.datasets);
+  const dq = DQ.erpAnomalies(S.d.datasets, S.period);
   if (DQ.anomalyStatus(dq, S.d.importAck) === 'BLOCK - CONFIRM') {
     toast(`STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận (${dq.recon.issues.length} PC lệch PC-P / PC-M, ${dq.lines.length} dòng vật tư bất thường). Mở STEP 1 → "Kiểm tra dữ liệu ERP", rà soát rồi bấm Xác nhận.`, 'block');
     location.hash = '#step1'; return;
@@ -1645,11 +1648,14 @@ document.addEventListener('click', async (e) => {
       exportBook(`SVL_WIP_Opening_Template_${S.period}.xlsx`, TPL.wipOpeningTemplate(S.period)); break;
     case 'dq-confirm': {
       if (!guardMutate()) break;
-      const key = a.dataset.part; const dq = DQ.erpAnomalies(S.d.datasets); const p = dq.parts && dq.parts[key];
+      const key = a.dataset.part; const dq = DQ.erpAnomalies(S.d.datasets, S.period); const p = dq.parts && dq.parts[key];
       if (!p || !p.count || DQ.partStatus(dq, S.d.importAck, key) === 'CONFIRMED') break;
+      const mcTxt = [...new Set((dq.mcLines || []).map((l) => `${l.erp}|${l.code}|${l.name}`))].slice(0, 30).map((k) => { const [e, c, n] = k.split('|'); const ls = (dq.mcLines || []).filter((l) => l.erp === e && l.code === c); return `• MI-M ${e} ${c} ${n}: ${ls.length} dòng, lệch lớn nhất ${fmtNum(Math.max(...ls.map((l) => Math.abs(l.dev))) * 100, 0)} %`; });
       const listTxt = key === 'A'
         ? dq.recon.bySys.filter((x) => x.status !== 'PASS').map((x) => `• PC-P vs PC-M hệ ${x.erp}: chênh ${fmtNum(x.diff, 2)} VND – ${x.gaps} PC lệch, ${x.onlyM} chỉ ở PC-M, ${x.onlyP} chỉ ở PC-P`)
-        : dq.summary.filter((g) => (key === 'B' ? g.type === 'ZERO COST' : g.type !== 'ZERO COST')).map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`);
+        : key === 'C'
+          ? [...dq.summary.filter((g) => g.type !== 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`), ...mcTxt]
+          : dq.summary.filter((g) => g.type === 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`);
       const prev = DQ.ackParts(S.d.importAck, dq)[key];
       const note = (prompt(`Xác nhận phần ${key} – ${DQ.DQ_PARTS[key]}?\n${listTxt.join('\n')}\n\nGhi chú / kết luận (bắt buộc, ≥ 5 ký tự), ví dụ: "Hàng khách cấp – ERP giá trị 0 là đúng":`, prev ? prev.note : '') || '').trim();
       if (!note) break;
@@ -1662,7 +1668,7 @@ document.addEventListener('click', async (e) => {
     }
     case 'dq-unconfirm': {
       if (!guardMutate()) break;
-      const key = a.dataset.part; const dq = DQ.erpAnomalies(S.d.datasets);
+      const key = a.dataset.part; const dq = DQ.erpAnomalies(S.d.datasets, S.period);
       const parts = DQ.ackParts(S.d.importAck, dq);
       if (!parts[key]) break;
       if (!confirm(`Xóa xác nhận phần ${key} (${DQ.DQ_PARTS[key]})? STEP 2 sẽ bị chặn cho đến khi phần này được xác nhận lại.`)) break;

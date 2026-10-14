@@ -40,18 +40,21 @@ async function loadAll(page) {
   await page.waitForSelector('#mc-dev', { timeout: 240000 });
   await sleep(1000);
 }
-const flaggedLinesCount = (page) => page.locator('#t-mc-lines tbody tr').count().catch(() => 0);
+// the on-screen threshold changes the material analysis (summary line); the confirmation card C keeps the default thresholds
+const mcSummary = (page) => page.locator('p.muted', { hasText: 'vật tư bất thường' }).first().textContent().catch(() => '');
+const dCardLines = (page) => page.locator('#t-dq-mc tbody tr').count().catch(() => 0);
 const stored = (page) => page.evaluate(() => localStorage.getItem('svl.matcostOpts'));
 
 let page = await openPage();
 await loadAll(page);
 
 ok('default threshold shows 30 %', (await page.inputValue('#mc-dev')) === '30');
-const lines0 = await flaggedLinesCount(page);
+const sum0 = await mcSummary(page); const d0 = await dCardLines(page);
 
 await page.fill('#mc-dev', '250'); await page.dispatchEvent('#mc-dev', 'change'); await sleep(1200);
-const lines1 = await flaggedLinesCount(page);
-ok('raising the threshold to 250 % changes the flagged-line list', lines1 !== lines0, `${lines0} → ${lines1} lines`);
+const sum1 = await mcSummary(page); const d1 = await dCardLines(page);
+ok('raising the threshold to 250 % changes the material analysis', sum1 !== sum0, sum1.replace(/\s+/g, ' ').slice(0, 90));
+ok('card C (confirmation list) keeps the default thresholds', d1 === d0 && d0 > 0, `${d0} → ${d1} lines`);
 ok('threshold 250 % is stored on this device', JSON.parse((await stored(page)) || 'null')?.dev === 2.5);
 
 // fresh page in the same browser profile: the stored threshold must be applied again
@@ -59,7 +62,7 @@ await page.close();
 page = await openPage();
 await loadAll(page);
 ok('threshold survives a new page load', (await page.inputValue('#mc-dev')) === '250');
-ok('the flagged-line list keeps the 250 % result', (await flaggedLinesCount(page)) === lines1);
+ok('the material analysis keeps the 250 % result', (await mcSummary(page)) === sum1);
 
 await page.click('#mc-reset'); await sleep(1000);
 ok('reset restores 30 % and clears the stored value', (await page.inputValue('#mc-dev')) === '30' && (await stored(page)) === null);

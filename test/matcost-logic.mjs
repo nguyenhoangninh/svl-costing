@@ -66,5 +66,24 @@ ok('minimum cost 300k: M2 line of 500k (deviating) is flagged too', rMin.lines.s
 const rDef = materialIssueCosts(datasets, P, {});
 ok('no options → defaults (30 %, 1.000.000 VND)', rDef.summary.dev === MATCOST_DEV && rDef.summary.minCost === MATCOST_MIN_COST && rDef.lines.length === 1);
 
+// v1.14.48: the MI-M unit-cost lines are part C of the STEP 1 confirmation gate (confirmed with the negative / text lines)
+const DQ = await import('../src/engine/dataquality.js');
+const negN = (x) => x.lines.filter((l) => l.type !== 'ZERO COST').length; // part C's own lines (zero-cost lines are part B)
+const an = DQ.erpAnomalies(datasets, P);
+ok('part C lists the flagged MI-M lines at the default thresholds', an.mcLines.length === 1 && an.mcLines[0].code === 'M1');
+ok('part C count = negative/text lines + flagged MI-M lines (1 + 1)', an.parts.C.count === negN(an) + an.mcLines.length && an.parts.C.count === 2);
+ok('there is no separate part D any more', !('D' in an.parts) && !('D' in DQ.DQ_PARTS));
+ok('part C blocks STEP 2 while not confirmed', DQ.anomalyStatus(an, null) === 'BLOCK - CONFIRM' && DQ.partStatus(an, null, 'C') === 'NOT CONFIRMED');
+const ackC = { parts: { A: { fp: an.parts.A.fp, count: an.parts.A.count }, B: { fp: an.parts.B.fp, count: an.parts.B.count }, C: { fp: an.parts.C.fp, count: an.parts.C.count, by: 't', at: 'x', note: 'ok' } } };
+ok('confirmed part C releases the gate', DQ.anomalyStatus(an, ackC) === 'REVIEW - CONFIRMED');
+ok('the fingerprint is stable for the same data (confirmation stays valid)', DQ.erpAnomalies(datasets, P).parts.C.fp === an.parts.C.fp);
+const anOther = DQ.erpAnomalies(datasets, '2026-07');
+ok('another period has no MI-M lines in part C (no false block)', anOther.mcLines.length === 0 && anOther.parts.C.count === negN(anOther));
+const anNoPeriod = DQ.erpAnomalies(datasets);
+ok('without a period no MI-M lines are added to part C (backward compatible)', anNoPeriod.mcLines.length === 0 && anNoPeriod.parts.C.count === negN(anNoPeriod));
+const negOnly = { 'MI-M-T': { ...datasets['MI-M-T'], rows: datasets['MI-M-T'].rows.filter((r) => r[15] < 0) } };
+const anNeg = DQ.erpAnomalies(negOnly, P);
+ok('a list with only a negative line gives part C that line alone', anNeg.mcLines.length === 0 && anNeg.parts.C.count === 1 && negN(anNeg) === 1);
+
 console.log(`\n${total - fail}/${total} material unit cost checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
