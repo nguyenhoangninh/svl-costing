@@ -56,12 +56,17 @@ function stopPeriodWatch() { if (stopLivePeriod) stopLivePeriod(); stopLivePerio
 function startPeriodWatch(period) {
   stopPeriodWatch();
   if (!store.cloud.user || !period) return;
-  stopLivePeriod = store.watchPeriodMeta(period, async (meta, metadata) => {
+  const onMeta = async (meta, metadata) => {
     if (!meta || metadata.fromCache || period !== S.period) return;
     const rev = Number(meta.rev || 0);
     if (!rev) return;
-    // A listener can see our own save before local cloudRev is committed; wait for the writer.
-    if (S.sync === 'saving') await new Promise((r) => setTimeout(r, 900));
+    // Firestore may publish OUR commit while compression/upload + localRev persistence is
+    // still in flight. Wait until the writer has finished; a fixed 900-ms delay is unsafe
+    // for large costing periods and creates a false conflict against our own committed save.
+    if (S.sync === 'saving') {
+      setTimeout(() => { if (S.period === period) onMeta(meta, metadata).catch((e) => console.warn('Live sync check', e)); }, 1100);
+      return;
+    }
     if (period !== S.period) return;
     const localRev = Number((await store.localGet(lk(period, 'cloudRev'))) || 0);
     if (rev <= localRev) return;
@@ -71,7 +76,8 @@ function startPeriodWatch(period) {
     S.sync = 'conflict'; S.syncMsg = 'Có bản Cloud mới hơn #' + rev + '. Cần kiểm tra trước khi tiếp tục.';
     clearTimeout(syncTimer); renderSync(); showLiveConflict();
     toast(`Kỳ ${period} có thay đổi trên Cloud (rev #${rev})${S.remoteConflict.closed ? ' – đã đóng kỳ' : ''}. Hãy tải phiên bản mới trước khi thao tác.`, 'block');
-  }, (e) => { console.warn('live period watch', e); });
+  };
+  stopLivePeriod = store.watchPeriodMeta(period, onMeta, (e) => { console.warn('live period watch', e); });
 }
 
 // ======================= worker =======================
