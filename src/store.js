@@ -64,13 +64,14 @@ let keepError = ''; // survives the auth callback that a signOut triggers
 export async function initCloud(onUser) {
   if (!cloud.enabled) return;
   try {
-    const [appM, authM, fsM] = await Promise.all([
+    const [appM, authM, fsM, fnM] = await Promise.all([
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`),
+      import(`https://www.gstatic.com/firebasejs/${V}/firebase-functions.js`),
     ]);
     const app = appM.initializeApp(FIREBASE_CONFIG, 'svl-costing');
-    fb = { app, auth: authM.getAuth(app), fs: fsM.getFirestore(app), A: authM, F: fsM };
+    fb = { app, auth: authM.getAuth(app), fs: fsM.getFirestore(app), A: authM, F: fsM, C: fnM, fn: fnM.getFunctions(app, FN_REGION) };
     cloud.ready = true;
     authM.getRedirectResult(fb.auth).catch((e) => { keepError = 'Đăng nhập lỗi: ' + (e.code || e.message); cloud.error = keepError; });
     authM.onAuthStateChanged(fb.auth, async (u) => {
@@ -96,6 +97,21 @@ export async function initCloud(onUser) {
 }
 const allowed = (email) => !ALLOWED_EMAILS.length || ALLOWED_EMAILS.map((x) => x.toLowerCase()).includes(String(email || '').toLowerCase());
 /** Popup first (works on desktop, Android and installed iOS apps); falls back to a full-page redirect where popups are not allowed. */
+/** v1.14.38 (ENH-06): approvals are decided on the server (Cloud Functions in asia-southeast1). */
+export const FN_REGION = 'asia-southeast1';
+export async function callFn(name, data) {
+  if (!fb || !fb.C) throw new Error('Chưa kết nối cloud.');
+  const res = await fb.C.httpsCallable(fb.fn, name)(data);
+  return res.data;
+}
+/** Approval receipts of one period (client read-only; written only by the functions). */
+export async function cloudApprovals(period) {
+  if (!cloud.user || !fb) return {};
+  const q = await fb.F.getDocs(fb.F.collection(fb.fs, CLOUD_COLLECTION, period, 'approvals'));
+  const out = {};
+  for (const d of q.docs) out[d.id] = d.data();
+  return out;
+}
 export async function signIn() {
   const provider = new fb.A.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });

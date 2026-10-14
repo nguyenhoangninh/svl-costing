@@ -67,6 +67,11 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isAdmin() && periodOpen(period);
       }
+      // v1.14.38 (ENH-06): approval receipts are written only by the Cloud Functions (admin SDK); clients may read them.
+      match /approvals/{approval} {
+        allow read: if canRead();
+        allow write: if false;
+      }
       // Immutable manifest snapshot for every committed cloud revision.
       match /revisions/{revision} {
         allow read: if canRead();
