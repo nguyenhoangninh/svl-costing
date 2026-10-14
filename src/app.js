@@ -243,13 +243,13 @@ async function approvalWrite(op, payload) {
 }
 async function openPeriod(p, { preferCloud = false } = {}) {
   await saveChain;
-  stopPeriodWatch();
-  S.remoteConflict = null;
   // ENH-07: push the period being left while its data is still loaded; if the cloud refuses, the user decides
   if (S.period && p !== S.period && store.cloud.user && store.canEdit() && (await store.localGet(lk(S.period, 'unsynced')))) {
     const r = await syncNow();
     if (!r.ok && !r.skipped && !confirm(`Kỳ ${S.period} CHƯA lên được cloud: ${r.error}\n\nOK = chuyển sang kỳ ${p}; thay đổi của kỳ ${S.period} vẫn được giữ trên máy và đẩy lên khi mở lại kỳ này.\nHuỷ = ở lại kỳ ${S.period}.`)) { render(); return; }
   }
+  stopPeriodWatch();
+  S.remoteConflict = null;
   S.period = p; S.d = await loadLocal(p);
   S.approvals = await loadApprovals(p);
   localStorage.setItem('svl.period', p);
