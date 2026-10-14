@@ -240,6 +240,13 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   if ((cur && cur.summary && (cur.summary.everClosed || cur.summary.closed)) || safeSummary.closed) safeSummary.everClosed = true;
   const meta = { period, rev: curRev + 1, blobs: manifest, manifestHash, summary: safeSummary, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
   const revisionId = `${String(meta.rev).padStart(6, '0')}-${manifestHash}`;
+  // Never announce a no-op manual sync; every announcement is atomically linked to a committed revision.
+  const changed = Object.keys({ ...old, ...manifest }).some((name) => (old[name] && old[name].hash) !== (manifest[name] && manifest[name].hash))
+    || JSON.stringify(cur && cur.summary || {}) !== JSON.stringify(safeSummary);
+  const announcement = changed && opts.notice ? {
+    ...opts.notice, period, rev: meta.rev, actor: cloud.user.email.toLowerCase(),
+    actorUid: cloud.user.uid, clientAt: meta.updatedAt, createdAt: F.serverTimestamp(),
+  } : null;
   try {
     await F.runTransaction(fb.fs, async (t) => {
       const s2 = await t.get(pdoc(period));
@@ -247,6 +254,7 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
       if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
       t.set(pdoc(period), meta);
       t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
+      if (announcement) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
     });
   } catch (e) {
     // v1.14.36 (fix, found by test/e2e-cloud.mjs): a lost reply does NOT mean the commit failed. Remove this attempt's chunks
@@ -299,6 +307,41 @@ export async function cloudLoad(period, onProgress) {
     out[name] = JSON.parse(json);
   }
   return { meta, blobs: out };
+}
+
+// ---------------- committed realtime notifications ----------------
+// One collection-wide ordered listener keeps ALL periods visible without N listeners or composite indexes.
+export function watchNotifications(onRows, onError = () => {}) {
+  if (!cloud.user || !fb) return () => {};
+  const F = fb.F;
+  const q = F.query(F.collection(fb.fs, 'svl_costing_notifications'), F.orderBy('createdAt', 'desc'), F.limit(80));
+  return F.onSnapshot(q,
+    (snapshot) => onRows(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })), snapshot.metadata),
+    onError);
+}
+function readRef() {
+  if (!cloud.user) throw new Error('Chưa đăng nhập để xem thông báo.');
+  return fb.F.doc(fb.fs, 'svl_costing_notification_reads', cloud.user.uid);
+}
+export function watchNotificationReads(onState, onError = () => {}) {
+  if (!cloud.user || !fb) return () => {};
+  return fb.F.onSnapshot(readRef(), (s) => onState(s.exists() ? s.data() : { seen: [] }), onError);
+}
+export async function markNoticeRead(id) {
+  const F = fb.F, ref = readRef();
+  await F.runTransaction(fb.fs, async (t) => {
+    const s = await t.get(ref), data = s.exists() ? s.data() : {};
+    const seen = [...new Set([...(data.seen || []), String(id)])].slice(-180);
+    t.set(ref, { uid: cloud.user.uid, seen, updatedAt: F.serverTimestamp(), ...(data.readThrough ? { readThrough: data.readThrough } : {}) });
+  });
+}
+export async function markAllNoticesRead() {
+  const F = fb.F;
+  await F.setDoc(readRef(), { uid: cloud.user.uid, seen: [], readThrough: F.serverTimestamp(), updatedAt: F.serverTimestamp() }, { merge: true });
+}
+export function watchPeriodMeta(period, onMeta, onError = () => {}) {
+  if (!cloud.user || !fb || !/^\\d{4}-\\d{2}$/.test(period)) return () => {};
+  return fb.F.onSnapshot(pdoc(period), (s) => onMeta(s.exists() ? s.data() : null, s.metadata), onError);
 }
 
 export async function cloudPeriods() {
