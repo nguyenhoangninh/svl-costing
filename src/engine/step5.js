@@ -530,6 +530,7 @@ export function runFIFO(ctx) {
     const o = { seq: s.seq, book: s.book, acc: s.acc, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
     else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv, matchedOrigInv: s.matchedOrigInv, matchMode: s.matchMode, returnLid: s.returnLid });
+    if (s.vmsg) o.vmsg = s.vmsg; // v1.14.50: validation warning of the sale line (checkpoint 09b detail)
     return o;
   });
   let sumDetA = 0;

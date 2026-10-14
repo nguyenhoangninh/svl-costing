@@ -165,10 +165,10 @@ export function derive(S, p2) {
 }
 
 /** v1.14.50: chi tiết checkpoint 07 (SL FIFO = SL bán đủ điều kiện) và 08 (sản phẩm thiếu FG), để đối chiếu từng dòng. */
-function step5Detail(res, rows) {
+function step5Detail(res, rows, S) {
   if (!res) return '';
   const T = res.totals || {}, EPS = 0.0005;
-  const r07 = rows.find((r) => r.no === '07'), r08 = rows.find((r) => r.no === '08');
+  const r07 = rows.find((r) => r.no === '07'), r08 = rows.find((r) => r.no === '08'), r09b = rows.find((r) => r.no === '09b'), r10 = rows.find((r) => r.no === '10');
   const dateOf = (v) => (typeof v === 'number' && v > 0 ? serialToISO(v) : '');
   const nf = (n) => Number(n || 0).toLocaleString('vi-VN'); // counts show 0, not the dash used for empty amounts
   const qty = (v) => A.fmtNum(num(v), 3);
@@ -197,7 +197,25 @@ function step5Detail(res, rows) {
     <div class="cp-scroll"><table class="cp"><thead><tr><th>Loại</th><th>Mã SP</th><th>Hóa đơn / phiếu</th><th>Ngày</th><th>Khách hàng</th><th class="r">SL cần</th><th class="r">SL FIFO được</th><th class="r">Thiếu</th><th>Ghi chú</th></tr></thead><tbody>
       ${list.slice(0, 500).map((x) => `<tr><td>${esc(kindLbl[x.kind] || x.kind)}</td><td>${esc(x.prod || '')}</td><td>${esc(x.kind === 'SALE' ? x.inv || '' : x.ref || '')}</td><td>${esc(dateOf(x.date))}</td><td>${esc(x.cust || '')}</td><td class="r">${qty(x.need)}</td><td class="r">${qty(x.fifo)}</td><td class="r">${qty(x.short)}</td><td class="muted">${esc(x.note || '')}</td></tr>`).join('') || '<tr><td colspan="9" class="muted">Không có sản phẩm thiếu FG.</td></tr>'}
     </tbody></table></div></details>`;
-  return (r07 ? part07 : '') + (r08 ? part08 : '');
+  // 09b — sale lines the validation flagged for review (advisory: they still take part in FIFO)
+  const adv = (res.sales || []).filter((s) => s.vmsg && s.fin === 'FIFO COGS');
+  const part09b = `<details class="cp-detail"><summary>Chi tiết 09b · ${nf(adv.length)} dòng bán có cảnh báo kiểm tra dữ liệu</summary>
+    <p class="muted">Các dòng này vẫn được tính FIFO (không chặn). Cảnh báo lấy từ kiểm tra dữ liệu bán (thiếu khách hàng, SL × đơn giá lệch, loại OTHER…). Nên rà soát ở nguồn doanh thu.</p>
+    ${cap(adv.length)}
+    <div class="cp-scroll"><table class="cp"><thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Khách hàng</th><th>Mã SP</th><th class="r">SL</th><th class="r">Giá trị VND</th><th>Cảnh báo</th></tr></thead><tbody>
+      ${adv.slice(0, 500).map((s) => `<tr><td>${esc(s.inv || '')}</td><td>${esc(dateOf(s.date))}</td><td>${esc(s.cust || '')}</td><td>${esc(s.prod || '')}</td><td class="r">${qty(s.qty)}</td><td class="r">${A.fmtNum(num(s.vnd))}</td><td>${esc(s.vmsg || '')}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Không có dòng cảnh báo.</td></tr>'}
+    </tbody></table></div></details>`;
+  // 10 — FG closing layers whose cost after provision is above NRV (NRV = selling price − estimated selling cost)
+  const cl = (res.closing || []).filter((c) => utxt(c.status) === 'REVIEW - COST > PRICE').sort((a, b) => num(b.provNeed) - num(a.provNeed));
+  const provSum = cl.reduce((a, c) => a + num(c.provNeed), 0);
+  const rate = S ? sellRate(S) : 0.015;
+  const part10 = `<details class="cp-detail"><summary>Chi tiết 10 · ${nf(cl.length)} lô FG cuối kỳ có giá vốn > NRV</summary>
+    <p class="muted">NRV đơn vị = giá bán × tỷ giá − ${(rate * 100).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}% chi phí bán hàng. Giá vốn sau dự phòng = (Thành tiền + dự phòng đã ghi) ÷ SL. Dự phòng cần trích = (giá vốn sau dự phòng − NRV đơn vị) × SL. Tổng dự phòng đề xuất: <b>${A.fmtNum(provSum)}</b> VND (checkpoint 10 đếm số lô).</p>
+    ${cap(cl.length)}
+    <div class="cp-scroll"><table class="cp"><thead><tr><th>Lô</th><th>PC / nguồn</th><th>Mã SP</th><th>Ngày</th><th class="r">SL còn</th><th class="r">Giá vốn / đv (sau DP)</th><th class="r">NRV / đv</th><th class="r">Dự phòng cần trích</th></tr></thead><tbody>
+      ${cl.slice(0, 500).map((c) => { const q = num(c.qty); return `<tr><td>${esc(c.lid || '')}</td><td>${esc(c.pc || '')}${c.source ? ' · ' + esc(c.source) : ''}</td><td>${esc(c.prod || '')}</td><td>${esc(dateOf(c.date))}</td><td class="r">${qty(q)}</td><td class="r">${A.fmtNum(q ? (num(c.tot) + num(c.prov)) / q : 0, 2)}</td><td class="r">${A.fmtNum(num(c.nrvUnit), 2)}</td><td class="r">${A.fmtNum(num(c.provNeed))}</td></tr>`; }).join('') || '<tr><td colspan="8" class="muted">Không có lô nào giá vốn > NRV.</td></tr>'}
+    </tbody></table></div></details>`;
+  return (r07 ? part07 : '') + (r08 ? part08 : '') + (r09b ? part09b : '') + (r10 ? part10 : '');
 }
 
 /** 00_CONTROL_CENTER rows 119..136 — STEP 5 checkpoints. */
@@ -402,7 +420,7 @@ export function viewFIFO(el) {
     ${T ? `<div class="kpis">${A.kpi('FG đầu kỳ', T.openA)}${A.kpi('Nhập kho (STEP 4)', T.prodA)}${A.kpi('Giá vốn bán ra (FIFO)', T.cogsA + num(T.retA), true)}${res.withReturns ? A.kpi('Giảm giá vốn hàng trả lại (5R)', -num(T.retA)) + A.kpi('Giá vốn thuần (632)', T.cogsA, true) : ''}${A.kpi('Chuyển rework (5B)', num(T.rwTot))}${A.kpi('FG cuối kỳ', T.closeA, true)}</div>` : ''}
     ${res && D5.fresh === 'CURRENT' && D5.retStale ? `<div class="alert review"><b>Bước tiếp: STEP 5R.</b> Kết quả 5.2 chỉ gồm bán hàng. Kỳ có ${salesReturnsInPeriod(S).length} dòng hàng bán bị trả lại – chạy riêng ở <a href="#salesreturn">màn hình 5R</a> (${esc(D5.retStale)}).</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
-    <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}${step5Detail(res, c.rows)}</details>
+    <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}${step5Detail(res, c.rows, S)}</details>
     ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
     <div id="t5"></div></section>`;
   const modeSel = el.querySelector('#s5-mode');
