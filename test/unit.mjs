@@ -933,8 +933,14 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   eq('DQ: list changed by a re-import → confirmation needed again', DQ.anomalyStatus(an2, ack), 'BLOCK - CONFIRM');
   eq('DQ: clean data → PASS', DQ.anomalyStatus(DQ.erpAnomalies({ 'MI-M-T': { ...mimT, rows: [mimT.rows[1]] } }), null), 'PASS');
   const s1 = { checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } };
-  const c1 = step1Controls(s1, 0, [], { ...an, status: DQ.anomalyStatus(an, null) });
-  eq('STEP 1: unconfirmed anomalies block STEP 1 (status / result / next)', [c1.status, c1.result, /xác nhận 6 dòng/.test(c1.next)], ['BLOCK', 'BLOCK - XÁC NHẬN DỮ LIỆU BẤT THƯỜNG', true]);
+  const c1 = step1Controls(s1, 0, [], { ...an, status: DQ.anomalyStatus(an, null), blocking: DQ.blockingParts(an, null) });
+  eq('STEP 1: unconfirmed anomalies block STEP 1 (status / result / next lists the blocking parts)', [c1.status, c1.result, /^Rà soát và xác nhận dữ liệu ERP bất thường \(STEP 1\) trước khi chạy STEP 2: A: \d+ .*\(chưa xác nhận\); B: \d+ .*\(chưa xác nhận\); C: \d+ .*\(chưa xác nhận\)$/.test(c1.next)], ['BLOCK', 'BLOCK - XÁC NHẬN DỮ LIỆU BẤT THƯỜNG', true]);
+  // v1.14.67: notifications name each blocking part, and a part changed since its confirmation is labelled as such
+  const dA = { parts: { A: { count: 0, fp: '' }, B: { count: 0, fp: '' }, C: { count: 0, fp: '' }, D: { count: 2, fp: 'new' } } };
+  const dAck = { parts: { D: { fp: 'old', count: 2, by: 'a@svl', at: '2026-10-13T09:00:00Z', note: 'ok' } } };
+  const blk = DQ.blockingParts(dA, dAck);
+  eq('DQ: part D confirmed before a PC-P adjustment → CHANGED and blocking', [blk.map((p) => [p.key, p.status, p.count]), DQ.blockingSummary(blk)], [[['D', 'CHANGED', 2]], 'D: 2 lô PC bất thường (PC-P) (thay đổi sau lần xác nhận)']);
+  eq('DQ: nothing blocking when every non-empty part is confirmed', DQ.blockingParts(dA, { parts: { D: { fp: 'new', count: 2, by: 'a', at: '', note: '' } } }), []);
   const c2 = step1Controls(s1, 0, [], { ...an, status: DQ.anomalyStatus(an, ack) });
   eq('STEP 1: confirmed anomalies → PASS WITH REVIEW, next = STEP 2', [c2.status, c2.result, c2.next], ['PASS WITH REVIEW', 'PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG', 'Chạy STEP 2']);
 }

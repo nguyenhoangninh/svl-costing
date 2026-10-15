@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.67 (15/10/2026):** Khi bước 3A **Điều chỉnh PC-P theo PC-M** làm đơn giá lô PC-P đổi, thẻ D có thể đổi và cần xác nhận lại ở STEP 1: thông báo nay nêu rõ nguyên nhân, liệt kê đủ các phần A/B/C/D còn chặn (STEP 2 và mục kiểm soát STEP 1), và cảnh báo ngay trong màn điều chỉnh.
+>
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
 > **v1.14.66 (15/10/2026):** Tiêu đề thẻ D đổi thành **D · Đơn giá thành phẩm theo lô PC bất thường (PC-P)** để đồng nhất với thẻ C.
 >
