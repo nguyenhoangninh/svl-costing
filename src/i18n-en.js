@@ -1,6 +1,7 @@
 // v1.14.59: English UI strings. Keys are the Vietnamese text as rendered (trimmed, single spaces), numbers replaced by {#}.
 // Generated from a crawl of every screen and tab; values keep {#} in the same order.
 export const EN = {
+"Số âm, hoặc ô là chữ thay vì số: sửa trên ERP rồi import lại. Đơn giá xuất NVL (MI-M): dòng có thành tiền ≥ {#} VND và đơn giá lệch > {#} % so với đơn giá chuẩn (trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ). Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP {#}.": "Negative quantity or Total Cost, or a text cell instead of a number: fix in ERP and re-import. Material issue price (MI-M): lines with amount ≥ {#} VND and unit cost more than {#} % away from the reference (median unit cost of the lines with the same system, material code and unit in the period). If correct, confirm; if wrong, fix ERP and re-import. The list must be confirmed before running STEP {#}.",
 "Đơn giá lô = Total Cost ÷ SL hoàn thành, so với trung vị đơn giá các lô cùng hệ và cùng mã sản phẩm trong kỳ. Bất thường: lệch > {#} % và Total Cost ≥ {#} VND; hoặc SL ≤ {#} nhưng có cost; hoặc SL > {#} nhưng Total Cost = {#}. Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP {#}.": "Lot unit cost = Total Cost ÷ completed qty, compared with the median lot unit cost of the same system and product code in the period. Abnormal: deviation > {#} % and Total Cost ≥ {#} VND; or qty ≤ {#} with cost; or qty > {#} with Total Cost = {#}. If correct, confirm; if wrong, fix ERP and re-import. The list must be confirmed before running STEP {#}.",
 "Đơn giá lô = Total Cost ÷ SL hoàn thành. Đơn giá chuẩn = trung vị đơn giá các lô cùng hệ và cùng mã sản phẩm trong kỳ. Bất thường: lệch > {#} % và Total Cost ≥ {#} VND; hoặc SL ≤ {#} nhưng có cost; hoặc SL > {#} nhưng Total Cost = {#}. Chỉ để rà soát, không chặn STEP {#}.": "Lot unit cost = Total Cost ÷ completed qty. Reference cost = median lot unit cost of the same system and product code in the period. Abnormal: deviation > {#} % and Total Cost ≥ {#} VND; or qty ≤ {#} with cost; or qty > {#} with Total Cost = {#}. For review only, not blocking STEP {#}.",
 "Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ (chưa đủ tin cậy để chặn). Bất thường: thành tiền ≥ {#} VND và lệch > {#} % so với chuẩn.": "Line unit cost = Amount ÷ issued qty. Reference cost = median line unit cost of the same system, material code and unit in the period (not reliable enough to block). Abnormal: amount ≥ {#} VND and deviation > {#} % from the reference.",
@@ -1982,6 +1983,8 @@ export const MSG_WILD = [
 // v1.14.60: every other Vietnamese text segment of the source code (states not seen in the crawl: confirmed cards, errors, trace screens…).
 // SRC_WILD: '{*}' marks a value inserted by the code.
 export const SRC_EXACT = {
+"Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ.": "Line unit cost = Amount ÷ issued qty. Reference cost = median line unit cost of the same system, material code and unit in the period.",
+"Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường": "Negative or wrong-type materials, or abnormal material issue prices",
 "D · Đơn giá thành phẩm theo lô PC (PC-P)": "D · Finished-goods unit cost by PC lot (PC-P)",
 "Đơn giá thành phẩm theo lô PC bất thường (PC-P)": "Abnormal finished-goods unit cost by PC lot (PC-P)",
 "Số mã SP": "Product codes",
@@ -2819,6 +2822,8 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+["Đơn giá xuất NVL (MI-M) · {*} dòng · {*} bất thường", "Material issue unit cost (MI-M) · {*} lines · {*} abnormal"],
+["{*} dòng xuất NVL đơn giá bất thường", "{*} lines with abnormal material issue prices"],
 ["Đơn giá lô PC (PC-P) · {*} lô · {*} bất thường", "PC-lot unit cost (PC-P) · {*} lots · {*} abnormal"],
 ["{*} lô PC bất thường (PC-P)", "{*} abnormal PC lots (PC-P)"],
 ["• PC-P hệ {*}: {*} lô bất thường, {*} mã SP", "• PC-P system {*}: {*} abnormal lots, {*} product codes"],

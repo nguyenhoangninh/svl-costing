@@ -33,7 +33,12 @@ await sleep(1000);
 
 const card = page.locator('section.dq-card', { hasText: 'C · Vật tư số âm' });
 ok('card C shows the flagged MI-M lines', (await card.count()) === 1 && (await card.locator('#t-dq-mc tbody tr').count()) > 0, `${await card.locator('#t-dq-mc tbody tr').count()} dòng`);
-ok('card C does not block STEP 2 for MI-M prices (no confirm button for the MI-M lines)', (await card.locator('button[data-part="C"]').count()) === 0);
+ok('card C blocks STEP 2 until the MI-M prices are confirmed (v1.14.65)', (await card.locator('button[data-part="C"]').count()) === 1 && /BLOCK/.test((await card.locator('h3').textContent()) || ''));
+await card.locator('button[data-part="C"]').click();
+await sleep(1500);
+const cardCAfter = page.locator('section.dq-card', { hasText: 'C · Vật tư số âm' });
+ok('after confirming, card C shows who confirmed', /Đã xác nhận bởi/.test(((await cardCAfter.textContent()) || '')));
+ok('the confirm dialog listed the MI-M lines', dialogs.some((m) => /Xác nhận phần C/.test(m) && /MI-M/.test(m)));
 // v1.14.62: filters – system and status – and export of the filtered rows
 const tbl = card.locator('#t-dq-mc');
 const sels = tbl.locator('select.vt-filter');
