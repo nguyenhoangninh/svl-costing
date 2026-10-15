@@ -302,10 +302,11 @@ async function openPeriod(p, { preferCloud = false } = {}) {
           const d = emptyData();
           for (const [k, v] of Object.entries(r.blobs)) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
           d.audit = d.audit || []; d.importLog = d.importLog || {}; d.soPrice = d.soPrice || []; d.manualPrice = d.manualPrice || []; d.directAdj = d.directAdj || [];
-          for (const k of await store.localKeys()) if (String(k).startsWith(`p/${p}/`)) await store.localDel(k);
-          await saveBlobs(p, d, Object.keys(blobsOf(d)));
+          // DATA-01: one IndexedDB transaction; the prior local snapshot stays
+          // intact on quota, storage or browser interruption. Only adopt in-memory
+          // state after the complete Cloud payload has passed chunk hash checks.
+          await store.localReplacePeriod(p, blobsOf(d), r.meta);
           S.d = d;
-          await store.localSet(lk(p, 'cloudRev'), r.meta.rev || 0); await store.localSet(lk(p, 'cloudAt'), r.meta.updatedAt); await store.localDel(lk(p, 'unsynced'));
         });
         S.sync = 'synced';
       } else if (meta && cloudNewer) {
@@ -1362,7 +1363,7 @@ async function readPeriodVerified(p, names = null) {
     const d = emptyData();
     for (const [k, v] of Object.entries((r && r.blobs) || {})) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
     d.audit = d.audit || [];
-    return { d, source: 'CLOUD', verified: true, rev: meta.rev, localRev: localRev ?? null };
+    return { d, source: 'CLOUD', verified: true, rev: r.meta.rev, localRev: localRev ?? null };
   } catch (e) { return { d: local, source: 'LOCAL', verified: false, error: (e && e.message) || String(e), rev: meta.rev }; }
 }
 
@@ -1372,10 +1373,12 @@ async function checkPrevDrift() {
   const fgRoll = S.d.fgOpen && S.d.fgOpen.srcKind === 'ROLL FORWARD' && S.period ? prevPeriod(S.period) : '';
   const p = (op && op.period) || (bs && bs.period) || fgRoll;
   let verifyErr = '';
+  S.prevVerifiedPeriod = ''; S.prevVerifiedRev = null;
   if (p) {
     // v1.14.86 (AUD-02): read the previous period as the cloud holds it now; never fall back silently to a stale copy
     const rv = await readPeriodVerified(p, ['step3', 'register', 'closed', 'step5', 'nrvDecision']).catch((e) => ({ verified: false, error: (e && e.message) || String(e) }));
     if (!rv.verified && !rv.offline) verifyErr = `Không xác minh được kỳ ${p} trên cloud (${rv.error || 'không đọc được'}). Số dư đầu kỳ ${S.period} chưa được đối chiếu với số mới nhất của kỳ ${p}; kiểm tra kết nối rồi mở lại màn hình trước khi CLOSE.`;
+    if (rv.verified && !rv.offline) { S.prevVerifiedPeriod = p; S.prevVerifiedRev = rv.rev ?? null; }
     const prevD = rv.d;
     if (prevD) {
       if (op && wipFp(prevD.step3) !== op.wipFp) out.push(`Closing WIP kỳ ${p} đã thay đổi sau khi chuyển sang Opening WIP kỳ ${S.period} – roll forward lại.`);
@@ -1504,11 +1507,11 @@ function periodTable() {
   return `<table class="cp"><thead><tr><th>Kỳ</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map((p) => { const x = st(p); const h = hid.has(p);
     return `<tr><td><a href="#cc" data-act="goto-period" data-p="${p}"><b>${p}</b></a>${p === S.period ? ' <span class="muted">(đang mở)</span>' : ''}${h ? ' <span class="muted">(đã ẩn)</span>' : ''}</td>
       <td>${x.closed ? pill('CLOSED') : x.ever ? `${pill('REVIEW')} <small>đã từng đóng – đang mở lại</small>` : pill('OPEN')}</td>
-      <td class="r">${admin && !x.ever ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá kỳ…</button>` : ''}
-        ${admin && x.ever && !h ? `<button class="btn ghost sm" data-act="hide-period" data-p="${p}" type="button" title="Kỳ đã từng đóng không xoá được (hồ sơ lưu trữ) – chỉ ẩn khỏi danh sách">Ẩn kỳ…</button>` : ''}
+      <td class="r">${admin && !x.ever && (!store.cloud.enabled || !(((S.periodInfo || {})[p] || {}).cloud)) ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá bản nháp…</button>` : ''}
+        ${admin && !h && (store.cloud.enabled || x.ever) ? `<button class="btn ghost sm" data-act="hide-period" data-p="${p}" type="button" title="Ẩn kỳ nhưng giữ toàn bộ dữ liệu và lịch sử Cloud">Ẩn kỳ…</button>` : ''}
         ${admin && h ? `<button class="btn ghost sm" data-act="unhide-period" data-p="${p}" type="button">Hiện lại</button>` : ''}</td></tr>`; }).join('')}</tbody></table>
     ${hid.size ? `<p class="muted"><label><input type="checkbox" id="show-hidden" ${show ? 'checked' : ''}> Hiện cả ${hid.size} kỳ đã ẩn</label></p>` : ''}
-    <p class="muted">Kỳ <b>chưa từng đóng</b>: Xoá kỳ (xoá hẳn trên máy này và cloud). Kỳ <b>đã từng đóng</b> là hồ sơ kế toán – không xoá được, chỉ <b>Ẩn kỳ</b> khỏi danh sách (dữ liệu và lịch sử vẫn giữ trên cloud, hiện lại được).</p>`;
+    <p class="muted"><b>Lưu trữ an toàn:</b> kỳ đã từng được lưu lên Cloud (dù đang OPEN) không thể xoá vĩnh viễn vì revision cũ vẫn tham chiếu dữ liệu. Dùng <b>Ẩn kỳ</b> để bỏ khỏi danh sách mà không mất lịch sử; chỉ bản nháp chưa từng lưu Cloud mới có thể xoá khỏi máy.</p>`;
 }
 VIEWS.settings = (el) => {
   const c = store.cloud;
@@ -1978,12 +1981,12 @@ document.addEventListener('click', async (e) => {
       if (a.dataset.p && a.dataset.p !== S.period) { await openPeriod(a.dataset.p); location.hash = 'settings'; }
       if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN. Dùng “Ẩn kỳ” để bỏ khỏi danh sách.`, 'block'); break; }
       if (isClosed()) { toast(`Kỳ ${S.period} đang CLOSED và không được xoá.`, 'block'); break; }
-      if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ OPEN này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
+      if (prompt(`Gõ ${S.period} để xoá BẢN NHÁP CHƯA LƯU CLOUD trên máy này (kỳ đã có revision Cloud không thể xoá, hãy chọn Ẩn kỳ):`) === S.period) {
         const delP = S.period;
         clearTimeout(syncTimer); await saveChain; await pushChain; // no queued save may recreate the period after deletion
         // cloud first: if the cloud refuses, nothing is removed on this device either
         if (store.cloud.user) { try { await store.cloudDelete(delP); } catch (err) { toast('Không xoá được trên cloud (dữ liệu trên máy giữ nguyên): ' + err.message + (/CLOSED/.test(err.message) ? ' → dùng “Ẩn kỳ”.' : ''), 'block'); await refreshPeriods(); render(); break; } }
-        audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${delP}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
+        audit('DELETE LOCAL DRAFT', `Xoá bản nháp chưa lưu Cloud kỳ ${delP} trên máy này`);
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${delP}/`)) await store.localDel(k);
         await store.localSet('periods', ((await store.localGet('periods')) || []).filter((x) => x !== delP));
         toast(`Đã xoá kỳ ${delP}.`, 'pass');

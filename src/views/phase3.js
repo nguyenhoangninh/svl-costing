@@ -972,11 +972,22 @@ export async function doClose() {
   if (A.refreshPrevDrift) await A.refreshPrevDrift(); // ENH-10: the previous period is re-read now, not at the last screen refresh
   const D5 = derive(S, P2.derive(S));
   if (D5.closeReason) { A.toast('CLOSE MONTH bị chặn: ' + D5.closeReason, 'block'); return; }
+  let sourceRev = null;
   if (A.cloudOn() && A.cloudMeta) {
     try {
       const meta = await A.cloudMeta(S.period);
       if (meta && meta.summary && meta.summary.closed) {
         A.toast('Cloud đã ghi kỳ này là CLOSED nhưng dữ liệu trên máy đang OPEN. Hãy Pull cloud / mở lại kỳ từ trạng thái cloud thay vì CLOSE thêm lần nữa.', 'block');
+        return;
+      }
+      // DATA-04: bind CLOSE to the revision of the preceding period that was
+      // verified by the opening-balance controls. Revalidate this dependency
+      // inside the Cloud transaction so a late concurrent update cannot slip through.
+      const sourcePeriod = prevPeriod(S.period);
+      const sourceMeta = await A.cloudMeta(sourcePeriod);
+      sourceRev = sourceMeta ? sourceMeta.rev || 0 : null;
+      if (S.prevVerifiedPeriod === sourcePeriod && S.prevVerifiedRev !== sourceRev) {
+        A.toast(`CLOSE MONTH bị chặn: kỳ nguồn ${sourcePeriod} đã thay đổi sau bước kiểm tra Closing → Opening. Hãy xác minh và tính lại.`, 'block');
         return;
       }
     } catch (e) { A.toast(cloudTransitionMessage('CLOSE preflight', e), 'block'); return; }
@@ -1012,7 +1023,7 @@ export async function doClose() {
   // is read back from the cloud pointer, so a lost reply, a failed write and a close made by another session are told apart
   const trId = SP.newTransitionId('CLOSE', S.period);
   d.closed.transitionId = trId;
-  if (A.setPendingTransition) A.setPendingTransition({ id: trId, kind: 'CLOSE', period: S.period, from: 'OPEN', to: 'CLOSED', at: d.closed.closedAt, reason: '' });
+  if (A.setPendingTransition) A.setPendingTransition({ id: trId, kind: 'CLOSE', period: S.period, from: 'OPEN', to: 'CLOSED', at: d.closed.closedAt, reason: '', sourcePeriod: prevPeriod(S.period), sourceRev });
   A.markDirty('closed', 'closedEver', 'rwArchive');
   A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
   const r = await A.syncNow();

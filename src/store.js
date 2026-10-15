@@ -31,6 +31,53 @@ export const localGet = (k) => tx('readonly', (s) => reqP(s.get(k)));
 export const localSet = (k, v) => tx('readwrite', (s) => { s.put(v, k); });
 export const localDel = (k) => tx('readwrite', (s) => { s.delete(k); });
 export const localKeys = () => tx('readonly', (s) => reqP(s.getAllKeys()));
+/**
+ * Wave 1 / DATA-01: atomically replace ONE period's IndexedDB snapshot.
+ * Cloud chunks are fetched/decompressed/hash-checked BEFORE calling this method.
+ * Old period keys are deleted and new keys + revision markers committed in ONE
+ * IndexedDB transaction. Abort/quota/serialization errors preserve the old snapshot.
+ * No network operations, await, or rendering are permitted while the transaction is open.
+ */
+export async function localReplacePeriod(period, blobMap, meta) {
+  if (!/^\d{4}-\d{2}$/.test(String(period || '')) || !meta || !Number.isInteger(meta.rev) || meta.rev < 1)
+    throw new Error('Snapshot local không có kỳ/revision Cloud hợp lệ.');
+  const entries = Object.entries(blobMap || {}).filter(([, v]) => v !== undefined && v !== null);
+  const prefix = `p/${period}/`, stamp = new Date().toISOString();
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    let t;
+    try {
+      t = d.transaction('kv', 'readwrite');
+      const store = t.objectStore('kv');
+      // Collect keys first. All destructive operations and replacements remain
+      // in the same transaction, so any failure rolls back the entire operation.
+      const getKeys = store.getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+      getKeys.onsuccess = () => {
+        try {
+          for (const k of getKeys.result) store.delete(k);
+          for (const [name, value] of entries) {
+            if (!name || name.includes('/')) throw new Error('Tên blob không hợp lệ: ' + name);
+            store.put(value, prefix + name);
+          }
+          store.put(meta.rev, prefix + 'cloudRev');
+          store.put(meta.updatedAt || '', prefix + 'cloudAt');
+          store.put(stamp, prefix + 'savedAt');
+          const periods = store.get('periods');
+          periods.onsuccess = () => {
+            try {
+              const listed = new Set(Array.isArray(periods.result) ? periods.result : []);
+              listed.add(period);
+              store.put([...listed].sort(), 'periods');
+            } catch (e) { try { t.abort(); } catch {} }
+          };
+        } catch (e) { try { t.abort(); } catch {} }
+      };
+      t.oncomplete = () => resolve({ period, rev: meta.rev, count: entries.length });
+      t.onerror = () => reject(t.error || new Error('Không thể lưu trọn vẹn snapshot trên máy.'));
+      t.onabort = () => reject(t.error || new Error('Snapshot mới ghi thất bại; bản local cũ được giữ nguyên.'));
+    } catch (e) { if (t) try { t.abort(); } catch {} reject(e); }
+  });
+}
 
 // ---------------- compression ----------------
 async function gzip(str) {
@@ -187,6 +234,14 @@ const CHUNK = 700000;
 /** Chunk id of blob `name` part k. New saves use content-addressed keys (name@hash) so a save never overwrites
  *  chunks that the committed manifest still points to; legacy manifests (no key) use name__k. */
 const chunkId = (name, m, k) => `${m.key || name}__${k}`;
+const neighborPeriod = (p, direction) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(p || ''));
+  if (!m) throw new Error('Kỳ không hợp lệ.');
+  const year = Number(m[1]), month = Number(m[2]);
+  if (month < 1 || month > 12) throw new Error('Tháng không hợp lệ.');
+  const date = new Date(Date.UTC(year, month - 1 + direction, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+};
 
 export class ConflictError extends Error {
   constructor(meta) {
@@ -256,6 +311,23 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
     const s2 = await t.get(pdoc(period));
     const r2 = s2.exists() ? s2.data().rev || 0 : 0;
     if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
+    // DATA-04: read dependent periods IN THE SAME Firestore transaction.
+    // If another browser closes the next period or changes the previous period
+    // between preflight and commit, Firestore retries the transaction and this
+    // invariant is re-evaluated before any document is written.
+    if (opts.transition && opts.transition.kind === 'REOPEN') {
+      const nextPeriod = neighborPeriod(period, 1);
+      const nextSnap = await t.get(pdoc(nextPeriod));
+      if (nextSnap.exists() && nextSnap.data().summary && nextSnap.data().summary.closed)
+        throw new Error(`Không thể REOPEN kỳ ${period}: kỳ sau ${nextPeriod} đã CLOSED trên Cloud.`);
+    }
+    if (opts.transition && opts.transition.kind === 'CLOSE') {
+      const prevPeriod = neighborPeriod(period, -1);
+      const prevSnap = await t.get(pdoc(prevPeriod));
+      const actual = prevSnap.exists() ? prevSnap.data().rev || 0 : null;
+      if (actual !== opts.transition.sourceRev)
+        throw new Error(`Không thể CLOSE kỳ ${period}: kỳ trước ${prevPeriod} đã thay đổi revision trong lúc thực hiện. Vui lòng đối chiếu lại nguồn chuyển kỳ.`);
+    }
     t.set(pdoc(period), meta);
     t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt , ...(meta.transition ? { transition: meta.transition } : {})});
     if (includeNotice) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
@@ -289,15 +361,9 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   if (announcement && cloud.noticesSupported === false) meta.noticeDisabled = true;
   return meta;
 }
-function referenced(manifest, id) {
-  for (const [name, m] of Object.entries(manifest || {})) for (let k = 0; k < m.n; k++) if (chunkId(name, m, k) === id) return true;
-  return false;
-}
-async function sweepChunks(period, manifest) {
-  const q = await fb.F.getDocs(fb.F.collection(fb.fs, CLOUD_COLLECTION, period, 'chunks'));
-  for (const d of q.docs) if (!referenced(manifest, d.id)) await fb.F.deleteDoc(d.ref);
-}
-
+// DATA-02/03: do not sweep chunks. Immutable revision manifests may reference
+// chunks absent from the current period pointer. Purge requires a separate,
+// audited offline retention/migration process with complete reference analysis.
 export async function cloudRevisions(period, limitN = 100) {
   if (!cloud.user) return [];
   const F = fb.F, col = F.collection(fb.fs, CLOUD_COLLECTION, period, 'revisions');
@@ -388,7 +454,7 @@ export async function markAllNoticesRead() {
   await F.setDoc(readRef(), { uid: cloud.user.uid, seen: [], readThrough: F.serverTimestamp(), updatedAt: F.serverTimestamp() }, { merge: true });
 }
 export function watchPeriodMeta(period, onMeta, onError = () => {}) {
-  if (!cloud.user || !fb || !/^\\d{4}-\\d{2}$/.test(period)) return () => {};
+  if (!cloud.user || !fb || !/^\d{4}-\d{2}$/.test(period)) return () => {};
   return fb.F.onSnapshot(pdoc(period), (s) => onMeta(s.exists() ? s.data() : null, s.metadata), onError);
 }
 
@@ -405,26 +471,19 @@ export async function cloudPeriods() {
  * A failure after phase 1 leaves only unreferenced chunks (never a pointer to missing data); calling again finishes the sweep.
  * Revision documents stay as history.
  */
+/**
+ * DATA-03: permanent deletion of a Cloud period is deliberately disabled.
+ * Every committed period has immutable revision history; removing its chunks
+ * leaves history that cannot be restored. Use saveHiddenPeriods() to archive/hide.
+ * A draft never written to the Cloud may still be deleted locally after the
+ * absence of both a Cloud pointer and revision history is confirmed.
+ */
 export async function cloudDelete(period) {
-  if (!isAdmin()) throw new Error('Chỉ quản trị viên được xoá kỳ trên cloud.');
+  if (!isAdmin()) throw new Error('Chỉ quản trị viên được kiểm tra xoá kỳ.');
   const meta = await cloudMeta(period);
-  if (meta && meta.summary && meta.summary.everClosed) throw new Error('Kỳ này đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete. Chỉ REOPEN để điều chỉnh rồi CLOSE lại.');
-  // Backward-compatible protection for periods closed before everClosed was introduced (also covers a pointer already gone).
-  const revs = await cloudRevisions(period, 1000);
-  if (revs.some((r) => r.summary && r.summary.closed)) throw new Error('Kỳ này đã từng CLOSED trong revision history; không được hard-delete.');
-  if (meta) {
-    await fb.F.runTransaction(fb.fs, async (t) => {
-      const s2 = await t.get(pdoc(period));
-      if (!s2.exists()) return; // already removed by an earlier attempt: go on with the sweep
-      const d = s2.data();
-      if ((d.rev || 0) !== (meta.rev || 0)) throw new ConflictError(d);
-      if (d.summary && (d.summary.everClosed || d.summary.closed)) throw new Error('Kỳ này vừa được ghi là CLOSED trên cloud; không xoá.');
-      t.delete(pdoc(period));
-    });
-  }
-  // a save that started meanwhile would have written a pointer: never sweep under a live pointer
-  if (await cloudMeta(period)) throw new Error('Kỳ này vừa được lưu lại trên cloud trong lúc xoá; chưa xoá dữ liệu. Thử lại sau khi kiểm tra.');
-  await sweepChunks(period, {});
+  const revs = await cloudRevisions(period, 1);
+  if (meta || revs.length) throw new Error('Kỳ đã có dữ liệu/lịch sử Cloud; không cho phép xoá vĩnh viễn. Dùng “Ẩn kỳ” để lưu trữ an toàn (có thể hiện lại).');
+  return { localOnly: true };
 }
 
 // ---------------- append-only audit trail (svl_costing_audit) ----------------
