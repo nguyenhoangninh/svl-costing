@@ -33,6 +33,7 @@ import * as TPL from './engine/templates.js';
 import * as DQ from './engine/dataquality.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
+import { costAllocationSheet, fgLayerSheet } from './engine/exportform.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
@@ -1600,10 +1601,10 @@ async function exportAll() {
   }
   if (S.d.pm) tbl('04_PRICE_MASTER', P2.F.PM_FIELDS, P2.F.PM_HEADERS, S.d.pm.rows);
   if (S.d.pm && S.d.step2) tbl('04_PC_PRICE_CHECK', P2.F.PC_PRICE_FIELDS, P2.F.PC_PRICE_HEADERS, P2.F.pcPriceCheck(S.d.step2, S.d.pm, S.period).rows);
-  if (D.d4 && D.d4.fl) tbl('04_COST_ALLOCATION', P2.F.CA_FIELDS, P2.F.CA_HEADERS, D.d4.fl.rows.map((r) => ({ ...r, date: typeof r.date === 'number' ? serialToISO(r.date) : r.date })));
+  if (D.d4 && D.d4.fl) sheets.push(costAllocationSheet(D.d4.fl.rows, S.period)); // template layout (exportform.js)
   if (S.d.step4 && S.d.step4.recon) tbl('04_RECONCILIATION', ['label', 'expected', 'result', 'diff', 'status', 'note'], ['Control', 'Expected', 'Result', 'Difference', 'Status', 'Note'], S.d.step4.recon.rows);
   const r5 = S.d.step5 && S.d.step5.period === S.period ? S.d.step5 : null;
-  if (S.d.fgOpen) tbl('05_FG_OPENING', P3.F5.LAYER_FIELDS, P3.F5.LAYER_HEADERS, S.d.fgOpen.rows);
+  if (S.d.fgOpen) sheets.push(fgLayerSheet(S.d.fgOpen.rows, 'opening', S.period));
   if (r5) {
     const dt = (rows, fs) => rows.map((r) => { const o = { ...r }; for (const f of fs) if (typeof o[f] === 'number') o[f] = serialToISO(o[f]); return o; });
     tbl('05_FG_LEDGER', P3.F5.LEDGER_FIELDS, P3.F5.LEDGER_HEADERS, dt(r5.ledger, ['date']));
@@ -1615,7 +1616,7 @@ async function exportAll() {
     }
     tbl('05_FIFO_DETAIL', P3.F5.DETAIL_FIELDS, P3.F5.DETAIL_HEADERS, dt(r5.detail, ['date']));
     if (r5.rework) tbl('05_FG_REWORK_FIFO', P3.F5.RWF_FIELDS, P3.F5.RWF_HEADERS, dt(r5.rework.rows, ['issueDate', 'layerDate']));
-    tbl('05_FG_CLOSING', P3.F5.LAYER_FIELDS, P3.F5.LAYER_HEADERS, dt(r5.closing, ['date']));
+    sheets.push(fgLayerSheet(r5.closing, 'closing', S.period));
     tbl('05_COGS_SUMMARY', P3.F5.SUM_FIELDS, P3.F5.SUM_HEADERS, r5.summary);
     if (r5.rollforward) tbl('05_FG_ROLLFORWARD', P3.F5.XNT_FIELDS, P3.F5.XNT_HEADERS, r5.rollforward.rows);
   }
