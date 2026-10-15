@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.86', v === '1.14.86');
+ok('package version = 1.14.87', v === '1.14.87');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -53,5 +53,8 @@ ok('AUD-02: FG / provision opening compared with last closing', phase3.includes(
 ok('AUD-03: REOPEN reads the next period status from the cloud', phase3.includes('nm = await A.cloudMeta(np)'));
 ok('NEW-05: dashboard comparison uses the verified reader', app.includes('readPeriod: (p, names) => readPeriodVerified(p, names)') && fs.readFileSync(new URL('../src/views/dashboard.js', import.meta.url), 'utf8').includes('A.readPeriod(p, [\'step5\'])'));
 ok('audit report kept with the code', fs.existsSync(new URL('../docs/audit/SVL_Costing_Audit_v1.14.86.docx', import.meta.url)));
+// v1.14.87 (audit NEW-01): a whole synthetic period runs in the browser in CI, and deploy / Rules publish wait for it
+ok('CI runs the synthetic browser period and gates deploy + rules on it', /\n  e2e:\n/.test(ci) && ci.includes('node test/e2e-synthetic.mjs') && (ci.match(/needs: \[checks, e2e\]/g) || []).length === 2);
+ok('synthetic data is shared by the engine and browser tests', fs.readFileSync(new URL('./synth.mjs', import.meta.url), 'utf8').includes("from './support/synth-data.mjs'") && fs.existsSync(new URL('./support/synth-files.mjs', import.meta.url)));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
