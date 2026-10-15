@@ -11,8 +11,8 @@ ok('explicit admin CLOSE transition exists', rules.includes("isAdmin() && closed
 ok('closed period REOPEN changes only closed manifest key', rules.includes("affectedKeys().hasOnly(['closed'])"));
 ok('REOPEN summary permits closed + everClosed + live step5 status', rules.includes("affectedKeys().hasOnly(['closed', 'everClosed', 'step5'])"));
 ok('reopen preserves everClosed=true', rules.includes("request.resource.data.summary.get('everClosed', false) == true"));
-ok('hard delete blocked after everClosed', rules.includes("get('everClosed', false) != true"));
-ok('content-addressed chunks are create-only', rules.includes('allow create: if canWrite() && periodOpen(period);') && rules.includes('allow update: if false;'));
+ok('Cloud period hard deletion disabled for all committed revisions', rules.includes('match /svl_costing_periods/{period}') && rules.slice(rules.indexOf('match /svl_costing_periods/{period}'), rules.indexOf('match /chunks/{chunk}')).includes('allow delete: if false;'));
+ok('content-addressed chunks are create-only and undeletable by clients', rules.includes('allow create: if canWrite() && periodOpen(period);') && rules.slice(rules.indexOf('match /chunks/{chunk}'), rules.indexOf('match /revisions/{revision}')).includes('allow update: if false;') && rules.slice(rules.indexOf('match /chunks/{chunk}'), rules.indexOf('match /revisions/{revision}')).includes('allow delete: if false;'));
 ok('old CLOSED chunk exception removed', !rules.includes("chunk.matches('closed@.*')"));
 ok('revision rev bound to parent', rules.includes('request.resource.data.rev == getAfter(periodPath(period)).data.rev'));
 ok('revision hash bound to parent', rules.includes('request.resource.data.manifestHash == getAfter(periodPath(period)).data.manifestHash'));
@@ -22,8 +22,8 @@ ok('revision documents immutable', /match \/revisions\/\{revision\}[\s\S]*allow 
 ok('audit events immutable', /match \/svl_costing_audit\/\{id\}[\s\S]*allow update, delete: if false;/.test(rules));
 ok('owner email is a placeholder (public repo – real email only in the Firebase console)', rules.includes("myEmail() in ['YOUR_EMAIL@gmail.com']") && !/@gmail\.com'\]/.test(rules.replace("'YOUR_EMAIL@gmail.com'", '')));
 ok('cloudSave preserves everClosed after close/reopen', store.includes('safeSummary.everClosed = true'));
-ok('cloudDelete checks everClosed metadata', store.includes('meta.summary.everClosed'));
-ok('cloudDelete checks historical closed revision', store.includes('r.summary && r.summary.closed'));
+ok('cloudDelete refuses to remove any Cloud pointer', store.includes('if (meta || revs.length) throw new Error('));
+ok('cloudDelete checks retained revision history even if Cloud pointer is missing', store.includes('cloudRevisions(period, 1)'));
 ok('close persists local closedEver retention state', phase3.includes('d.closedEver = true'));
 ok('close snapshots exception package', phase3.includes('exceptions'));
 ok('CLOSE has cloud-state preflight', phase3.includes("Cloud đã ghi kỳ này là CLOSED"));
@@ -31,13 +31,17 @@ ok('REOPEN has cloud-state preflight', phase3.includes("Cloud đang ở trạng 
 ok('permission error gives rules/admin guidance', phase3.includes('Publish firestore.rules mới nhất') && phase3.includes('Quản trị'));
 ok('REOPEN revision changes only closed / everClosed (accepted by every published rules version)', app.includes('closed: null, everClosed: true }') && !app.includes('step5: live.step5'));
 
+// Wave 1 (v1.14.90): local snapshot and period dependency controls.
+ok('DATA-01: Cloud Pull uses one atomic IndexedDB replacement', app.includes('await store.localReplacePeriod(p, blobsOf(d), r.meta)') && store.includes("d.transaction('kv', 'readwrite')") && store.includes("store.getAllKeys(IDBKeyRange.bound(prefix"));
+ok('DATA-04: REOPEN checks next-period Cloud state inside transaction', store.includes("opts.transition.kind === 'REOPEN'") && store.includes('await t.get(pdoc(nextPeriod))'));
+ok('DATA-04: CLOSE checks preceding period revision inside transaction', store.includes("opts.transition.kind === 'CLOSE'") && store.includes('actual !== opts.transition.sourceRev'));
 // v1.14.35 (audit wave 2)
 const appJs = app;
 ok('ENH-08 audit ACTOR events must match the signed-in uid and email', rules.includes("get('attribution', 'LEGACY') != 'ACTOR'") && rules.includes('actorUid == request.auth.uid') && rules.includes('actorEmail == myEmail()'));
 ok('ENH-08 audit documents are keyed by event id (idempotent upload)', store.includes('fb.F.doc(fb.fs, AUDIT, e.eventId)') && store.includes('if (!ex.exists())'));
 ok('ENH-08 actor is captured at event time, not at upload', store.includes('const actor = cloud.user ? { uid: cloud.user.uid'));
-ok('ENH-04 cloudDelete removes the pointer in a transaction before sweeping chunks', store.indexOf('t.delete(pdoc(period))') > 0 && store.indexOf('t.delete(pdoc(period))') < store.indexOf('await sweepChunks(period, {});', store.indexOf('export async function cloudDelete')));
-ok('ENH-04 cloudDelete refuses to sweep under a pointer saved meanwhile', store.includes('vừa được lưu lại trên cloud trong lúc xoá'));
+ok('DATA-03: no destructive Cloud pointer removal or chunk sweep', !store.includes('t.delete(pdoc(period))') && !store.includes('sweepChunks('));
+ok('DATA-02: chunk deletion denied by Rules', rules.slice(rules.indexOf('match /chunks/{chunk}'), rules.indexOf('match /revisions/{revision}')).includes('allow delete: if false;'));
 ok('ENH-05 render has no offline bypass for local accounting data', !appJs.includes('!store.cloud.offline') && appJs.includes('(store.cloud.enabled && !store.cloud.user)'));
 
 // v1.14.36 (audit wave 3)
