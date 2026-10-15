@@ -34,13 +34,30 @@ await sleep(1000);
 const card = page.locator('section.dq-card', { hasText: 'C · Vật tư số âm' });
 ok('card C shows the flagged MI-M lines', (await card.count()) === 1 && (await card.locator('#t-dq-mc tbody tr').count()) > 0, `${await card.locator('#t-dq-mc tbody tr').count()} dòng`);
 ok('there is no separate card D', (await page.locator('section.dq-card', { hasText: 'D · ' }).count()) === 0);
-ok('card C asks for confirmation before STEP 2', (await card.locator('button[data-part="C"]').count()) === 1);
-await card.locator('button[data-part="C"]').click();
-await sleep(1500);
-const cardAfter = page.locator('section.dq-card', { hasText: 'C · Vật tư số âm' });
-const txt = ((await cardAfter.textContent()) || '').replace(/\s+/g, ' ');
-ok('after confirming, card C shows who confirmed and the note', /Đã xác nhận bởi/.test(txt) && /Kiểm thử: định mức đã rà soát/.test(txt));
-ok('the confirm dialog listed the material lines', dialogs.some((m) => /Xác nhận phần C/.test(m) && /MI-M/.test(m)));
+ok('card C does not block STEP 2 for MI-M prices (no confirm button for the MI-M lines)', (await card.locator('button[data-part="C"]').count()) === 0);
+// v1.14.62: filters – system and status – and export of the filtered rows
+const tbl = card.locator('#t-dq-mc');
+const sels = tbl.locator('select.vt-filter');
+ok('the MI-M table has a system filter and a status filter', (await sels.count()) === 2);
+const cnt = async () => { const t = ((await tbl.locator('.vt-count').textContent()) || '').replace(/\./g, ''); const m = t.match(/(\d+)/g) || []; return +m[0] || 0; };
+const allN = await cnt();
+await sleep(3000); // let the page finish its first render before changing the filters
+await sels.nth(1).selectOption({ label: 'Review - Abnormal' }); await sleep(300);
+const flaggedN = await cnt();
+await sels.nth(1).selectOption({ label: 'OK - Normal' }); await sleep(300);
+const okN = await cnt();
+ok('status filter: Review - Abnormal + OK - Normal = all lines', flaggedN + okN === allN && allN > 0, `${flaggedN} + ${okN} = ${allN}`);
+await sels.nth(1).selectOption({ value: '' }); await sleep(200);
+const systems = await sels.nth(0).locator('option').allTextContents();
+ok('system filter lists the systems, not statuses', systems.length >= 2 && !systems.some((x) => /Review|OK -/.test(x)), systems.join(' | '));
+const dlP = page.waitForEvent('download', { timeout: 30000 }).catch(() => null);
+await tbl.locator('xpath=..').locator('button.vt-export').click();
+const dl = await dlP;
+ok('export downloads a file named for the MI-M line list', !!dl && /01_DON_GIA_XUAT_NVL_MI_M_DONG/.test(dl.suggestedFilename()), dl ? dl.suggestedFilename() : 'no download');
+// v1.14.63: PC lot unit cost review (PC-P) – informational, filters by system and status
+const pcSec = page.locator('#t-pc');
+ok('STEP 1 lists the PC-lot unit cost review with rows', (await pcSec.locator('tbody tr[data-v]').count()) > 0 && (await page.locator('h2', { hasText: 'Đơn giá thành phẩm theo lô PC' }).count()) === 1);
+ok('the PC-lot review has a system filter and a status filter', (await pcSec.locator('select.vt-filter').count()) === 2);
 ok('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 console.log(`\n${n - fail}/${n} STEP 1 card C browser checks passed${fail ? `, ${fail} FAILED` : ''}`);
 await browser.close();

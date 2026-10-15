@@ -1,6 +1,10 @@
 // v1.14.59: English UI strings. Keys are the Vietnamese text as rendered (trimmed, single spaces), numbers replaced by {#}.
 // Generated from a crawl of every screen and tab; values keep {#} in the same order.
 export const EN = {
+"Đơn giá lô = Total Cost ÷ SL hoàn thành. Đơn giá chuẩn = trung vị đơn giá các lô cùng hệ và cùng mã sản phẩm trong kỳ. Bất thường: lệch > {#} % và Total Cost ≥ {#} VND; hoặc SL ≤ {#} nhưng có cost; hoặc SL > {#} nhưng Total Cost = {#}. Chỉ để rà soát, không chặn STEP {#}.": "Lot unit cost = Total Cost ÷ completed qty. Reference cost = median lot unit cost of the same system and product code in the period. Abnormal: deviation > {#} % and Total Cost ≥ {#} VND; or qty ≤ {#} with cost; or qty > {#} with Total Cost = {#}. For review only, not blocking STEP {#}.",
+"Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ (chưa đủ tin cậy để chặn). Bất thường: thành tiền ≥ {#} VND và lệch > {#} % so với chuẩn.": "Line unit cost = Amount ÷ issued qty. Reference cost = median line unit cost of the same system, material code and unit in the period (not reliable enough to block). Abnormal: amount ≥ {#} VND and deviation > {#} % from the reference.",
+"SL ≤ {#} nhưng có Total Cost": "Qty ≤ {#} but has Total Cost",
+"SL > {#} nhưng Total Cost = {#}": "Qty > {#} but Total Cost = {#}",
 "lệch lớn nhất {#} %": "largest deviation {#} %",
 "Chạy lại theo thứ tự (STEP {#} nếu cần) → RUN FIFO COGS → BUILD FG HISTORY.": "Re-run in order (STEP {#} if needed) → RUN FIFO COGS → BUILD FG HISTORY.",
 "Chạy lại theo thứ tự STEP {#} → RUN FIFO → BUILD FG HISTORY.": "Re-run in order STEP {#} → RUN FIFO → BUILD FG HISTORY.",
@@ -1977,6 +1981,16 @@ export const MSG_WILD = [
 // v1.14.60: every other Vietnamese text segment of the source code (states not seen in the crawl: confirmed cards, errors, trace screens…).
 // SRC_WILD: '{*}' marks a value inserted by the code.
 export const SRC_EXACT = {
+"Đơn giá thành phẩm theo lô PC (PC-P)": "Finished-goods unit cost by PC lot (PC-P)",
+"PC No.": "PC No.",
+"Lọc theo hệ": "Filter by system",
+"Lọc theo trạng thái": "Filter by status",
+"Tất cả hệ": "All systems",
+"Review - Abnormal": "Review - Abnormal",
+"OK - Normal": "OK - Normal",
+"Số lượng hoặc Total Cost âm, hoặc ô là chữ thay vì số: phải sửa trên ERP rồi import lại. Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP 2.": "Negative quantity or Total Cost, or a text cell instead of a number: fix in ERP and re-import. If correct, confirm; if wrong, fix ERP and re-import. The list must be confirmed before running STEP 2.",
+"C · Vật tư số âm, sai kiểu dữ liệu": "C · Negative or wrong-type materials",
+"không có dòng cần xác nhận": "no line needs confirmation",
 "Đang lưu lên cloud…": "Saving to the cloud…",
 "Kỳ đã đóng – mở lại kỳ (5.3) nếu cần xoá": "Period closed – reopen it (5.3) if you need to delete",
 "Tiếp tục?": "Continue?",
@@ -2799,6 +2813,11 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+["Đơn giá xuất NVL (MI-M) · {*} dòng · {*} bất thường · tham khảo, không chặn STEP 2", "Material issue unit cost (MI-M) · {*} lines · {*} abnormal · for reference, not blocking STEP 2"],
+["Chưa có dữ liệu PC-P trong kỳ {*}.", "No PC-P data in period {*}."],
+["{*} lô · {*} mã sản phẩm · {*} lô bất thường · chưa có PC-P hệ {*}", "{*} lots · {*} product codes · {*} abnormal lots · no PC-P for system {*}"],
+["{*} lô · {*} mã sản phẩm · {*} lô bất thường", "{*} lots · {*} product codes · {*} abnormal lots"],
+["Đơn giá lệch {*} % so với chuẩn", "Unit cost {*} % vs reference"],
 ["Validate & Save doanh thu bán hàng ({*})", "Validate & Save sales revenue ({*})"],
 ["Validate & Save hàng trả lại / giảm giá ({*})", "Validate & Save returns / discounts ({*})"],
 ["Kỳ {*}: cả máy này và cloud đều có thay đổi.", "Period {*}: both this computer and the cloud have changes."],
