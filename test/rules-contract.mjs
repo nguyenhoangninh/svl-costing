@@ -49,7 +49,7 @@ ok('ENH-07 period being left is pushed before switching (user decides on failure
 ok('ENH-09 FG posting is deferred until the close is committed', fgprodJs.includes('defer = false') && phase3Js.includes('{ silent: true, defer: true }'));
 ok('ENH-09 close audit lines are written only after the cloud commit', (() => { const a = phase3Js.indexOf('export async function doClose'); const b = phase3Js.indexOf('export async function doReopen'); const seg = phase3Js.slice(a, b); return seg.indexOf('await A.syncNow()') > 0 && seg.lastIndexOf('for (const [a, t] of trail) A.audit(a, t);') > seg.indexOf('await A.syncNow()'); })());
 ok('ENH-09 failed close rolls back the FG posting as well', phase3Js.includes('d.fgProd = before.fgProd;'));
-ok('ENH-09 close success confirmed by the close timestamp (no double apply)', phase3Js.includes('SP.closeCommitted(await A.cloudMeta(S.period)'));
+ok('ENH-09 / AUD-01 close success confirmed from the cloud pointer (transition id; close timestamp for older pointers)', phase3Js.includes("SP.transitionOutcome({ ok: r.ok, skipped: r.skipped, writtenId: r.writtenId, meta, metaError, id: trId, kind: 'CLOSE' })") && phase3Js.includes('SP.closeCommitted(meta, d.closed.closedAt)'));
 ok('ENH-10 CLOSE re-reads the previous period before the gate', phase3Js.includes('if (A.refreshPrevDrift) await A.refreshPrevDrift();'));
 ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes('op.closedAt && !isClosedIn(prevD, p)'));
 
@@ -58,7 +58,7 @@ ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes
 const saveBody = store.slice(store.indexOf('export async function cloudSave'), store.indexOf('export async function', store.indexOf('export async function cloudSave') + 10));
 ok('cloud save never deletes chunks, even after a failed commit', saveBody.length > 0 && !saveBody.includes('deleteDoc(cdoc('));
 // v1.14.81 (AUD-07): a sync with the same manifest and summary writes no revision
-ok('no-op sync writes no revision (NO_CHANGE)', saveBody.includes('if (cur && !changed && !opts.forceRevision) return { ...cur, noChange: true };') && saveBody.indexOf('noChange: true') < saveBody.indexOf('commitRevision('));
+ok('no-op sync writes no revision (NO_CHANGE)', saveBody.includes('if (cur && !changed && !opts.forceRevision && !opts.transition) return { ...cur, noChange: true };') && saveBody.indexOf('noChange: true') < saveBody.indexOf('commitRevision('));
 // v1.14.81 (AUD-04): everClosed is one-way on every update, not only on REOPEN
 ok('rules: everClosed cannot be lowered by any update', rules.includes('function keepsEverClosed()') && /allow update: if canWrite\(\) && request\.resource\.data\.rev == resource\.data\.get\('rev', 0\) \+ 1\s*&& keepsEverClosed\(\)/.test(rules));
 

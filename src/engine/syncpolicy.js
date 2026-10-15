@@ -32,3 +32,24 @@ export function periodReadPlan({ signedIn, metaError = null, meta = null, localR
   if (!meta) return 'NO_CLOUD';
   return localRev !== null && localRev !== undefined && localRev === (meta.rev || 0) ? 'LOCAL' : 'CLOUD';
 }
+
+/**
+ * v1.14.89 (audit AUD-01 / AUD-09 / AUD-10): outcome of a CLOSE or REOPEN request, decided from the cloud pointer read
+ * back after the sync – never from the sync reply alone (a reply can be lost, and a "skipped" reply proves nothing).
+ *   COMMITTED – the pointer carries this request's transition id
+ *   BY_OTHER  – the period is already in the target state, but through another session's transition
+ *   NOT_COMMITTED – the cloud is readable and still in the starting state
+ *   UNKNOWN   – the cloud could not be read and the reply did not confirm the write
+ */
+export function transitionOutcome({ ok = false, skipped = false, writtenId = null, meta = null, metaError = false, id, kind }) {
+  if (meta && meta.transition && meta.transition.id === id) return 'COMMITTED';
+  if (ok && !skipped && writtenId === id && (metaError || !meta)) return 'COMMITTED'; // the write returned this transition; the read-back failed
+  if (meta) {
+    const closed = !!(meta.summary && meta.summary.closed);
+    if ((kind === 'CLOSE' && closed) || (kind === 'REOPEN' && !closed)) return 'BY_OTHER';
+    return 'NOT_COMMITTED';
+  }
+  return 'UNKNOWN';
+}
+/** A new transition id: kind, period, time and a random part (unique across devices). */
+export const newTransitionId = (kind, period, now = Date.now(), rnd = Math.random) => `${kind}-${period}-${now.toString(36)}-${Math.floor(rnd() * 1e9).toString(36)}`;

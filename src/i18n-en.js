@@ -3150,6 +3150,11 @@ export const SRC_WILD = [
 ["Không thể mở lại {*}: kỳ kế tiếp {*} đã ĐÓNG trên cloud và đang phụ thuộc số dư cuối kỳ này. Mở lại {*} trước, sau đó mới mở lại {*}.", "Cannot reopen {*}: the next period {*} is CLOSED on the cloud and depends on this closing. Reopen {*} first, then {*}."],
 ["– {*} dòng không còn (UNMAPPED), {*} dòng đổi số liệu. STEP {*} bị chặn cho tới khi xác nhận lại.", "– {*} lines gone (UNMAPPED), {*} lines with changed figures. STEP {*} is blocked until confirmed again."],
 ["STEP 2 bị chặn: danh sách tiêu hao NVL không còn khớp báo cáo Stock Out ({*} dòng không còn, {*} dòng đổi số liệu). Xem khối Tiêu hao NVL → Xác nhận lại danh sách tiêu hao.", "STEP 2 blocked: the material consumption list no longer matches the Stock Out reports ({*} lines gone, {*} lines changed). See the Material consumption block → Confirm the consumption list again."],
+// v1.14.89: transition outcome toasts
+["Kỳ {*} đã được ĐÓNG từ phiên khác{*}. Lần bấm này không ghi gì; hãy tải lại bản cloud.", "Period {*} was CLOSED from another session{*}. This click wrote nothing; reload the cloud copy."],
+["Kỳ {*} đã được MỞ LẠI từ phiên khác{*}. Máy này theo trạng thái cloud (OPEN).", "Period {*} was REOPENED from another session{*}. This device follows the cloud (OPEN)."],
+["Chưa xác minh được CLOSE trên cloud ({*}). Dữ liệu trên máy giữ trạng thái đóng; mở lại màn hình khi có kết nối để kiểm tra.", "The CLOSE could not be verified on the cloud ({*}). This device keeps the period closed; reopen the screen when connected to check."],
+["Chưa xác minh được MỞ LẠI KỲ trên cloud ({*}). Máy này giữ trạng thái OPEN; mở lại màn hình khi có kết nối để kiểm tra.", "The REOPEN could not be verified on the cloud ({*}). This device keeps the period OPEN; reopen the screen when connected to check."],
 ["{*} · Giá vốn {*}", "{*} · COGS {*}"],
 ["{*} · Lãi gộp {*}", "{*} · Gross profit {*}"],
 ["{*} · Lỗ gộp {*}", "{*} · Gross loss {*}"],
