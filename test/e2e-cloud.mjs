@@ -71,10 +71,13 @@ await gotoTab('#step4'); await page.click('[data-act=run-step4]'); await sleep(1
 await gotoTab('#step5'); await page.click('[data-act=s5-run]'); await sleep(1500);
 await gotoTab('#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-hist]'); await sleep(1200);
+// v1.14.73 moved the NRV decision to 5P; the CLOSE gate needs it (the test reached CLOSE without it since then)
+if (!(await page.locator('#f-nrv-decision').count())) { await gotoTab('#provision'); await sleep(1200); }
 if (await page.locator('#f-nrv-decision').count()) {
   await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
   await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: chưa trích lập kỳ này'); await page.click('#f-nrv-decision button[type=submit]'); await sleep(500);
 }
+await gotoTab('#close'); await page.waitForSelector('.result');
 await page.click('[data-tabh="fast"]'); await page.waitForSelector('#f-fast');
 const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => [tr.querySelector('input').name, tr.children[2].textContent.replace(/\./g, '').replace(',', '.').replace(/[–-]$/, '0')]));
 for (const [k, v] of engVals) await page.fill(`#f-fast input[name=${k}]`, k === 'a632' ? String(Math.round(+v || 0) - 1000) : String(Math.round(+v || 0)));
@@ -90,7 +93,6 @@ ok('2026-08 is closeable before the cloud tests', (await page.locator('[data-act
 const closeBefore = await countAudit('STEP 5 - CLOSE MONTH');
 await setFail('runTransaction', 1);
 await page.click('[data-act=s5-close]'); await sleep(4000);
-console.log('DEBUG after first close click, toasts:', (await toasts()).slice(-400), '| result:', ((await page.textContent('.result').catch(() => '')) || '').slice(0, 200));
 ok('ENH-09 failed commit: CLOSE refused with cloud message', /CHƯA đóng kỳ/.test(await toasts()), (await toasts()).slice(-140));
 ok('ENH-09 failed commit: no "STEP 5 - CLOSE MONTH" in the cloud trail', (await countAudit('STEP 5 - CLOSE MONTH')) === closeBefore);
 ok('ENH-09 failed commit: a FAILED entry is recorded instead', (await countAudit('STEP 5 - CLOSE MONTH FAILED')) >= 1);

@@ -52,6 +52,18 @@ export function returnStepStatus(S, D5) {
 /** The NRV decision that still belongs to this STEP 5 result, or null. */
 export const currentNrv = (S, res) => (res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
 /** NRV approved for this STEP 5 result, spread over the closing layers (v1.14.73; see PROV.nrvApproved). */
+/**
+ * CLOSE gate of 5P (audit AUD-08): opening + increase (NRV approved) − decrease (release) − rework part must equal the
+ * provision of the closing layers, and every layer must track. Returns the block reason, or '' when 5P reconciles.
+ */
+export function provisionGate(S, res) {
+  if (!res) return '';
+  const approved = nrvApprovedFor(S, res);
+  const trk = PROV.provisionTrack(res, approved.byLayer);
+  const mv = PROV.provisionMovement(trk, approved);
+  if (mv.ok) return '';
+  return `5P Dự phòng FG (TK 2294) chưa khớp: đầu kỳ + tăng − giảm − phần rework − cuối kỳ theo lớp = ${A.fmtNum(mv.check)}${trk.ok ? '' : ' · có lớp chưa theo dõi được dự phòng'}. Mở màn 5P để kiểm tra trước khi CLOSE.`;
+}
 export function nrvApprovedFor(S, res) {
   return PROV.nrvApproved((res && res.closing) || [], res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
 }
@@ -180,6 +192,8 @@ export function derive(S, p2) {
     const nd = d.nrvDecision, key = nrvKey(res);
     if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành ở 5P (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
   }
+  // v1.14.81 (audit AUD-08): the 5P provision movement (TK 2294) must reconcile before CLOSE, the same check as the 5P rail
+  if (!closeReason && res && !(d.closed && d.closed.period === S.period)) { const pg = provisionGate(S, res); if (pg) closeReason = pg; }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
     if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213 (STEP 5.3 → tab Đối chiếu FAST).';
     else {
