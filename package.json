@@ -14,7 +14,8 @@
     "test:e2e:approvals": "node test/e2e-approvals.mjs http://127.0.0.1:8765/ ../costing.xlsm . ../fixtures/returns_2026_08.xlsx",
     "test:e2e:consumption": "node test/e2e-consumption.mjs http://127.0.0.1:8765/ ../fixtures/erp ../costing.xlsm",
     "test:e2e:synthetic": "node test/e2e-synthetic.mjs http://127.0.0.1:8765/",
-    "test:e2e:local-atomic": "node test/e2e-local-atomic.mjs http://127.0.0.1:8765/"
+    "test:e2e:local-atomic": "node test/e2e-local-atomic.mjs http://127.0.0.1:8765/",
+    "test:e2e:period-guard": "node test/e2e-period-guard.mjs http://127.0.0.1:8765/"
   },
   "author": "",
   "license": "ISC",
