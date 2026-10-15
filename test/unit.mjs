@@ -1191,6 +1191,28 @@ eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP
   eq('customer P&L: no result before STEP 5 runs', customerPL(null), null);
 }
 
+// ---- v1.14.82 one customer whatever the case / spacing of its name (Tectronic = TECTRONIC = " tectronic ")
+{
+  const { customerPL, filterRes, monthlyRevenue, custKey } = await import('../src/engine/custpl.js');
+  const sales = [
+    { acc: '511', inv: 'T1', cust: 'Tectronic', vnd: 100, tot: 60, fin: 'FIFO COGS', fq: 1, status: 'PASS' },
+    { acc: '511', inv: 'T2', cust: 'TECTRONIC', vnd: 200, tot: 120, fin: 'FIFO COGS', fq: 2, status: 'PASS' },
+    { acc: '511', inv: 'T3', cust: ' tectronic  ', vnd: 50, tot: 20, fin: 'FIFO COGS', fq: 1, status: 'PASS' },
+    { acc: '511', inv: 'T4', cust: 'Tectronic', vnd: 70, tot: 40, fin: 'FIFO COGS', fq: 1, status: 'PASS' },
+    { acc: '5212', inv: 'TR', cust: 'tectronic', origInv: 'T2', vnd: -20, tot: -12, fin: 'RETURN', fq: -0.2, status: 'RETURNED' },
+    { acc: '511', inv: 'O1', cust: 'Other Co', vnd: 10, tot: 5, fin: 'FIFO COGS', fq: 1, status: 'PASS' },
+  ];
+  const pl = customerPL({ sales, totals: { cogsA: 233, consA: 0, consQ: 0 } });
+  eq('customer name case: Tectronic / TECTRONIC / tectronic are one customer', pl.rows.map((r) => r.cust), ['Tectronic', 'Other Co']);
+  eq('customer name case: the row adds every spelling (net 400, COGS 228, qty 4.8)', [pl.rows[0].net, pl.rows[0].cogs, +pl.rows[0].qty.toFixed(1)], [400, 228, 4.8]);
+  eq('customer name case: the label is the spelling used most often', pl.rows[0].cust, 'Tectronic');
+  eq('customer name case: the dashboard filter matches any spelling', customerPL(filterRes({ sales, totals: { cogsA: 233 } }, { cust: 'TECTRONIC' })).total.net, 400);
+  eq('customer name case: key ignores case and extra spaces, keeps accents', [custKey(' tectronic  co '), custKey('Tectronic Co'), custKey('Đông Á') === custKey('Dong A')], ['TECTRONIC CO', 'TECTRONIC CO', false]);
+  const serial = (y, m) => (Date.UTC(y, m - 1, 15) - Date.UTC(1899, 11, 30)) / 86400000;
+  const db = { rows: [{ invDate: serial(2026, 8), customer: 'TECTRONIC', product: 'P', qty: 1, amtVND: 30, tranType: 'NORMAL SALE' }, { invDate: serial(2026, 8), customer: 'tectronic', product: 'P', qty: 1, amtVND: 20, tranType: 'NORMAL SALE' }] };
+  eq('customer name case: monthly trend filter matches any spelling', monthlyRevenue(db, null, { cust: 'Tectronic' }).get('2026-08').net, 50);
+}
+
 // ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);

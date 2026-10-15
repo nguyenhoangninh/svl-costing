@@ -17,20 +17,32 @@ const TOL = 1;
 const share = (v, base) => (Math.abs(base) > TOL ? v / base : null);
 
 /**
+ * Matching key of a customer name (v1.14.82): case-insensitive and spacing-insensitive, so "TECTRONIC", "Tectronic"
+ * and " tectronic " are one customer. Accents are kept (they change the name in Vietnamese).
+ */
+export const custKey = (v) => ttxt(v).replace(/\s+/g, ' ').trim().toLocaleUpperCase('vi');
+
+/**
  * Customer of each STEP 5 line: a sales line (511) keeps its own customer; a return (5212) or credit note (5213)
  * follows the customer of its original invoice when that invoice is in this period, else its own customer.
+ * Names are grouped by custKey; the label shown is the spelling used most often in the period (ties: the first seen).
  */
 export function custResolver(res) {
   const invCust = new Map();
+  const spell = new Map(); // key → Map(spelling → count)
   for (const s of (res && res.sales) || []) {
-    const inv = ttxt(s.inv), c = ttxt(s.cust);
-    if (s.acc === '511' && inv && c && !invCust.has(inv)) invCust.set(inv, c);
+    const c = ttxt(s.cust).replace(/\s+/g, ' ').trim(), k = custKey(c);
+    if (!k) continue;
+    if (!spell.has(k)) spell.set(k, new Map());
+    const m = spell.get(k); m.set(c, (m.get(c) || 0) + 1);
+    const inv = ttxt(s.inv);
+    if (s.acc === '511' && inv && !invCust.has(inv)) invCust.set(inv, k);
   }
+  const label = new Map([...spell].map(([k, m]) => [k, [...m].reduce((b, x) => (x[1] > b[1] ? x : b))[0]]));
   return (s) => {
-    const own = ttxt(s.cust);
-    if (s.acc === '511') return own || NO_CUST;
-    const orig = invCust.get(ttxt(s.matchedOrigInv)) || invCust.get(ttxt(s.origInv));
-    return orig || own || NO_CUST;
+    const own = custKey(s.cust);
+    const k = s.acc === '511' ? own : invCust.get(ttxt(s.matchedOrigInv)) || invCust.get(ttxt(s.origInv)) || own;
+    return k ? label.get(k) || ttxt(s.cust) : NO_CUST;
   };
 }
 
@@ -105,10 +117,10 @@ const isCosted = (s) => s.fin === 'FIFO COGS' || s.fin === 'RETURN';
  * belongs to no customer or sale, so it is left out of a filtered view. Without a filter the result is returned as it is.
  */
 export function filterRes(res, f = {}) {
-  const cust = ttxt(f.cust), prod = utxt(f.prod);
+  const cust = custKey(f.cust), prod = utxt(f.prod);
   if (!res || !Array.isArray(res.sales) || (!cust && !prod)) return res;
   const custOf = custResolver(res);
-  const sales = res.sales.filter((s) => (!cust || custOf(s) === cust) && (!prod || utxt(s.prod) === prod));
+  const sales = res.sales.filter((s) => (!cust || custKey(custOf(s)) === cust) && (!prod || utxt(s.prod) === prod));
   const cogsA = sales.filter(isCosted).reduce((a, s) => a + num(s.tot), 0);
   return { ...res, sales, totals: { ...res.totals, cogsA, consA: 0, consQ: 0 }, filtered: true };
 }
@@ -143,11 +155,11 @@ export const prodSheetRows = (pp) => (pp ? pp.rows.map((x) => [x.prod, x.name, x
  * figures come from STEP 5). Optional filter { cust, prod } on the row's own customer / product.
  */
 export function monthlyRevenue(salesDB, returnsDB, f = {}) {
-  const cust = ttxt(f.cust), prod = utxt(f.prod);
+  const cust = custKey(f.cust), prod = utxt(f.prod);
   const { sales, returns } = splitBooks(salesDB, returnsDB);
   const by = new Map();
   for (const r of [...sales, ...returns]) {
-    if (cust && ttxt(r.customer) !== cust) continue;
+    if (cust && custKey(r.customer) !== cust) continue;
     if (prod && utxt(r.product) !== prod) continue;
     const d = recognitionDate(r); if (d === null) continue;
     const ym = serialToISO(d).slice(0, 7);
