@@ -1167,6 +1167,30 @@ eq('ENH-07 retry stops after the limit', [SP.shouldRetry(0), SP.shouldRetry(1), 
 eq('ENH-07 outbox lists other periods only, sorted, unique', SP.outboxOthers(['2026-10', '2026-08', '2026-08', '', '2026-09'], '2026-10'), ['2026-08', '2026-09']);
 eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP.closeCommitted({ summary: { closed: 'T1' } }, 'T1'), SP.closeCommitted({ summary: { closed: 'T0' } }, 'T1'), SP.closeCommitted(null, 'T1'), SP.closeCommitted({ summary: { closed: null } }, 'T1')], [true, false, false, false]);
 
+// ---- v1.14.79 revenue · COGS · GP by customer (engine/custpl.js): hand-made STEP 5 lines
+{
+  const { customerPL, customerJournal, plSheetRows } = await import('../src/engine/custpl.js');
+  const sales = [
+    { acc: '511', inv: 'I1', cust: 'A', vnd: 100, tot: 60, fin: 'FIFO COGS', fq: 1, status: 'PASS' },
+    { acc: '511', inv: 'I2', cust: 'B', vnd: 200, tot: 120, fin: 'FIFO COGS', fq: 2, status: 'PASS' },
+    { acc: '5212', inv: 'R1', cust: '', origInv: 'I1', matchedOrigInv: 'I1', vnd: -40, tot: -24, fin: 'RETURN', fq: -0.4, status: 'RETURNED' },
+    { acc: '5213', inv: 'CN2', cust: 'B', origInv: 'I2', vnd: -10, tot: 0, fin: 'NO COGS', fq: 0, status: 'PASS' },
+    { acc: '511', inv: 'I3', cust: '', vnd: 50, tot: 30, fin: 'FIFO COGS', fq: 1, status: 'REVIEW' },
+  ];
+  const pl = customerPL({ sales, totals: { cogsA: 191, consA: 5, consQ: 1 } });
+  const by = Object.fromEntries(pl.rows.map((r) => [r.cust, r]));
+  eq('customer P&L: a return with a blank customer goes to the customer of its original invoice (A)', [by.A.ret, by.A.cogs, by.A.net], [-40, 36, 60]);
+  eq('customer P&L: a credit note goes to the customer of its invoice (B): net 190, COGS 120', [by.B.disc, by.B.net, by.B.cogs], [-10, 190, 120]);
+  eq('customer P&L: a line without customer is its own row, not dropped', [pl.rows.length, by['(Không rõ khách hàng)'].gross], [3, 50]);
+  eq('customer P&L: rows sorted by net revenue (B, A, unknown)', pl.rows.map((r) => r.cust), ['B', 'A', '(Không rõ khách hàng)']);
+  eq('customer P&L: consumption is its own row (cost 5, GP −5)', [pl.cons.cogs, pl.cons.gp], [5, -5]);
+  eq('customer P&L: totals net 300, COGS 191 (= 632), GP 109', [pl.total.net, pl.total.cogs, pl.total.gp], [300, 191, 109]);
+  eq('customer P&L: checks — COGS ties to 632; unknown customer and REVIEW line flagged', pl.checks.map((c) => c.status), ['PASS', 'REVIEW', 'REVIEW']);
+  eq('customer P&L: JE07 per customer adds up to 36 + 120 + 30', customerJournal(pl).filter((l) => l.je === 'JE07').map((l) => l.amount), [120, 36, 30]);
+  eq('customer P&L: the summary sheet starts with the top customer', plSheetRows(pl)[0].slice(0, 2), ['B', 2]);
+  eq('customer P&L: no result before STEP 5 runs', customerPL(null), null);
+}
+
 // ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);

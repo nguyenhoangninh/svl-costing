@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.78', v === '1.14.78');
+ok('package version = 1.14.79', v === '1.14.79');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -31,6 +31,11 @@ ok('CSP blocks object content', html.includes("object-src 'none'"));
 ok('referrer policy is present', html.includes('strict-origin-when-cross-origin'));
 ok('no personal email committed in firestore.rules', rules.includes('YOUR_EMAIL@gmail.com') && !/[a-z0-9._-]+@gmail\.com/i.test(rules.replace(/YOUR_EMAIL@gmail\.com/g, '')));
 ok('npm test includes retention contracts', String(pkg.scripts && pkg.scripts.test).includes('rules-contract.mjs'));
+ok('Dashboard doanh thu · GP is a visible navigation item with its own route', app.includes("{ id: 'dashboard'") && app.includes('VIEWS.dashboard = (el) => DBV.view(el)'));
+ok('dashboard, customer P&L and journal modules are precached', ['./src/views/dashboard.js', './src/engine/custpl.js', './src/engine/journal.js'].every((f) => sw.includes(`'${f}'`)));
+ok('JE07 is split by customer in the journal and export', app.includes('journalWithCustomers(ctx)') && app.includes('async function exportHachToan') && app.includes('SVL_Bang_Tong_Hop_Hach_Toan_'));
+ok('dashboard chart styles use theme tokens (dark mode follows)', html.includes('.dash-svg') && html.includes('.dash-gp { fill: var(--accent)'));
+ok('dashboard is documented in README', readme.includes('Dashboard doanh thu & GP'));
 
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
