@@ -15,6 +15,13 @@ export const EN = {
 "NRV RECORDED cần tham chiếu kế toán / số bút toán (Journal No.).": "NRV RECORDED needs an accounting reference or journal number (Journal No.).",
 "Điền tham chiếu kế toán, ngày ghi sổ, người ghi sau khi đã hạch toán trên FAST.": "Fill in the accounting reference, posting date and the person who posted it after booking in FAST.",
 "DIRECT_632 chỉ là đề xuất hạch toán – không vào PC-P hay WIP Allocation. Điền tham chiếu kế toán, ngày ghi sổ, người ghi sau khi đã hạch toán trên FAST.": "DIRECT_632 is only a posting proposal – it does not enter PC-P or WIP Allocation. Fill in the accounting reference, posting date and the person who posted it after booking in FAST.",
+// v1.14.75: material consumption (632 / 152) kept out of Material WIP
+"Opening WIP + MI + Stock Out − PC − MR = Closing WIP ERP theo từng vật tư. FG Stock Out và Stock Out tiêu hao (Nợ {#} / Có {#}) không đi vào WIP.": "Opening WIP + MI + Stock Out − PC − MR = ERP closing WIP per material. FG Stock Out and Stock Out marked as consumption (Dr {#} / Cr {#}) do not go into WIP.",
+"Tiêu hao NVL ngoài WIP ({#} / {#})": "Material consumption outside WIP ({#} / {#})",
+"Dòng Stock Out tiêu hao không qua TK {#}; tổng phải bằng tiêu hao STEP {#}": "Consumption Stock Out lines do not pass through TK {#}; their total must equal STEP {#} consumption",
+"Kết quả STEP {#} cũ còn tính tiêu hao NVL vào WIP.": "The old STEP {#} result still counts material consumption in WIP.",
+"Chạy lại STEP {#} để tiêu hao ({#} / {#}) không đi qua TK {#}.": "Run STEP {#} again so consumption ({#} / {#}) does not pass through TK {#}.",
+"WIP Out - MR Return = RM lô PC + Stock Out phân bổ (tiêu hao {#} không qua WIP)": "WIP Out - MR Return = PC lot RM + allocated Stock Out (consumption {#} does not pass through WIP)",
 // v1.14.74: 5P compact layout (equation strip, opening and NRV side by side, detail tabs)
 "Cuối kỳ = đầu kỳ + tăng (NRV duyệt) − giảm (hoàn nhập khi bán, tiêu dùng, trừ trả hàng); chuyển sang đầu kỳ sau. Rework tách riêng, chưa ghi sổ.": "Closing = opening + increase (NRV approved) − decrease (release on sales and internal use, net of returns); carried to next period's opening. Rework kept apart, not posted.",
 "TK {#} · kỳ {#}": "TK {#} · period {#}",
@@ -2980,6 +2987,10 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+[
+"Tiêu hao NVL không qua WIP: {*} dòng Stock Out đánh dấu tiêu hao ở STEP 2 ({*} VND) ghi thẳng Nợ 632 / Có 152, không tính vào Stock Out của WIP.",
+"Material consumption outside WIP: {*} Stock Out lines marked as consumption in STEP 2 ({*} VND) post straight to Dr 632 / Cr 152 and are not counted in WIP Stock Out."
+],
 [
 "gồm rework {*}",
 "incl. rework {*}"

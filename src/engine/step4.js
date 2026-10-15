@@ -564,8 +564,9 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
   const zeroProduction = !lots.length;
   const totalRM = totalPCRm + totalSO;
   if (Math.abs(totalSO - step2SO) >= 0.01) throw new Error(`Stock Out phân bổ trên PC-P không khớp STEP 2. Chênh lệch ${(totalSO - step2SO).toFixed(2)}`);
-  // v1.14.33: tiêu hao NVL (STEP 2, ghi 632 / 152) nằm trong WIP ra của STEP 3 nhưng không nằm trong lô PC
-  const consumedRM = Number(step2.total.cons) || 0;
+  // v1.14.33: tiêu hao NVL (STEP 2, ghi 632 / 152) used to sit in STEP 3 WIP out. v1.14.75: STEP 3 leaves it out of WIP
+  // (consExcluded), so the bridge is RM lô PC + Stock Out phân bổ only; an older STEP 3 result still adds it back.
+  const consumedRM = step3.consExcluded ? 0 : Number(step2.total.cons) || 0;
   const rmBridge = rmBridgeCheck(totalRM, consumedRM, step3Bridge);
   if (!rmBridge.ok) throw new Error(`RM STEP 4 không khớp cầu nối WIP STEP 3 (RM lô PC + Stock Out phân bổ + tiêu hao 632/152). Chênh lệch ${rmBridge.diff.toFixed(2)}`);
   // prices
@@ -663,7 +664,7 @@ function reconcile(x) {
   row('PC RM Cost', x.totalPCRm, x.totalPCRm, 0.01, 'REVIEW', 'PC output material cost');
   row('Stock Out Allocated', x.step2SO, x.totalRM - x.totalPCRm, 0.01, 'REVIEW', 'Must tie Step 2');
   row('Base Total RM (Pre WIP Adj)', x.totalPCRm + x.step2SO, x.totalRM, 0.01, 'REVIEW', 'Base PC RM + Stock Out; overhead driver remains locked to this base');
-  row('Step 3 Bridge', x.step3Bridge, x.totalRM + (x.consumedRM || 0), 0.01, 'REVIEW', 'WIP Out - MR Return = RM lô PC + Stock Out phân bổ + tiêu hao 632/152');
+  row('Step 3 Bridge', x.step3Bridge, x.totalRM + (x.consumedRM || 0), 0.01, 'REVIEW', x.consumedRM ? 'WIP Out - MR Return = RM lô PC + Stock Out phân bổ + tiêu hao 632/152' : 'WIP Out - MR Return = RM lô PC + Stock Out phân bổ (tiêu hao 632/152 không qua WIP)');
   a.push({ label: 'Missing Product Prices', expected: 0, result: x.missingPrice, diff: x.missingPrice, status: x.missingPrice === 0 ? 'PASS' : 'BLOCK', note: 'Must be zero' });
   a.push({ label: 'FX Input', expected: 1, result: x.fxOK ? 1 : 0, diff: (x.fxOK ? 1 : 0) - 1, status: x.fxOK ? 'PASS' : 'BLOCK', note: 'Approved costing FX' });
   const bf = x.blocked ? 'BLOCK' : 'REVIEW';

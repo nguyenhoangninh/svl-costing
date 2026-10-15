@@ -136,6 +136,7 @@ export function step3Controls(st) {
     cp('05', 'WIP ra (PC + MR + Stock Out)', 'INFO', S.outAmt, '', 'INFO', 'Material WIP'),
     cp('06', 'Closing WIP ERP = Opening + Vào − Ra', exp6, S.closingAmt, S.closingAmt - exp6, abs(S.closingAmt - exp6) < 1 ? 'PASS' : 'CHECK', 'Roll-forward trước STEP 3B'),
     cp('07', 'Stock Out khớp STEP 2', 0, c.soVsStep2.value, c.soVsStep2.value, c.soVsStep2.status, 'Đối chiếu độc lập với STEP 2'),
+    ...(c.consVsStep2 && c.consVsStep2.lines ? [cp('07b', 'Tiêu hao NVL ngoài WIP (632 / 152)', 0, c.consVsStep2.value, c.consVsStep2.value, c.consVsStep2.status, 'Dòng Stock Out tiêu hao không qua TK 154; tổng phải bằng tiêu hao STEP 2')] : []),
     cp('08', 'Chi phí NVL PC-M vs PC-P', 0, c.pcmVsPcp.value, c.pcmVsPcp.value, c.pcmVsPcp.status, 'Đối chiếu độc lập PC-M ↔ PC-P'),
     cp('09', 'Ngoại lệ cần review', 0, c.exceptions.value, c.exceptions.value, c.exceptions.value === 0 ? 'PASS' : 'REVIEW', 'Số lượng âm / thiếu master data'),
     cp('10', 'Kỳ & freshness', period, s3.period, '', s3.period !== period ? 'BLOCK' : later(s3.runAt, s2 ? s2.runAt : '') && later(s3.runAt, op ? op.changedAt || '' : '') ? 'CURRENT' : 'RERUN STEP 3', 'Chạy sau STEP 2 và sau mọi thay đổi Opening WIP'),
