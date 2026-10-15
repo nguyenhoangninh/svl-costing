@@ -71,7 +71,7 @@ const DQ = await import('../src/engine/dataquality.js');
 const negN = (x) => x.lines.filter((l) => l.type !== 'ZERO COST').length; // part C's own lines (zero-cost lines are part B)
 const an = DQ.erpAnomalies(datasets, P);
 ok('part C lists the flagged MI-M lines at the default thresholds', an.mcLines.length === 1 && an.mcLines[0].code === 'M1');
-ok('v1.14.62: MI-M lines are NOT part of the confirmation (part C = negative/text lines only)', an.parts.C.count === negN(an) && an.mcLines.length > 0);
+ok('v1.14.65: part C = negative/text lines + flagged MI-M lines (blocking again)', an.parts.C.count === negN(an) + an.mcLines.length && an.mcLines.length > 0);
 ok('v1.14.62: the full MI-M list (all costed lines, with status) is available for the filter', an.mcAll.length >= an.mcLines.length && an.mcAll.filter((l) => l.flag === 'REVIEW - BẤT THƯỜNG').length === an.mcLines.length && an.mcAll.some((l) => l.flag === 'OK - BÌNH THƯỜNG'));
 ok('v1.14.63: part D = flagged PC-lot unit costs, blocking like C', 'D' in an.parts && an.parts.D.count === an.pcFlagged.length && an.pcFlagged.every((l) => l.flag === 'REVIEW - BẤT THƯỜNG') && 'D' in DQ.DQ_PARTS);
 ok('part C blocks STEP 2 while not confirmed', DQ.anomalyStatus(an, null) === 'BLOCK - CONFIRM' && DQ.partStatus(an, null, 'C') === 'NOT CONFIRMED');

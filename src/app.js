@@ -711,7 +711,7 @@ function dqSection(dq) {
   const ack = S.d.importAck; const ok = DQ.anomalyStatus(dq, ack) === 'REVIEW - CONFIRMED';
   const parts = DQ.ackParts(ack, dq);
   const st = (k) => DQ.partStatus(dq, ack, k);
-  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', pcFlagged.length ? `${fmtNum(pcFlagged.length)} lô PC bất thường (PC-P)` : ''].filter(Boolean).join(' · ') || 'không có dòng cần xác nhận';
+  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', mcLines.length ? `${fmtNum(mcLines.length)} dòng xuất NVL đơn giá bất thường` : '', pcFlagged.length ? `${fmtNum(pcFlagged.length)} lô PC bất thường (PC-P)` : ''].filter(Boolean).join(' · ') || 'không có dòng cần xác nhận';
   // confirmation bar of one part: status, who confirmed / what changed, confirm and clear buttons
   const bar = (k) => {
     const s = st(k);
@@ -742,16 +742,17 @@ function dqSection(dq) {
     </tbody></table><div id="t-dq-zero"></div>
   </section>` : '';
   // v1.14.48: C gồm dòng số âm / sai kiểu (phải sửa ERP) và dòng xuất NVL đơn giá bất thường (MI-M, ngưỡng mặc định); một nút xác nhận
-  // C: số âm / sai kiểu (chặn, phải xác nhận). Đơn giá MI-M chỉ tham khảo (v1.14.62) – không chặn, không tính vào xác nhận.
-  const cardC = negLines.length || mcAll.length ? `<section class="dq-card ${negLines.length ? 'dq-block' : 'dq-info'}">
-    <h3>C · Vật tư số âm, sai kiểu dữ liệu ${pill(negLines.length ? 'BLOCK' : 'CHECK')}</h3>
-    ${negLines.length ? `<p class="muted">Số lượng hoặc Total Cost âm, hoặc ô là chữ thay vì số: phải sửa trên ERP rồi import lại. Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP 2.</p>
+  // C: số âm / sai kiểu dữ liệu và đơn giá xuất NVL (MI-M) bất thường – chặn STEP 2 cho tới khi xác nhận (v1.14.65)
+  const cCount = negLines.length + mcLines.length;
+  const cardC = cCount || mcAll.length ? `<section class="dq-card ${cCount ? 'dq-block' : 'dq-info'}">
+    <h3>C · Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường ${pill(cCount ? 'BLOCK' : 'CHECK')}</h3>
+    <p class="muted">Số âm, hoặc ô là chữ thay vì số: sửa trên ERP rồi import lại. Đơn giá xuất NVL (MI-M): dòng có thành tiền ≥ 1.000.000 VND và đơn giá lệch > 30 % so với đơn giá chuẩn (trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ). Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP 2.</p>
     ${bar('C')}
-    <table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
+    ${negLines.length ? `<table class="cp"><thead><tr><th>Báo cáo</th><th>Loại bất thường</th><th class="r">Số dòng</th><th class="r">Số vật tư</th><th>Mã vật tư (ví dụ)</th></tr></thead><tbody>
       ${negSum.map((g) => `<tr><td>${esc(g.report)}</td><td>${esc(g.label)}</td><td class="r">${fmtNum(g.lines)}</td><td class="r">${fmtNum(g.materials)}</td><td class="muted">${esc(g.sample)}${g.materials > 12 ? '…' : ''}</td></tr>`).join('')}
     </tbody></table><div id="t-dq-neg"></div>` : ''}
-    ${mcAll.length ? `<h4 class="dq-sub">Đơn giá xuất NVL (MI-M) · ${fmtNum(mcAll.length)} dòng · ${fmtNum(mcLines.length)} bất thường · tham khảo, không chặn STEP 2</h4>
-      <p class="muted">Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ (chưa đủ tin cậy để chặn). Bất thường: thành tiền ≥ 1.000.000 VND và lệch > 30 % so với chuẩn.</p>
+    ${mcAll.length ? `<h4 class="dq-sub">Đơn giá xuất NVL (MI-M) · ${fmtNum(mcAll.length)} dòng · ${fmtNum(mcLines.length)} bất thường</h4>
+      <p class="muted">Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ.</p>
       <div id="t-dq-mc"></div>` : ''}
   </section>` : '';
   // D: đơn giá thành phẩm theo lô PC (PC-P) – như thẻ C: bất thường phải được xác nhận trước khi chạy STEP 2
@@ -1727,10 +1728,11 @@ document.addEventListener('click', async (e) => {
       if (!guardMutate()) break;
       const key = a.dataset.part; const dq = DQ.erpAnomalies(S.d.datasets, S.period); const p = dq.parts && dq.parts[key];
       if (!p || !p.count || DQ.partStatus(dq, S.d.importAck, key) === 'CONFIRMED') break;
+      const mcTxt = [...new Set((dq.mcLines || []).map((l) => `${l.erp}|${l.code}|${l.name}`))].slice(0, 30).map((k) => { const [e, c, n] = k.split('|'); const ls = (dq.mcLines || []).filter((l) => l.erp === e && l.code === c); return `• MI-M ${e} ${c} ${n}: ${ls.length} dòng, lệch lớn nhất ${fmtNum(Math.max(...ls.map((l) => Math.abs(l.dev))) * 100, 0)} %`; });
       const listTxt = key === 'A'
         ? dq.recon.bySys.filter((x) => x.status !== 'PASS').map((x) => `• PC-P vs PC-M hệ ${x.erp}: chênh ${fmtNum(x.diff, 2)} VND – ${x.gaps} PC lệch, ${x.onlyM} chỉ ở PC-M, ${x.onlyP} chỉ ở PC-P`)
         : key === 'C'
-          ? dq.summary.filter((g) => g.type !== 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`)
+          ? [...dq.summary.filter((g) => g.type !== 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`), ...mcTxt]
         : key === 'D'
           ? ['T', 'S', 'O'].filter((e) => dq.pcFlagged.some((l) => l.erp === e)).map((e) => { const L = dq.pcFlagged.filter((l) => l.erp === e); return `• PC-P hệ ${e}: ${L.length} lô bất thường, ${new Set(L.map((l) => l.prod)).size} mã SP`; })
           : dq.summary.filter((g) => g.type === 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`);
