@@ -308,11 +308,14 @@ export async function cloudMeta(period) {
   return s.exists() ? s.data() : null;
 }
 
-export async function cloudLoad(period, onProgress) {
+/** names (optional, v1.14.85): load only these blobs – a check of another period needs a few blobs, not its ERP datasets. */
+export async function cloudLoad(period, onProgress, names = null) {
   const meta = await cloudMeta(period);
   if (!meta) return null;
   const out = {};
+  const want = names ? new Set(names) : null;
   for (const [name, m] of Object.entries(meta.blobs || {})) {
+    if (want && !want.has(name)) continue;
     onProgress && onProgress(`Đang tải ${name}…`);
     let b64 = '';
     for (let k = 0; k < m.n; k++) { const s = await fb.F.getDoc(cdoc(period, chunkId(name, m, k))); if (!s.exists()) throw new Error(`Thiếu dữ liệu ${name} (phần ${k + 1}/${m.n}) trên cloud.`); b64 += s.data().d; }

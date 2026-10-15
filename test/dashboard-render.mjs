@@ -91,6 +91,20 @@ html = el.innerHTML;
 ok('plan saved as a period blob', S.d.dashPlan && S.d.dashPlan.revenue === 250 && Math.abs(S.d.dashPlan.gpPct - 0.4) < 1e-9 && saved.includes('dashPlan'));
 ok('gauge shows 120,0% of plan', html.includes('120,0%') && html.includes('Sửa kế hoạch kỳ'));
 
+// v1.14.85 (NEW-05): the previous period is read through the verified reader and its source is shown
+{
+  const S2 = { ...S, period: '2026-08', d: { ...S.d } };
+  const el3 = { isConnected: true, innerHTML: '', querySelector: (q) => (q === '#dash-tbl' || q === '#dash-ptbl' ? { mounted: null } : node(q)) };
+  DB.install({ ...A, S: { ...S2, period: '2026-09' }, derived: () => ({ d5: null }) }); DB.view(el3); // switch period to reset the cache
+  DB.install({ ...A, S: S2, readPeriod: async (p) => (p === '2026-07' ? { d: { step5: PREV }, source: 'CLOUD', verified: true, rev: 12 } : { d: {} }) });
+  DB.view(el3); await tick();
+  ok('NEW-05: comparison period read via the verified reader shows its cloud revision', el3.innerHTML.includes('đã xác minh với cloud revision 12') && el3.innerHTML.includes('tải từ cloud'));
+  DB.install({ ...A, S: { ...S2, period: '2026-09' }, derived: () => ({ d5: null }) }); DB.view(el3);
+  DB.install({ ...A, S: S2, readPeriod: async () => ({ d: { step5: PREV }, source: 'LOCAL', verified: false, error: 'offline' }) });
+  DB.view(el3); await tick();
+  ok('NEW-05: an unverified comparison is flagged as possibly stale', el3.innerHTML.includes('KHÔNG xác minh được trên cloud') && el3.innerHTML.includes('dx-warn'));
+}
+
 // empty state: no STEP 5 result
 const el2 = { isConnected: true, innerHTML: '', querySelector: () => null };
 DB.install({ ...A, derived: () => ({ d5: null }) });

@@ -44,9 +44,9 @@ async function go(hash) { await page.goto(base + hash); await sleep(900); }
 async function flowValues() {
   return page.$$eval('.flow .fb b', (els) => els.map((e) => e.textContent));
 }
-/** JE rows of the STEP 3 journal, keyed by JE code → amount text */
+/** JE rows of the STEP 3 journal, keyed by JE code → amount text (last column; v1.14.79 added the Khách hàng column) */
 async function journal() {
-  return page.$$eval('table.cp tr', (rows) => Object.fromEntries(rows.map((r) => [...r.children].map((c) => c.textContent.trim())).filter((c) => /^JE\d/.test(c[0] || '')).map((c) => [c[0], c[4]])));
+  return page.$$eval('table.cp tr', (rows) => Object.fromEntries(rows.map((r) => [...r.children].map((c) => c.textContent.trim())).filter((c) => /^JE\d/.test(c[0] || '')).map((c) => [c[0], c[c.length - 1]])));
 }
 
 // ---------- load: workbook (opening WIP, settings) then the ERP reports

@@ -202,5 +202,23 @@ const gMsg = P3.provisionGate(badS, bad);
 ok('5P gate: provision with no source on a production layer blocks CLOSE (50,000)', /5P Dự phòng FG \(TK 2294\) chưa khớp/.test(gMsg) && /50000/.test(gMsg));
 ok('5P gate: no STEP 5 result → no 5P block (STEP 5 gates apply)', P3.provisionGate(gS, null) === '');
 
+// ---- v1.14.85 (audit AUD-02): FG opening rolled from last period's closing must still match that closing
+{
+  const prevStep5 = { ...structuredClone(ret), period: '2026-07', runResult: 'PASS' };
+  const prevD = { step5: prevStep5, nrvDecision: null };
+  const S8 = { period: '2026-08', d: { fgOpen: F5.openingFromClosing(prevStep5, '2026-08', '', {}) } };
+  ok('FG drift: an opening rolled from the current closing matches', P3.fgOpenDrift(S8, prevD, '2026-07') === '');
+  const changed = structuredClone(prevD); changed.step5.closing[0].tot = num(changed.step5.closing[0].tot) + 1000;
+  ok('FG drift: closing cost changed after the roll → message', /đã thay đổi sau khi chuyển sang FG đầu kỳ 2026-08/.test(P3.fgOpenDrift(S8, changed, '2026-07')));
+  const provChanged = structuredClone(prevD); provChanged.step5.closing[0].prov = num(provChanged.step5.closing[0].prov) - 500;
+  ok('FG drift: closing provision changed after the roll → message names dự phòng', /FG \/ dự phòng cuối kỳ 2026-07/.test(P3.fgOpenDrift(S8, provChanged, '2026-07')));
+  const S8file = { period: '2026-08', d: { fgOpen: { ...S8.d.fgOpen, provSource: { kind: 'FILE' } } } };
+  ok('FG drift: opening provision loaded from a file afterwards → provision not compared', P3.fgOpenDrift(S8file, provChanged, '2026-07') === '');
+  const S8imp = { period: '2026-08', d: { fgOpen: { ...S8.d.fgOpen, srcKind: 'IMPORT' } } };
+  ok('FG drift: an imported opening (not rolled) is not compared', P3.fgOpenDrift(S8imp, changed, '2026-07') === '');
+  const failed = structuredClone(prevD); failed.step5.runResult = 'CHECK';
+  ok('FG drift: previous closing no longer PASS → message', /không còn dùng được/.test(P3.fgOpenDrift(S8, failed, '2026-07')));
+}
+
 console.log(`\n${total - fail}/${total} provision checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

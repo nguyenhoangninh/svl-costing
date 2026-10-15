@@ -67,6 +67,21 @@ export function provisionGate(S, res) {
 export function nrvApprovedFor(S, res) {
   return PROV.nrvApproved((res && res.closing) || [], res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
 }
+/**
+ * v1.14.85 (audit AUD-02): FG opening rolled forward from the previous period's closing (layers, cost and provision)
+ * must still match that closing. Returns the drift message, or '' when it matches or the opening was not rolled.
+ * The provision is left out of the comparison when the opening provision was loaded from a file afterwards.
+ */
+export function fgOpenDrift(S, prevD, p) {
+  const op = S.d.fgOpen;
+  if (!op || op.srcKind !== 'ROLL FORWARD' || !prevD || !prevD.step5 || prevD.step5.period !== p) return '';
+  let exp;
+  try { exp = F5.openingFromClosing(prevD.step5, S.period, '', nrvCarryAdd(prevD.step5, prevD.nrvDecision)); } catch (e) { return `FG cuối kỳ ${p} không còn dùng được để chuyển sang kỳ ${S.period}: ${e.message}`; }
+  const withProv = !(op.provSource && op.provSource.kind === 'FILE');
+  const key = (rows) => (rows || []).map((r) => [ttxt(r.lid), num(r.qty).toFixed(4), num(r.tot).toFixed(0), withProv ? num(r.prov).toFixed(0) : ''].join('|')).sort().join('#');
+  if (key(exp.rows) === key(op.rows)) return '';
+  return `FG${withProv ? ' / dự phòng' : ''} cuối kỳ ${p} đã thay đổi sau khi chuyển sang FG đầu kỳ ${S.period} – chuyển lại ở 5.1 (Roll forward), Validate rồi chạy lại STEP 5.`;
+}
 /** Layer provision to add when a period's closing becomes the next opening (negative = more provision). */
 const nrvCarryAdd = (step5, decision) => {
   const cur = step5 && decision && decision.key === nrvKey(step5) ? decision : null;
@@ -182,6 +197,8 @@ export function derive(S, p2) {
   if (res && stale && !(d.closed && d.closed.period === S.period)) closeReason = `STEP 5 OUTDATED: ${stale}. Chạy lại theo thứ tự STEP 4 → RUN FIFO → BUILD FG HISTORY.`;
   if (!closeReason && res && !(d.closed && d.closed.period === S.period)) { const b = P2.threeBBlock(S, p2 ? p2.d3b : null, { forClose: true }); if (b) closeReason = b; }
   if (!closeReason && res && (S.prevDrift || []).length && !(d.closed && d.closed.period === S.period)) closeReason = `Số dư đầu kỳ đã lệch so với kỳ trước: ${S.prevDrift[0]}`;
+  // v1.14.85 (AUD-02): the previous period could not be read from the cloud → no CLOSE on an unverified opening
+  if (!closeReason && res && S.prevVerifyErr && !(d.closed && d.closed.period === S.period)) closeReason = S.prevVerifyErr;
   if (!closeReason && res && res.undated && res.undated.length) closeReason = `Sales Database có ${res.undated.length} dòng thiếu / sai ngày hoá đơn (vd. ${res.undated.slice(0, 3).map((u) => u.inv || 'dòng ' + u.dbRow).join(', ')}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.`;
   if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
   const r5 = { res, fresh };
@@ -1021,6 +1038,15 @@ export async function doReopen() {
     } catch (e) { A.toast(cloudTransitionMessage('REOPEN preflight', e), 'block'); return; }
   }
   const np = nextP(S.period);
+  // v1.14.85 (audit AUD-03): the next period's status is read from the cloud itself, not from this device's cache
+  if (A.cloudOn() && A.cloudMeta) {
+    let nm;
+    try { nm = await A.cloudMeta(np); } catch (e) { A.toast(`Không thể mở lại ${S.period}: không đọc được trạng thái kỳ kế tiếp ${np} trên cloud (${e.message || e}). Thử lại khi có kết nối.`, 'block'); return; }
+    if (nm && nm.summary && nm.summary.closed) {
+      A.toast(`Không thể mở lại ${S.period}: kỳ kế tiếp ${np} đã ĐÓNG trên cloud và đang phụ thuộc số dư cuối kỳ này. Mở lại ${np} trước, sau đó mới mở lại ${S.period}.`, 'block');
+      return;
+    }
+  }
   const nd = await A.loadPeriodData(np).catch(() => null);
   if (nd && nd.closed && nd.closed.period === np) {
     A.toast(`Không thể mở lại ${S.period}: kỳ kế tiếp ${np} đã ĐÓNG và đang phụ thuộc số dư cuối kỳ này. Mở lại ${np} trước, sau đó mới mở lại ${S.period}.`, 'block');

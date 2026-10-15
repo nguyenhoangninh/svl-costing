@@ -14,7 +14,8 @@ export function install(api) { A = api; }
 export const DASH_BLOBS = ['dashPlan'];
 
 const F = { period: '', cust: '', prod: '', detail: false };   // filters of the open period
-const HIST = new Map();                          // other periods → their STEP 5 result (null when none on this device)
+const HIST = new Map();
+const PREVSRC = { period: '', source: '', verified: false, rev: null, error: '', offline: false }; // where the previous-period comparison came from                          // other periods → their STEP 5 result (null when none on this device)
 let loading = '';
 
 const esc = (v) => A.esc(v);
@@ -176,12 +177,25 @@ async function loadHistory(period, el) {
     for (const p of todo) {
       let r = null;
       // STEP 5 of the period on this device; the previous period is also looked up on the cloud when this device has nothing
-      try { r = A.loadStep5 ? await A.loadStep5(p) : null; } catch { r = null; }
-      if (!(r && r.period === p) && p === prev && A.loadPeriodData) { try { const d = await A.loadPeriodData(p); r = d && d.step5; } catch { r = null; } }
+      if (p === prev && A.readPeriod) {
+        // v1.14.85 (audit NEW-05): the comparison period is read as the cloud holds it now (verified), not from a stale cache
+        try { const rv = await A.readPeriod(p, ['step5']); r = rv.d && rv.d.step5; PREVSRC.period = p; PREVSRC.source = rv.source; PREVSRC.verified = !!rv.verified; PREVSRC.rev = rv.rev ?? null; PREVSRC.error = rv.error || ''; PREVSRC.offline = !!rv.offline; } catch (e) { r = null; PREVSRC.period = p; PREVSRC.verified = false; PREVSRC.error = (e && e.message) || String(e); }
+      } else {
+        try { r = A.loadStep5 ? await A.loadStep5(p) : null; } catch { r = null; }
+      }
       HIST.set(p, r && r.period === p ? r : null);
     }
   } finally { loading = ''; }
   if (el.isConnected && A.S.period === period) view(el);
+}
+
+/** Where the previous-period comparison came from (v1.14.85, NEW-05). */
+function prevSrcNote() {
+  const p = PREVSRC.period;
+  if (PREVSRC.offline) return `So sánh với kỳ ${p}: dữ liệu trên máy này (chưa đăng nhập cloud nên không xác minh).`;
+  if (!PREVSRC.verified) return `So sánh với kỳ ${p}: KHÔNG xác minh được trên cloud (${PREVSRC.error || 'không đọc được'}) – số so sánh có thể đã cũ.`;
+  if (PREVSRC.rev === null) return `So sánh với kỳ ${p}: dữ liệu trên máy này (kỳ chưa có trên cloud).`;
+  return `So sánh với kỳ ${p}: đã xác minh với cloud revision ${PREVSRC.rev}${PREVSRC.source === 'CLOUD' ? ' (tải từ cloud vì bản trên máy cũ hơn)' : ''}.`;
 }
 
 /** Totals of a STEP 5 result under the current filter. */
@@ -189,7 +203,7 @@ const totalsOf = (res) => { const pl = res ? customerPL(filterRes(res, F)) : nul
 
 export function view(el) {
   const S = A.S; const D5 = A.derived().d5; const res0 = D5 ? D5.res : null;
-  if (F.period !== S.period) { F.period = S.period; F.cust = ''; F.prod = ''; HIST.clear(); }
+  if (F.period !== S.period) { F.period = S.period; F.cust = ''; F.prod = ''; HIST.clear(); Object.assign(PREVSRC, { period: '', source: '', verified: false, rev: null, error: '', offline: false }); }
   const full = customerPL(res0);
   const head = (right) => `<header class="ph dx-head"><div><h1>Dashboard điều hành · Doanh thu & lãi gộp</h1><p class="lead">Kỳ ${esc(S.period)} · theo khách hàng và sản phẩm · lấy từ STEP 5 (FIFO COGS). Lãi gộp = doanh thu thuần − giá vốn; chưa trừ dự phòng TK 2294 (màn 5P).</p></div>${right || ''}</header>`;
   if (!full) {
@@ -348,6 +362,7 @@ export function view(el) {
         <p class="muted dash-legend"><span><i class="dx-k-cur"></i>Doanh thu thuần ${yy}</span><span><i class="dx-k-last"></i>Năm ${yy - 1}</span><span><i class="dash-gp"></i>Lãi gộp (kỳ đã có STEP 5)</span></p>
         <div class="dash-scroll">${chartTrend(pts, mm)}</div>
         <p class="muted dx-note">Doanh thu các tháng lấy từ Sales / Returns Database; tháng ${esc(S.period)} lấy từ STEP 5. Lãi gộp có ở ${gpMonths} tháng (kỳ đã chạy STEP 5 trên máy này)${loading ? ' · đang tải dữ liệu các kỳ trước…' : ''}.</p>
+        ${PREVSRC.period ? `<p class="muted dx-note${PREVSRC.verified || PREVSRC.offline ? '' : ' dx-warn'}">${prevSrcNote()}</p>` : ''}
       </section>
       <section class="card dx-card dx-plan-card"><div class="dx-ch"><h2>Mức đạt kế hoạch</h2></div>${planBox}</section>
     </div>
