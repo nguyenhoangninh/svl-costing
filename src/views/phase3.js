@@ -9,6 +9,7 @@ import * as P2 from './phase2.js';
 import * as FGP from './fgprod.js';
 import { splitBooks, bookOf } from '../engine/revenue.js';
 import { num, ttxt, utxt, txt, nowISO, prevPeriod, serialToISO, fpRows } from '../engine/util.js';
+import { consFgPendingCount } from '../engine/step2.js';
 import { currentNrvDecision, validateNrvInput, buildNrvDecision, nrvSaveAuditText, nrvUndoAuditText } from '../engine/nrvdecision.js';
 
 let A = null;
@@ -273,14 +274,16 @@ function step5Controls(S, x) {
   add('10', `Lô cuối kỳ giá vốn > NRV (giá bán − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% CPBH)`, R(16).expected, R(16).result, R(16).status, res && res.totals && res.totals.nrvProv ? `Dự phòng giảm giá đề xuất (TK 2294): ${A.fmtNum(res.totals.nrvProv)} VND – xem STEP 5.2 → Tồn cuối` : 'Review NRV (sau dự phòng)');
   if (res && res.stats && res.stats.returns) add('10b', 'Hàng bán bị trả lại nhập lại kho', 'INFO', res.stats.returns, 'INFO', `${A.fmtNum(res.totals.retQ)} sp · ${A.fmtNum(res.totals.retA)} VND giảm giá vốn (theo giá vốn hoá đơn gốc)`);
   const reg = d.register ? d.register.rows : [];
-  const stale = reg.some((r) => (r.active === 'Y' && utxt(r.fifoStatus) === 'NOT RUN') || utxt(r.fifoStatus).startsWith('RERUN'));
+  // tiêu dùng nội bộ (2B) chưa tính giá (NOT COSTED) cũng khiến 5B lệch cho tới khi chạy RUN FIFO
+  const stale = reg.some((r) => (r.active === 'Y' && utxt(r.fifoStatus) === 'NOT RUN') || utxt(r.fifoStatus).startsWith('RERUN')) || consFgPendingCount(reg) > 0;
   const rw = res && res.rework ? res.rework : null;
-  const srcQ = sumOf(reg, 'issueQty'), fifoQ = rw ? rw.fifoQty : 0, fifoC = rw ? rw.fifoCost : 0;
+  const srcQ = F5.reworkSourceQty(reg), fifoQ = rw ? rw.fifoQty : 0, fifoC = rw ? rw.fifoCost : 0;
   const bf = reg.filter((r) => r.active === 'B/F').reduce((a, r) => a + num(r.bfCost), 0);
   const rwOut = sumOf(reg, 'writeOff') + sumOf(reg, 'returnedFG');
   const e12 = fifoC + bf, f12 = sumOf(reg, 'closingWIP') + sumOf(reg, 'carryIn') + rwOut;
   const comp = sumOf(reg, 'carryIn'), stepCarry = fl ? fl.totals.carryIn : 0;
-  add('11', '5B · SL rework = SL chuyển FIFO', srcQ, fifoQ, stale ? 'RERUN FIFO' : Math.abs(fifoQ - srcQ) <= 0.000001 ? 'PASS' : 'CHECK', 'Sổ rework ↔ FIFO rework');
+  add('11', '5B · SL rework = SL chuyển FIFO', srcQ, fifoQ, stale ? 'RERUN FIFO' : Math.abs(fifoQ - srcQ) <= 0.000001 ? 'PASS' : 'CHECK', 'Sổ rework (không gồm tiêu dùng nội bộ) ↔ FIFO rework');
+  if (rw && rw.consRows) add('11b', '5B · Tiêu dùng nội bộ (2B) – không qua FIFO rework', 'INFO', rw.consQty, 'INFO', 'Nợ 632 / Có 155 (JE07B) · tính ở STEP 5.2, không qua FIFO rework');
   add('12', '5B · FIFO + B/F = WIP rework cuối + chuyển vào', e12, f12, stale ? 'RERUN FIFO' : Math.abs(f12 - e12) <= 1 ? 'PASS' : 'CHECK', 'Không mất giá trị rework');
   add('13', '5B · Rework hoàn thành = chuyển vào STEP 4', comp, stepCarry, stale ? 'RERUN FIFO' : Math.abs(stepCarry - comp) <= 1 ? 'PASS' : 'CHECK', 'Giá trị lô rework vào STEP 4');
   { const ageN = num((d.rwCfg && d.rwCfg.agingMonths) || 3); const mb = (x) => (/^\d{4}-\d{2}$/.test(x) ? (+S.period.slice(0, 4) - +x.slice(0, 4)) * 12 + (+S.period.slice(5) - +x.slice(5)) : 0);
