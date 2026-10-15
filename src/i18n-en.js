@@ -761,6 +761,8 @@ export const EN = {
 "Tất cả dòng lặp là trùng – loại": "All repeated lines are duplicates – exclude",
 "Tất cả rule": "All rules",
 "Tất cả trạng thái": "All statuses",
+"Tất cả báo cáo": "All reports",
+"Lọc theo báo cáo": "Filter by report",
 "Tồn FG cuối kỳ ({#})": "Closing FG stock ({#})",
 "Tồn FG cuối kỳ: {#} (dòng chưa có Cost month) ↔ STEP {#} FG cuối kỳ": "Closing FG stock: {#} (lines without a Cost month) ↔ STEP {#} closing FG",
 "Tồn FG đầu kỳ ({#})": "Opening FG stock ({#})",

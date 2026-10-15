@@ -819,8 +819,8 @@ VIEWS.step1 = (el) => {
   const dqCols = () => DQ.DQ_FIELDS.map((f, i) => ({ key: f, label: DQ.DQ_HEADERS[i], type: f === 'row' ? 'int' : f === 'qty' ? 'qty' : f === 'amt' ? 'num' : f === 'type' ? 'status' : 'text', width: f === 'name' ? 280 : f === 'type' ? 120 : f === 'doc' ? 150 : 110 }));
   if (c.dq && c.dq.lines.length) {
     const zero = c.dq.lines.filter((l) => l.type === 'ZERO COST'), neg = c.dq.lines.filter((l) => l.type !== 'ZERO COST');
-    if (zero.length && $('#t-dq-zero')) mountTable($('#t-dq-zero'), { columns: dqCols(), rows: zero, filterKey: 'type', height: 300, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_SL_KHAC0_TOTAL_COST_0', dqCols()) });
-    if (neg.length && $('#t-dq-neg')) mountTable($('#t-dq-neg'), { columns: dqCols(), rows: neg, filterKey: 'type', height: 300, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_AM_HOAC_SAI_KIEU', dqCols()) });
+    if (zero.length && $('#t-dq-zero')) mountTable($('#t-dq-zero'), { columns: dqCols(), rows: zero, filterKey: 'report', filterLabel: 'Tất cả báo cáo', filterAria: 'Lọc theo báo cáo', height: 300, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_SL_KHAC0_TOTAL_COST_0', dqCols()) });
+    if (neg.length && $('#t-dq-neg')) mountTable($('#t-dq-neg'), { columns: dqCols(), rows: neg, filterKey: 'report', filterLabel: 'Tất cả báo cáo', filterAria: 'Lọc theo báo cáo', height: 300, totals: ['qty'], onExport: exportTable('01_DU_LIEU_ERP_AM_HOAC_SAI_KIEU', dqCols()) });
   }
   const handle = (files) => importERP([...files]);
   $('#f-files').addEventListener('change', (e) => handle(e.target.files));
@@ -854,7 +854,7 @@ async function importERP(files) {
         audit(`${prior ? 'REPLACE' : 'NEW'} ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${ds.status} · ${ds.dataRows} dòng`);
         if (ds.warnings) {
           const w = ds.warnings, shown = w.zeroCostMaterials.slice(0, 40).join(', ') + (w.zeroCostMaterials.length > 40 ? `… (+${w.zeroCostMaterials.length - 40} mã)` : '');
-          warns.push(ds.erp === 'S' ? `${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 – chỉ thông tin: PC-M-S không dùng trong giá thành (hệ S không có lô PC).` : `${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 (${w.zeroCostMaterials.length} vật tư: ${shown}). Xem và xác nhận ở mục "Dữ liệu ERP bất thường" bên dưới.`);
+          warns.push(`${ds.fileName}: ${w.zeroCostLines} dòng SL ≠ 0 nhưng Total Cost = 0 (${w.zeroCostMaterials.length} vật tư: ${shown}). Xem và xác nhận ở mục "Dữ liệu ERP bất thường" bên dưới.`);
           audit(`WARN ${ds.erp} / ${ds.report}`, `${ds.fileName} · ${w.zeroCostLines} dòng Total Cost = 0 · ${w.zeroCostMaterials.length} vật tư`);
         }
       } catch (e) {
