@@ -61,6 +61,7 @@ if (await page.locator('#nrv-undo').count()) {
   await page.selectOption('#f-nrv-decision select[name=status]', 'RECORDED'); await page.fill('#f-nrv-decision input[name=ref]', 'JV-E2E-1');
   await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: ghi nhận dự phòng'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(400);
   console.log('NRV after RECORDED:', (await txt('main')).match(/NRV: [A-Z ]+/)?.[0]);
+  await page.click('details.nrv-change > summary'); // v1.14.74: the change form sits behind "Thay đổi quyết định"
   await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
   await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: thay thế quyết định'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(400);
   console.log('NRV after replace:', (await txt('main')).match(/NRV: [A-Z ]+/)?.[0]);

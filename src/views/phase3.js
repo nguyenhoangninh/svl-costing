@@ -777,10 +777,14 @@ function refreshFgRef(S) {
 export function nrvDecisionHTML(S, res, closed) {
   const amt = num(res.totals && res.totals.nrvProv), key = nrvKey(res);
   const d = currentNrvDecision(S.d.nrvDecision, key), current = !!d;
-  const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · yêu cầu ${A.fmtNum(d.amount)} VND${utxt(d.status) === 'RECORDED' ? ' · đã ghi ' + A.fmtNum(num(d.recordedAmount ?? d.amount)) + ' VND' : ''} · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
+  // v1.14.74: compact — one summary line; when a decision exists the form sits behind "Thay đổi quyết định"
+  const summary = current
+    ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b>${utxt(d.status) === 'RECORDED' ? ' · đã ghi ' + A.fmtNum(num(d.recordedAmount ?? d.amount)) + ' VND' : ''} · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}${d.note ? `<br><span class="muted">${esc(d.note)}</span>` : ''}</div>`
+    : `<div class="alert review"><b>Chưa có quyết định NRV.</b> Cần quyết định trước khi CLOSE MONTH; quyết định cũ hết hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
   if (closed || !A.canEdit()) return summary;
-  const undo = current ? '<div class="row"><button class="btn danger ghost" type="button" id="nrv-undo">Hoàn tác quyết định NRV</button></div>' : '';
-  return summary + undo + `<form id="f-nrv-decision" class="inline"><label>Quyết định NRV <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Tham chiếu kế toán<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
+  const form = `<form id="f-nrv-decision" class="inline"><label>Quyết định NRV <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Tham chiếu kế toán<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:220px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
+  if (!current) return summary + form;
+  return summary + `<div class="row"><button class="btn danger ghost sm" type="button" id="nrv-undo">Hoàn tác quyết định NRV</button></div><details class="nrv-change"><summary>Thay đổi quyết định</summary>${form}</details>`;
 }
 /** NRV decision block (v1.14.73: shown in 5P). Call after the HTML from nrvDecisionHTML is in el. */
 export function mountNrvDecision(el, S, res) {

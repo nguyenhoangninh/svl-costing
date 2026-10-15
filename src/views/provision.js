@@ -99,13 +99,16 @@ const MAIN_TOTALS = ['qtyIn', 'qtyRem', 'open', 'restore', 'relSale', 'relCons',
 const REWORK_COLS = [...LAYER_BASE, { key: 'relRw', label: 'Chuyển rework (chờ, không ghi sổ)', type: 'num', width: 210 }];
 
 function openingText(src, op) {
-  if (!src) return 'Chưa có số dư đầu kỳ. Nếu kỳ trước đã có số liệu trên hệ thống, bấm <b>Chuyển từ kỳ trước</b>; nếu không, nạp template PROVISION_OPENING (mỗi dòng phải khớp đúng một lớp FG đầu kỳ).';
-  const onLayers = A.fmtNum(layerSum(op));
-  if (src.kind === 'FILE') return `File ${esc(src.file)} · ${src.count} dòng · tổng ${A.fmtNum(src.sum)} VND = sổ cái ${A.fmtNum(src.glBalance)} · trên lớp FG ${onLayers} · nạp ${A.fmtTs(src.at)}`;
-  if (src.legacy) return `Chuyển cùng FG đầu kỳ (roll forward từ kỳ trước) · trên lớp FG ${onLayers} VND.`;
-  return `Chuyển từ số dư cuối kỳ ${esc(src.from)} · ${src.count} lớp · ${A.fmtNum(src.sum)} VND · trên lớp FG ${onLayers} · ${src.at ? A.fmtTs(src.at) : ''}`;
+  if (!src) return Math.abs(layerSum(op)) > 1
+    ? `Có sẵn ${A.fmtNum(layerSum(op))} VND trên lớp FG đầu kỳ, chưa xác nhận nguồn. Chuyển từ kỳ trước hoặc nạp template.`
+    : 'Chưa có. Chuyển từ kỳ trước (nếu đã có số liệu) hoặc nạp template PROVISION_OPENING.';
+  if (src.kind === 'FILE') return `File ${esc(src.file)} · ${src.count} dòng · ${A.fmtNum(src.sum)} VND = sổ cái ${A.fmtNum(src.glBalance)} · ${A.fmtTs(src.at)}`;
+  if (src.legacy) return `Chuyển cùng FG đầu kỳ (roll forward) · ${A.fmtNum(layerSum(op))} VND`;
+  return `Chuyển từ cuối kỳ ${esc(src.from)} · ${src.count} lớp · ${A.fmtNum(src.sum)} VND`;
 }
+const tabsHTML = (cur, tabs) => `<div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" role="tab" class="tab ${id === cur ? 'on' : ''}" data-tabp="${id}" aria-selected="${id === cur}">${esc(label)}</button>`).join('')}</div>`;
 
+// v1.14.74: compact layout — one equation strip, opening and NRV side by side, details in tabs
 export function view(el) {
   const S = A.S; const D5 = A.derived().d5; const res = D5 ? D5.res : null; const op = S.d.fgOpen;
   const closed = S.d.closed && S.d.closed.period === S.period;
@@ -116,64 +119,73 @@ export function view(el) {
   const carryDiff = src && src.kind === 'CARRY' && !src.legacy ? layerSum(op) - num(src.expected) : 0;
   const edit = A.canEdit() && !closed;
   const nrvBlock = res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1;
+  const pending = nrvPending(S, res);
+  const tab = ['move', 'je', 'layers', 'rw'].includes(S.tabP) ? S.tabP : 'move';
+  const opx = (x) => `<i class="op" aria-hidden="true">${x}</i>`;
   const mvRow = (label, v, cls = '', note = '') => `<tr class="${cls}"><td>${label}</td><td class="r">${A.fmtNum(v)}</td><td class="muted">${note}</td></tr>`;
 
+  const strip = res ? `<div class="kpi-groups"><section class="kpi-group"><h3>TK ${PROV.PROV_ACC} · kỳ ${esc(S.period)}</h3><div class="kpis kpi-flow">
+      ${A.kpi('Đầu kỳ', mv.open, false, { tone: 'base', sub: src ? (src.kind === 'FILE' ? 'Theo file upload' : 'Chuyển từ kỳ trước') : 'Chưa xác nhận nguồn' })}${opx('+')}
+      ${A.kpi('Tăng (NRV duyệt)', mv.increase, false, { tone: 'in', sub: pending ? `Chờ quyết định · đề xuất ${A.fmtNum(mv.nrvProposed)}` : `Đề xuất ${A.fmtNum(mv.nrvProposed)}` })}${opx('−')}
+      ${A.kpi('Giảm (hoàn nhập)', mv.decrease, false, { tone: 'out', sub: 'Bán + tiêu dùng − trả hàng' })}${opx('=')}
+      ${A.kpi('Cuối kỳ', mv.closeBooks, true, { tone: 'res', sub: mv.ok ? (Math.abs(mv.rework) > 0.5 ? `<i class="ok">✓</i> gồm rework ${A.fmtNum(mv.rework)}` : '<i class="ok">✓ khớp theo lớp</i> · sang kỳ sau') : `<i class="warn">Lệch ${A.fmtNum(mv.check)}</i>` })}
+    </div></section></div>` : '';
+
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>Dự phòng FG · TK ${PROV.PROV_ACC}</h1><p class="lead">Số dư cuối kỳ = đầu kỳ + tăng (NRV được duyệt trong kỳ) − giảm (hoàn nhập theo sản phẩm bán ra và tiêu dùng nội bộ, trừ hàng bán trả lại). Số dư cuối kỳ chuyển sang đầu kỳ sau. Dự phòng đi theo hàng chuyển rework được tách riêng và chưa ghi sổ.</p></div>
+    <header class="ph"><div><h1>Dự phòng FG · TK ${PROV.PROV_ACC}</h1><p class="lead">Cuối kỳ = đầu kỳ + tăng (NRV duyệt) − giảm (hoàn nhập khi bán, tiêu dùng, trừ trả hàng); chuyển sang đầu kỳ sau. Rework tách riêng, chưa ghi sổ.</p></div>
       <div class="result"><span>Trạng thái</span>${A.pill(railStatus(S, D5))}<small>${src ? (src.kind === 'FILE' ? esc(src.file) : 'Chuyển từ kỳ trước') : 'Chưa có dự phòng đầu kỳ'}</small></div></header>
     ${closed ? `<div class="alert pass">Kỳ ${esc(S.period)} đã đóng – chỉ xem.</div>` : ''}
     ${res && D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>Kết quả FIFO đã cũ:</b> ${esc(D5.stale)}. Chạy lại RUN FIFO COGS (5.2) trước khi dùng số dự phòng.</div>` : ''}
     ${src && op && !String(op.status).startsWith('VALIDATED') ? `<div class="alert review">Dự phòng đầu kỳ đã có nhưng FG đầu kỳ chưa validate lại. Vào <a href="#fgopen">5.1 FG đầu kỳ</a> → Validate, rồi chạy lại FIFO (5.2).</div>` : ''}
     ${Math.abs(carryDiff) > 1 ? `<div class="alert review"><b>Đầu kỳ khác số dư cuối kỳ ${esc(src.from)}:</b> chênh ${A.fmtNum(carryDiff)} VND. Bấm Chuyển từ kỳ trước để lấy lại.</div>` : ''}
-
-    <h2>1 · Số dư đầu kỳ</h2>
-    ${edit ? `<div class="row">
-      <button class="btn ghost" type="button" id="prov-carry">Chuyển từ kỳ trước (${esc(prevPeriod(S.period))})</button>
-      <label class="btn ghost">Nạp dự phòng đầu kỳ (template)…<input type="file" id="f-provopen" accept=".xlsx,.xlsm,.xls" hidden></label>
-      <a class="btn ghost" href="#fgopen">Mở FG đầu kỳ (5.1)</a>
-    </div>` : ''}
-    <p class="muted">${openingText(src, op)}</p>
-
-    <h2>2 · Tăng · Quyết định NRV trong kỳ</h2>
-    ${res ? (nrvBlock
-    ? `<p class="muted">NRV đề xuất từ FIFO (5.2): ${A.fmtNum(res.totals.nrvProv)} VND (+ trích lập / − hoàn nhập). Chỉ quyết định <b>RECORDED</b> mới làm tăng dự phòng; số đã ghi FAST được phân bổ xuống từng lớp theo tỷ lệ đề xuất. <b>NO ADJUSTMENT APPROVED</b> = không thay đổi.</p>${P3.nrvDecisionHTML(S, res, closed)}`
-    : '<p class="muted">Kỳ này không có NRV đề xuất (không lớp FG cuối kỳ nào có giá vốn sau dự phòng cao hơn NRV).</p>')
-    : A.emptyNote('Chưa chạy FIFO COGS (5.2).')}
-
-    <h2>3 · Biến động TK ${PROV.PROV_ACC}</h2>
-    ${res ? `
-      ${mv.ok ? '' : `<div class="alert review"><b>Dự phòng chưa khớp:</b> chênh lệch ${A.fmtNum(mv.check || c.trk.check)} VND giữa đầu kỳ + biến động và số dư theo lớp.</div>`}
-      ${Math.abs(num(c.approved.unallocated)) > 1 ? `<div class="alert review">NRV đã ghi ${A.fmtNum(c.approved.unallocated)} VND nhưng kỳ này không có NRV đề xuất để phân bổ xuống lớp. Kiểm tra lại quyết định NRV.</div>` : ''}
-      <div class="kpis">${A.kpi('Đầu kỳ', mv.open, true)}${A.kpi('Tăng (NRV duyệt)', mv.increase, true)}${A.kpi('Giảm (hoàn nhập)', mv.decrease, true)}${A.kpi('Cuối kỳ', mv.closeBooks, true)}</div>
-      <table class="cp"><thead><tr><th>Chỉ tiêu</th><th class="r">VND</th><th>Ghi chú</th></tr></thead><tbody>
-        ${mvRow('Số dư đầu kỳ', mv.open, '', src ? (src.kind === 'FILE' ? 'Theo file upload' : 'Chuyển từ cuối kỳ trước') : Math.abs(mv.open) > 1 ? 'Có sẵn trên lớp FG đầu kỳ, chưa xác nhận nguồn (upload hoặc chuyển từ kỳ trước)' : 'Chưa có')}
-        ${mvRow('(+) Tăng: NRV được duyệt trong kỳ', mv.increase, '', nrvPending(S, res) ? `Chưa có quyết định – đề xuất ${A.fmtNum(mv.nrvProposed)}` : `Đề xuất ${A.fmtNum(mv.nrvProposed)}`)}
-        ${mvRow('(−) Giảm: hoàn nhập dự phòng', mv.decrease, 'strong', '= bán + tiêu dùng − trả hàng')}
-        ${mvRow('&nbsp;&nbsp;· Hoàn nhập theo sản phẩm bán ra', mv.relSale, 'muted')}
-        ${mvRow('&nbsp;&nbsp;· Hoàn nhập theo tiêu dùng nội bộ', mv.relCons, 'muted')}
-        ${mvRow('&nbsp;&nbsp;· Trừ: hàng bán bị trả lại (phục hồi)', -mv.restore, 'muted')}
-        ${mvRow('<b>Số dư cuối kỳ</b> = đầu + tăng − giảm', mv.closeBooks, 'strong', 'Chuyển sang đầu kỳ sau')}
-        ${mvRow('&nbsp;&nbsp;Trong đó: trên lớp FG cuối kỳ', mv.closeLayers, 'muted')}
-        ${mvRow('&nbsp;&nbsp;Trong đó: đi theo hàng chuyển rework (mục 4)', mv.rework, 'muted', 'Chưa ghi sổ')}
-      </tbody></table>
-      <h3>Bút toán FAST (TK ${PROV.PROV_ACC} / ${PROV.PROV_COST_ACC})</h3>
-      <table class="cp"><thead><tr><th>Mã</th><th>Diễn giải</th><th>Nợ</th><th>Có</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>${jr.lines.map((l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.desc)}</td><td>${esc(l.dr)}</td><td>${esc(l.cr)}</td><td class="r">${A.fmtNum(l.amount)}</td></tr>`).join('')}</tbody></table>
-      <h3>Theo dõi theo lớp</h3><div id="t-prov"></div>`
-    : A.emptyNote('Chưa chạy FIFO COGS (5.2). Số dự phòng hiển thị sau khi chạy.')}
-
-    <h2>4 · Chuyển rework — tách riêng, chưa ghi sổ</h2>
-    ${res ? `
-      <p class="muted">Dự phòng đi theo số lượng FG chuyển sang rework (5B). Không tính vào hoàn nhập khi bán hay tiêu dùng, và chưa có trong bút toán FAST cho đến khi kế toán quyết định cách ghi.</p>
-      <div class="kpis">${A.kpi('Chuyển rework (chờ)', tt.relRw, true)}</div>
-      <table class="cp"><thead><tr><th>Mã</th><th>Diễn giải</th><th>Nợ</th><th>Có</th><th class="r">Số tiền (VND)</th></tr></thead><tbody><tr class="muted"><td>${esc(jr.pending.code)}</td><td>${esc(jr.pending.desc)}</td><td></td><td></td><td class="r">${A.fmtNum(jr.pending.amount)}</td></tr></tbody></table>
-      <div id="t-rw"></div>`
-    : A.emptyNote('Chưa chạy FIFO COGS (5.2).')}
+    ${c && Math.abs(num(c.approved.unallocated)) > 1 ? `<div class="alert review">NRV đã ghi ${A.fmtNum(c.approved.unallocated)} VND nhưng kỳ này không có NRV đề xuất để phân bổ xuống lớp. Kiểm tra lại quyết định NRV.</div>` : ''}
+    ${strip}
+    <div class="grid2">
+      <div><h2>1 · Đầu kỳ</h2>
+        <p class="muted">${openingText(src, op)}</p>
+        ${edit ? `<div class="row">
+          <button class="btn ghost sm" type="button" id="prov-carry">Chuyển từ kỳ trước (${esc(prevPeriod(S.period))})</button>
+          <label class="btn ghost sm">Nạp template…<input type="file" id="f-provopen" accept=".xlsx,.xlsm,.xls" hidden></label>
+          <a class="btn ghost sm" href="#fgopen">FG đầu kỳ (5.1)</a>
+        </div>` : ''}
+      </div>
+      <div><h2>2 · Tăng · NRV</h2>
+        ${res ? (nrvBlock
+    ? `<p class="muted">Đề xuất ${A.fmtNum(res.totals.nrvProv)} VND (+ trích / − hoàn). Chỉ RECORDED làm tăng; số ghi FAST chia xuống lớp theo tỷ lệ đề xuất.</p>${P3.nrvDecisionHTML(S, res, closed)}`
+    : '<p class="muted">Kỳ này không có NRV đề xuất.</p>')
+    : '<p class="muted">Chưa chạy FIFO COGS (5.2).</p>'}
+      </div>
+    </div>
+    ${res ? `<h2>3 · Chi tiết</h2>
+      ${tabsHTML(tab, [['move', 'Biến động'], ['je', 'Bút toán FAST'], ['layers', `Theo lớp (${c.trk.rows.length})`], ['rw', `Rework · chờ (${reworkRows.length})`]])}
+      <div id="tp"></div>` : A.emptyNote('Chưa chạy FIFO COGS (5.2). Số dự phòng hiển thị sau khi chạy.')}
   </section>`;
 
   const fi = el.querySelector('#f-provopen'); if (fi) fi.addEventListener('change', (e) => importProvFile(e.target.files[0]));
   const cb = el.querySelector('#prov-carry'); if (cb) cb.addEventListener('click', carryFromPrev);
   if (!res) return;
   if (nrvBlock) P3.mountNrvDecision(el, S, res);
-  A.mountTable(el.querySelector('#t-prov'), { columns: MAIN_COLS, rows: c.trk.rows, filterKey: 'source', height: 520, totals: MAIN_TOTALS, onExport: A.exportTable('06_PROVISION_TRACK', MAIN_COLS) });
-  A.mountTable(el.querySelector('#t-rw'), { columns: REWORK_COLS, rows: reworkRows, filterKey: 'source', height: 360, totals: ['qtyIn', 'qtyRem', 'relRw'], onExport: A.exportTable('06_PROVISION_REWORK', REWORK_COLS) });
+  el.querySelectorAll('[data-tabp]').forEach((b) => b.addEventListener('click', () => { S.tabP = b.dataset.tabp; A.render(); }));
+  const box = el.querySelector('#tp');
+  if (tab === 'move') {
+    box.innerHTML = `<table class="cp"><thead><tr><th>Chỉ tiêu</th><th class="r">VND</th><th>Ghi chú</th></tr></thead><tbody>
+      ${mvRow('Số dư đầu kỳ', mv.open, '', src ? (src.kind === 'FILE' ? 'Theo file upload' : 'Chuyển từ cuối kỳ trước') : 'Chưa xác nhận nguồn')}
+      ${mvRow('(+) Tăng: NRV được duyệt trong kỳ', mv.increase, '', pending ? `Chưa có quyết định – đề xuất ${A.fmtNum(mv.nrvProposed)}` : `Đề xuất ${A.fmtNum(mv.nrvProposed)}`)}
+      ${mvRow('(−) Giảm: hoàn nhập dự phòng', mv.decrease, '', '= bán + tiêu dùng − trả hàng')}
+      ${mvRow('&nbsp;&nbsp;· Hoàn nhập theo sản phẩm bán ra', mv.relSale, 'muted')}
+      ${mvRow('&nbsp;&nbsp;· Hoàn nhập theo tiêu dùng nội bộ', mv.relCons, 'muted')}
+      ${mvRow('&nbsp;&nbsp;· Trừ: hàng bán bị trả lại (phục hồi)', -mv.restore, 'muted')}
+      ${mvRow('<b>Số dư cuối kỳ</b> = đầu + tăng − giảm', mv.closeBooks, '', 'Chuyển sang đầu kỳ sau')}
+      ${mvRow('&nbsp;&nbsp;Trong đó: trên lớp FG cuối kỳ', mv.closeLayers, 'muted')}
+      ${mvRow('&nbsp;&nbsp;Trong đó: đi theo hàng chuyển rework', mv.rework, 'muted', 'Chưa ghi sổ')}
+    </tbody></table>`;
+  } else if (tab === 'je') {
+    box.innerHTML = `<table class="cp"><thead><tr><th>Mã</th><th>Diễn giải</th><th>Nợ</th><th>Có</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>${jr.lines.map((l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.desc)}</td><td>${esc(l.dr)}</td><td>${esc(l.cr)}</td><td class="r">${A.fmtNum(l.amount)}</td></tr>`).join('')}
+      <tr class="muted"><td>${esc(jr.pending.code)}</td><td>${esc(jr.pending.desc)}</td><td></td><td></td><td class="r">${A.fmtNum(jr.pending.amount)}</td></tr></tbody></table>`;
+  } else if (tab === 'layers') {
+    A.mountTable(box, { columns: MAIN_COLS, rows: c.trk.rows, filterKey: 'source', height: 520, totals: MAIN_TOTALS, onExport: A.exportTable('06_PROVISION_TRACK', MAIN_COLS) });
+  } else {
+    box.innerHTML = `<p class="muted">Dự phòng đi theo FG chuyển sang rework (5B): không tính vào hoàn nhập, chưa có trong bút toán FAST cho đến khi kế toán quyết định. Tổng chờ: <b>${A.fmtNum(tt.relRw)}</b> VND.</p><div id="t-rw"></div>`;
+    A.mountTable(box.querySelector('#t-rw'), { columns: REWORK_COLS, rows: reworkRows, filterKey: 'source', height: 360, totals: ['qtyIn', 'qtyRem', 'relRw'], onExport: A.exportTable('06_PROVISION_REWORK', REWORK_COLS) });
+  }
 }

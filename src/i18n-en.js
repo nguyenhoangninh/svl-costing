@@ -15,6 +15,31 @@ export const EN = {
 "NRV RECORDED cần tham chiếu kế toán / số bút toán (Journal No.).": "NRV RECORDED needs an accounting reference or journal number (Journal No.).",
 "Điền tham chiếu kế toán, ngày ghi sổ, người ghi sau khi đã hạch toán trên FAST.": "Fill in the accounting reference, posting date and the person who posted it after booking in FAST.",
 "DIRECT_632 chỉ là đề xuất hạch toán – không vào PC-P hay WIP Allocation. Điền tham chiếu kế toán, ngày ghi sổ, người ghi sau khi đã hạch toán trên FAST.": "DIRECT_632 is only a posting proposal – it does not enter PC-P or WIP Allocation. Fill in the accounting reference, posting date and the person who posted it after booking in FAST.",
+// v1.14.74: 5P compact layout (equation strip, opening and NRV side by side, detail tabs)
+"Cuối kỳ = đầu kỳ + tăng (NRV duyệt) − giảm (hoàn nhập khi bán, tiêu dùng, trừ trả hàng); chuyển sang đầu kỳ sau. Rework tách riêng, chưa ghi sổ.": "Closing = opening + increase (NRV approved) − decrease (release on sales and internal use, net of returns); carried to next period's opening. Rework kept apart, not posted.",
+"TK {#} · kỳ {#}": "TK {#} · period {#}",
+"Chưa xác nhận nguồn": "Source not confirmed",
+"Chờ quyết định · đề xuất {#}": "Awaiting decision · proposed {#}",
+"Bán + tiêu dùng − trả hàng": "Sales + internal use − returns",
+"✓ khớp theo lớp": "✓ ties to the layers",
+"· sang kỳ sau": "· to next period",
+"1 · Đầu kỳ": "1 · Opening",
+"2 · Tăng · NRV": "2 · Increase · NRV",
+"3 · Chi tiết": "3 · Details",
+"Chưa có. Chuyển từ kỳ trước (nếu đã có số liệu) hoặc nạp template PROVISION_OPENING.": "None yet. Carry from the previous period (if it has data) or load the PROVISION_OPENING template.",
+"Nạp template…": "Load template…",
+"FG đầu kỳ ({#})": "Opening FG ({#})",
+"Kỳ này không có NRV đề xuất.": "No NRV proposal this period.",
+"Chưa chạy FIFO COGS ({#}).": "FIFO COGS ({#}) has not run yet.",
+"Biến động": "Movement",
+"Bút toán FAST": "FAST entries",
+"Theo lớp ({#})": "By layer ({#})",
+"Rework · chờ ({#})": "Rework · pending ({#})",
+"Trong đó: đi theo hàng chuyển rework": "Of which: with goods moved to rework",
+"Dự phòng đi theo FG chuyển sang rework ({#}B): không tính vào hoàn nhập, chưa có trong bút toán FAST cho đến khi kế toán quyết định. Tổng chờ:": "Provision that goes with FG moved to rework ({#}B): not counted as a release, and not in the FAST entries until accounting decides. Total pending:",
+"Chưa có quyết định NRV.": "No NRV decision yet.",
+"Cần quyết định trước khi CLOSE MONTH; quyết định cũ hết hiệu lực khi số liệu STEP {#} thay đổi.": "A decision is needed before CLOSE MONTH; an earlier decision lapses when STEP {#} figures change.",
+"Thay đổi quyết định": "Change decision",
 // v1.14.73: 5P · provision roll-forward (opening + NRV approved − release = closing), carry from the previous period, NRV decision in 5P
 "Số dư cuối kỳ = đầu kỳ + tăng (NRV được duyệt trong kỳ) − giảm (hoàn nhập theo sản phẩm bán ra và tiêu dùng nội bộ, trừ hàng bán trả lại). Số dư cuối kỳ chuyển sang đầu kỳ sau. Dự phòng đi theo hàng chuyển rework được tách riêng và chưa ghi sổ.": "Closing balance = opening + increase (NRV approved in the period) − decrease (release on products sold and used internally, net of sales returns). The closing balance carries to next period's opening. Provision that goes with goods moved to rework is kept apart and not posted.",
 "Chưa có dự phòng đầu kỳ": "No opening provision",
@@ -2955,6 +2980,30 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+[
+"gồm rework {*}",
+"incl. rework {*}"
+],
+[
+"Có sẵn {*} VND trên lớp FG đầu kỳ, chưa xác nhận nguồn. Chuyển từ kỳ trước hoặc nạp template.",
+"{*} VND already on the opening FG layers, source not confirmed. Carry from the previous period or load the template."
+],
+[
+"File {*} · {*} dòng · {*} VND = sổ cái {*} · {*}",
+"File {*} · {*} lines · {*} VND = GL {*} · {*}"
+],
+[
+"Chuyển cùng FG đầu kỳ (roll forward) · {*} VND",
+"Carried with the opening FG (roll forward) · {*} VND"
+],
+[
+"Chuyển từ cuối kỳ {*} · {*} lớp · {*} VND",
+"Carried from the {*} closing · {*} layers · {*} VND"
+],
+[
+"Đề xuất {*} VND (+ trích / − hoàn). Chỉ RECORDED làm tăng; số ghi FAST chia xuống lớp theo tỷ lệ đề xuất.",
+"Proposed {*} VND (+ add / − release). Only RECORDED increases it; the FAST amount is spread over the layers in proportion to the proposal."
+],
 [
 "File {*} · {*} dòng · tổng {*} VND = sổ cái {*} · trên lớp FG {*} · nạp {*}",
 "File {*} · {*} lines · total {*} VND = GL {*} · on FG layers {*} · loaded {*}"

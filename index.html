@@ -133,6 +133,12 @@ h2 small { font-weight: 400; color: var(--muted); font-size: 13px; display: inli
 input, select { font: inherit; color: var(--ink); }
 form.inline { display: flex; gap: 10px; align-items: end; }
 form.inline input { display: block; padding: 6px 8px; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); }
+/* v1.14.74: the NRV decision form inside a half-width card (5P) wraps into a 2-column grid instead of overflowing */
+.grid2 #f-nrv-decision { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; align-items: end; margin-top: 8px; }
+.grid2 #f-nrv-decision label { min-width: 0; }
+.grid2 #f-nrv-decision input, .grid2 #f-nrv-decision select { display: block; width: 100%; min-width: 0 !important; box-sizing: border-box; padding: 6px 8px; }
+.grid2 #f-nrv-decision .btn { justify-self: start; }
+.grid2 details.nrv-change > summary { cursor: pointer; font-weight: 600; margin: 6px 0; }
 
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; line-height: 1.6; }
 .s-pass { color: var(--pass); background: var(--pass-bg); }
