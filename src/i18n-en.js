@@ -1,6 +1,9 @@
 // v1.14.59: English UI strings. Keys are the Vietnamese text as rendered (trimmed, single spaces), numbers replaced by {#}.
 // Generated from a crawl of every screen and tab; values keep {#} in the same order.
 export const EN = {
+"Hoàn tác quyết định NRV": "Withdraw NRV decision",
+"Số NRV đã ghi FAST không hợp lệ.": "The NRV amount booked in FAST is not valid.",
+"Đã hoàn tác quyết định NRV. Cần quyết định NRV mới trước khi đóng kỳ.": "NRV decision withdrawn. A new NRV decision is needed before closing the period.",
 "A: {#} PC lệch PC-P / PC-M (chưa xác nhận)": "A: {#} PCs with PC-P / PC-M difference (not confirmed)",
 "A: {#} PC lệch PC-P / PC-M (thay đổi sau lần xác nhận)": "A: {#} PCs with PC-P / PC-M difference (changed since confirmation)",
 "B: {#} dòng SL ≠ 0 nhưng Total Cost = 0 (chưa xác nhận)": "B: {#} lines with qty ≠ 0 but Total Cost = 0 (not confirmed)",
@@ -2831,6 +2834,8 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+["Thay thế quyết định NRV hiện tại ({*}) bằng quyết định mới?", "Replace the current NRV decision ({*}) with the new one?"],
+["Hoàn tác quyết định NRV {*}? Kỳ sẽ cần quyết định NRV mới trước khi đóng kỳ.", "Withdraw the NRV decision {*}? The period will need a new NRV decision before closing."],
 ["Nguyên nhân: điều chỉnh PC-P theo PC-M ở STEP 3 lúc {*} đã đổi đơn giá lô PC-P.", "Cause: the PC-P to PC-M adjustment at STEP 3 on {*} changed the PC-P lot unit costs."],
 ["Đơn giá xuất NVL (MI-M) · {*} dòng · {*} bất thường", "Material issue unit cost (MI-M) · {*} lines · {*} abnormal"],
 ["{*} dòng xuất NVL đơn giá bất thường", "{*} lines with abnormal material issue prices"],

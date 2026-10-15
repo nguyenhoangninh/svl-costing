@@ -8,6 +8,7 @@ import * as P2 from './phase2.js';
 import * as FGP from './fgprod.js';
 import { splitBooks, bookOf } from '../engine/revenue.js';
 import { num, ttxt, utxt, txt, nowISO, prevPeriod, serialToISO, fpRows } from '../engine/util.js';
+import { currentNrvDecision, validateNrvInput, buildNrvDecision, nrvSaveAuditText, nrvUndoAuditText } from '../engine/nrvdecision.js';
 
 let A = null;
 export function install(api) { A = api; }
@@ -753,10 +754,11 @@ function refreshFgRef(S) {
 // ======================= 5.3 FG History & close =======================
 function nrvDecisionHTML(S, res, closed) {
   const amt = num(res.totals && res.totals.nrvProv), key = nrvKey(res);
-  const d = S.d.nrvDecision, current = d && d.key === key;
+  const d = currentNrvDecision(S.d.nrvDecision, key), current = !!d;
   const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · yêu cầu ${A.fmtNum(d.amount)} VND${utxt(d.status) === 'RECORDED' ? ' · đã ghi ' + A.fmtNum(num(d.recordedAmount ?? d.amount)) + ' VND' : ''} · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
   if (closed || !A.canEdit()) return summary;
-  return summary + `<form id="f-nrv-decision" class="inline"><label>NRV decision <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Accounting Ref<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
+  const undo = current ? '<div class="row"><button class="btn danger ghost" type="button" id="nrv-undo">Hoàn tác quyết định NRV</button></div>' : '';
+  return summary + undo + `<form id="f-nrv-decision" class="inline"><label>NRV decision <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Accounting Ref<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
 }
 export function viewClose(el) {
   const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
@@ -777,22 +779,37 @@ export function viewClose(el) {
     <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
     ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
     <div id="th"></div></section>`;
+  const nrvNow = nrvKey(res), fmtN = (v) => A.fmtNum(num(v));
   const nf = el.querySelector('#f-nrv-decision');
   if (nf) nf.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!A.canEdit()) { A.toast('Tài khoản chỉ có quyền xem.', 'block'); return; }
-    const status = utxt(nf.elements.status.value), ref = nf.elements.ref.value.trim(), note = nf.elements.note.value.trim();
-    if (!['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(status)) { A.toast('Chọn quyết định NRV.', 'review'); return; }
-    let recordedAmount = 0;
-    if (status === 'RECORDED') {
-      recordedAmount = A.parseNum(nf.elements.recordedAmount.value, 'Số NRV đã ghi FAST');
-      if (recordedAmount === undefined || recordedAmount === null) return;
-      if (ref.length < 3) { A.toast('NRV RECORDED cần Accounting Reference / Journal No.', 'review'); return; }
+    const input = { status: utxt(nf.elements.status.value), ref: nf.elements.ref.value.trim(), note: nf.elements.note.value.trim() };
+    if (input.status === 'RECORDED') {
+      input.recordedAmount = A.parseNum(nf.elements.recordedAmount.value, 'Số NRV đã ghi FAST');
+      if (input.recordedAmount === undefined || input.recordedAmount === null) return;
     }
-    if (note.length < 5) { A.toast('Nhập giải trình NRV ít nhất 5 ký tự.', 'review'); return; }
-    S.d.nrvDecision = { key: nrvKey(res), status, ref, note, amount: num(res.totals.nrvProv), recordedAmount, by: A.who(), at: nowISO() };
-    A.audit('NRV DECISION', `${status}; required=${A.fmtNum(res.totals.nrvProv)}; recorded=${A.fmtNum(recordedAmount)}; ref=${ref || '-'}; ${note}`);
+    const bad = validateNrvInput(input);
+    if (bad) { A.toast(bad, 'review'); return; }
+    const prev = currentNrvDecision(S.d.nrvDecision, nrvNow);
+    if (prev && !confirm(`Thay thế quyết định NRV hiện tại (${prev.status}${prev.status === 'RECORDED' ? `, ${fmtN(prev.recordedAmount)} VND ghi FAST` : ''}, ${prev.by || '-'}) bằng quyết định mới?`)) return;
+    const required = num(res.totals.nrvProv);
+    const next = buildNrvDecision({ ...input, key: nrvNow, amount: required, by: A.who(), at: nowISO() });
+    S.d.nrvDecision = next;
+    A.audit('NRV DECISION', nrvSaveAuditText(next, required, prev, fmtN));
     A.markDirty('nrvDecision', 'audit'); A.render();
+  });
+  const un = el.querySelector('#nrv-undo');
+  if (un) un.addEventListener('click', () => {
+    if (!A.canEdit()) { A.toast('Tài khoản chỉ có quyền xem.', 'block'); return; }
+    const cur = currentNrvDecision(S.d.nrvDecision, nrvNow);
+    if (!cur) { A.render(); return; }
+    if (!confirm(`Hoàn tác quyết định NRV ${cur.status}${cur.status === 'RECORDED' ? ` (${fmtN(cur.recordedAmount)} VND ghi FAST)` : ''}? Kỳ sẽ cần quyết định NRV mới trước khi đóng kỳ.`)) return;
+    S.d.nrvDecision = null;
+    A.audit('NRV DECISION UNDO', nrvUndoAuditText(cur, fmtN));
+    A.markDirty('nrvDecision', 'audit');
+    A.toast('Đã hoàn tác quyết định NRV. Cần quyết định NRV mới trước khi đóng kỳ.', 'review');
+    A.render();
   });
     el.querySelectorAll('[data-tabh]').forEach((b) => b.addEventListener('click', () => { S.tabH = b.dataset.tabh; A.render(); }));
   const box = el.querySelector('#th');

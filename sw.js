@@ -1,7 +1,7 @@
 // SVL Costing service worker: makes the web app installable and usable offline (iOS / Android / desktop).
 // Same-origin files: network-first (always the latest deployed code when online), cache fallback when offline.
 // Versioned third-party modules (Firebase SDK, fonts): cache-first. Cloud data (Firestore / Google sign-in) is never cached.
-const VERSION = 'v1.14.67';
+const VERSION = 'v1.14.68';
 const CACHE = `svl-costing-${VERSION}`;
 const PRECACHE = [
   './', './index.html', './manifest.webmanifest', './icon.svg',
@@ -9,7 +9,7 @@ const PRECACHE = [
   './lib/xlsx.mjs', './lib/cpexcel.full.mjs', './lib/exceljs.min.js',
   './src/app.js', './src/config.js', './src/store.js', './src/worker.js', './src/i18n.js', './src/i18n-en.js',
   './src/engine/notifications.js', './src/engine/controls.js', './src/engine/auditqueue.js', './src/engine/syncpolicy.js', './src/engine/grid.js', './src/engine/step1.js', './src/engine/step2.js', './src/engine/step3.js',
-  './src/engine/step3b.js', './src/engine/step4.js', './src/engine/step5.js', './src/engine/return.js', './src/engine/approvals.js', './src/engine/matcost.js', './src/engine/pccost.js', './src/engine/revenue.js', './src/engine/fgprod.js', './src/engine/fgdetail.js', './src/engine/step2report.js', './src/engine/templates.js', './src/engine/dataquality.js', './src/engine/pcbasis.js', './src/engine/trace.js', './src/engine/util.js',
+  './src/engine/step3b.js', './src/engine/step4.js', './src/engine/step5.js', './src/engine/return.js', './src/engine/approvals.js', './src/engine/matcost.js', './src/engine/pccost.js', './src/engine/nrvdecision.js', './src/engine/revenue.js', './src/engine/fgprod.js', './src/engine/fgdetail.js', './src/engine/step2report.js', './src/engine/templates.js', './src/engine/dataquality.js', './src/engine/pcbasis.js', './src/engine/trace.js', './src/engine/util.js',
   './src/ui/notifications.js', './src/ui/format.js', './src/ui/table.js', './src/ui/xlsxstyle.js','./src/views/phase2.js', './src/views/phase3.js', './src/views/trace.js', './src/views/fgprod.js', './src/views/rework.js',
 ];
 const CDN_CACHEABLE = [/^https:\/\/www\.gstatic\.com\/firebasejs\//, /^https:\/\/fonts\.(googleapis|gstatic)\.com\//];
