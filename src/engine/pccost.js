@@ -8,6 +8,7 @@ import { MATCOST_DEV, MATCOST_MIN_COST } from './matcost.js';
 const median = (xs) => { if (!xs.length) return 0; const a = [...xs].sort((x, y) => x - y), n = a.length; return n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2; };
 export const PC_FLAG_REVIEW = 'REVIEW - BẤT THƯỜNG';
 export const PC_FLAG_OK = 'OK - BÌNH THƯỜNG';
+export const PC_KIND = { DEV: 'Đơn giá lệch so với chuẩn', QTY0: 'SL ≤ 0 nhưng có Total Cost', COST0: 'SL > 0 nhưng Total Cost = 0' };
 
 /** Đọc các lô PC-P của kỳ (một hệ). null nếu thiếu cột bắt buộc. */
 function pcpLots(ds, erp, period) {
@@ -57,11 +58,11 @@ export function pcUnitCosts(datasets, period, opts = {}) {
     for (const l of L) {
       const unitCost = l.qty > 0 && l.cost > 0 ? l.cost / l.qty : null;
       const dev = unitCost !== null && ref > 0 ? unitCost / ref - 1 : null;
-      let reason = '';
-      if (l.qty <= 0 && l.cost > 0) reason = 'SL ≤ 0 nhưng có Total Cost';
-      else if (l.qty > 0 && l.cost <= 0) reason = 'SL > 0 nhưng Total Cost = 0';
-      else if (dev !== null && Math.abs(dev) > DEV && l.cost >= MIN) reason = `Đơn giá lệch ${dev > 0 ? '+' : ''}${(dev * 100).toFixed(1)} % so với chuẩn`;
-      lots.push({ ...l, unitCost, ref, dev, reason, flag: reason ? PC_FLAG_REVIEW : PC_FLAG_OK });
+      let reason = '', kind = '';
+      if (l.qty <= 0 && l.cost > 0) { kind = 'QTY0'; reason = PC_KIND.QTY0; }
+      else if (l.qty > 0 && l.cost <= 0) { kind = 'COST0'; reason = PC_KIND.COST0; }
+      else if (dev !== null && Math.abs(dev) > DEV && l.cost >= MIN) { kind = 'DEV'; reason = `Đơn giá lệch ${dev > 0 ? '+' : ''}${(dev * 100).toFixed(1)} % so với chuẩn`; }
+      lots.push({ ...l, unitCost, ref, dev, kind, reason, flag: reason ? PC_FLAG_REVIEW : PC_FLAG_OK });
     }
   }
   lots.sort((a, b) => a.erp.localeCompare(b.erp) || a.prod.localeCompare(b.prod, 'vi', { numeric: true }) || a.pc.localeCompare(b.pc, 'vi', { numeric: true }));

@@ -33,7 +33,6 @@ await sleep(1000);
 
 const card = page.locator('section.dq-card', { hasText: 'C · Vật tư số âm' });
 ok('card C shows the flagged MI-M lines', (await card.count()) === 1 && (await card.locator('#t-dq-mc tbody tr').count()) > 0, `${await card.locator('#t-dq-mc tbody tr').count()} dòng`);
-ok('there is no separate card D', (await page.locator('section.dq-card', { hasText: 'D · ' }).count()) === 0);
 ok('card C does not block STEP 2 for MI-M prices (no confirm button for the MI-M lines)', (await card.locator('button[data-part="C"]').count()) === 0);
 // v1.14.62: filters – system and status – and export of the filtered rows
 const tbl = card.locator('#t-dq-mc');
@@ -54,10 +53,19 @@ const dlP = page.waitForEvent('download', { timeout: 30000 }).catch(() => null);
 await tbl.locator('xpath=..').locator('button.vt-export').click();
 const dl = await dlP;
 ok('export downloads a file named for the MI-M line list', !!dl && /01_DON_GIA_XUAT_NVL_MI_M_DONG/.test(dl.suggestedFilename()), dl ? dl.suggestedFilename() : 'no download');
-// v1.14.63: PC lot unit cost review (PC-P) – informational, filters by system and status
-const pcSec = page.locator('#t-pc');
-ok('STEP 1 lists the PC-lot unit cost review with rows', (await pcSec.locator('tbody tr[data-v]').count()) > 0 && (await page.locator('h2', { hasText: 'Đơn giá thành phẩm theo lô PC' }).count()) === 1);
-ok('the PC-lot review has a system filter and a status filter', (await pcSec.locator('select.vt-filter').count()) === 2);
+// v1.14.63 / v1.14.64: card D – PC-lot unit cost (PC-P): blocking like C, with filters and export
+const cardD = page.locator('section.dq-card', { hasText: 'D · Đơn giá thành phẩm theo lô PC' });
+ok('card D exists next to C', (await cardD.count()) === 1);
+ok('card D asks for confirmation before STEP 2 (flagged PC lots)', (await cardD.locator('button[data-part="D"]').count()) === 1);
+const tblD = cardD.locator('#t-dq-pc');
+ok('card D lists the PC lots with rows', (await tblD.locator('tbody tr[data-v]').count()) > 0);
+ok('card D has a system filter and a status filter', (await tblD.locator('select.vt-filter').count()) === 2);
+await cardD.locator('button[data-part="D"]').click();
+await sleep(1500);
+const cardDAfter = page.locator('section.dq-card', { hasText: 'D · Đơn giá thành phẩm theo lô PC' });
+const txtD = ((await cardDAfter.textContent()) || '').replace(/\s+/g, ' ');
+ok('after confirming, card D shows who confirmed', /Đã xác nhận bởi/.test(txtD));
+ok('the confirm dialog listed the PC lots by system', dialogs.some((m) => /Xác nhận phần D/.test(m) && /PC-P hệ/.test(m)));
 ok('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 console.log(`\n${n - fail}/${n} STEP 1 card C browser checks passed${fail ? `, ${fail} FAILED` : ''}`);
 await browser.close();
