@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.79', v === '1.14.79');
+ok('package version = 1.14.80', v === '1.14.80');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -36,6 +36,9 @@ ok('dashboard, customer P&L and journal modules are precached', ['./src/views/da
 ok('JE07 is split by customer in the journal and export', app.includes('journalWithCustomers(ctx)') && app.includes('async function exportHachToan') && app.includes('SVL_Bang_Tong_Hop_Hach_Toan_'));
 ok('dashboard chart styles use theme tokens (dark mode follows)', html.includes('.dash-svg') && html.includes('.dash-gp { fill: var(--accent)'));
 ok('dashboard is documented in README', readme.includes('Dashboard doanh thu & GP'));
+ok('dashboard plan is saved with the period (dashPlan blob)', app.includes('...DBV.DASH_BLOBS') && fs.readFileSync(new URL('../src/views/dashboard.js', import.meta.url), 'utf8').includes("DASH_BLOBS = ['dashPlan']"));
+ok('journal summary export has the product sheet', app.includes("'3_TongHop_SanPham'"));
+ok('dashboard render test runs in npm test and CI', String(pkg.scripts.test).includes('dashboard-render.mjs') && fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').includes('dashboard-render.mjs'));
 
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

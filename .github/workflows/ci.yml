@@ -20,6 +20,8 @@ jobs:
         run: for f in $(find src -name '*.js') test/*.mjs sw.js; do node --check "$f" || exit 1; done
       - name: Synthetic control tests
         run: node test/unit.mjs
+      - name: Dashboard render (synthetic STEP 5)
+        run: node test/dashboard-render.mjs
       - name: Synthetic end-to-end costing regression (STEP 2 → 5, no company data)
         run: node test/synth.mjs
       - name: Live notifications unit tests
