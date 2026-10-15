@@ -6,13 +6,14 @@
 import { customerPL, productPL, filterRes, monthlyRevenue, prevMonth, growth, NO_PROD } from '../engine/custpl.js';
 import { journalCheck } from '../engine/journal.js';
 import { dashboardQuality, comparableAverageUnit } from '../engine/dashboard-quality.js';
+import { invoiceDetail, gpBridge, profitSignals } from '../engine/dashboard-intelligence.js';
 
 let A = null;
 export function install(api) { A = api; }
 /** Revenue plan of the period (kế hoạch doanh thu / GP %), saved with the period like the other blobs. */
 export const DASH_BLOBS = ['dashPlan'];
 
-const F = { period: '', cust: '', prod: '' };   // filters of the open period
+const F = { period: '', cust: '', prod: '', detail: false };   // filters of the open period
 const HIST = new Map();                          // other periods → their STEP 5 result (null when none on this device)
 let loading = '';
 
@@ -284,6 +285,21 @@ export function view(el) {
 
   // ---- checks
   const quality = dashboardQuality(res0, D5 && D5.fresh || 'CURRENT');
+  const bridge = gpBridge(res, prevRes ? filterRes(prevRes, F) : null);
+  const alerts = profitSignals(res);
+  const invoiceRows = F.detail ? invoiceDetail(res, F) : [];
+  const invoiceCols = [
+    { key:'row', label:'#', type:'int', width:50 },
+    { key:'customer', label:'Khách hàng', type:'text', width:190 },
+    { key:'product', label:'Mã SP', type:'text', width:110 },
+    { key:'invoice', label:'Hóa đơn', type:'text', width:140 },
+    { key:'account', label:'TK', type:'text', width:60 },
+    { key:'quantity', label:'SL', type:'qty', width:95 },
+    { key:'revenue', label:'Doanh thu', type:'num', width:165 },
+    { key:'cogs', label:'Giá vốn', type:'num', width:165 },
+    { key:'profit', label:'Chênh lệch DT–GV', type:'num', width:165 },
+    { key:'status', label:'Trạng thái', type:'text', width:105 },
+  ];
   const jc = journalCheck({ r5: res0 });
   const allChecks = [...full.checks, { id: 'je07', label: 'JE07 theo khách hàng = JE07 (giá vốn bán hàng)', expected: jc.expected, actual: jc.actual, status: jc.status }];
   const worst = allChecks.some((c) => c.status === 'CHECK') ? 'CHECK' : allChecks.some((c) => c.status === 'REVIEW') ? 'REVIEW' : 'PASS';
@@ -296,6 +312,17 @@ export function view(el) {
       : '<div class="dx-quality-ok">Không phát hiện bất thường trong các kiểm tra tự động hiện có.</div>'}
     <p class="dx-quality-note">${esc(quality.note)}</p>
    </section>`;
+  const intelBox = `<section class="card dx-card dx-intel" aria-label="Phân tích biến động lợi nhuận">
+    <div class="dx-ch"><h2>Phân tích biến động lợi nhuận gộp</h2></div>
+    ${bridge ? `<div class="dx-bridge">
+      <div><small>GP kỳ trước (STEP 5)</small><b>${esc(short(bridge.oldGP))}</b></div>
+      <div><small>Thay đổi doanh thu</small><b class="${bridge.revenueEffect>=0?'pos':'neg'}">${esc(short(bridge.revenueEffect))}</b></div>
+      <div><small>Tác động biến động COGS</small><b class="${bridge.cogsEffect>=0?'pos':'neg'}">${esc(short(bridge.cogsEffect))}</b></div>
+      <div><small>GP kỳ hiện tại</small><b>${esc(short(bridge.newGP))}</b></div>
+    </div><p class="muted dx-note">${esc(bridge.note)} ${bridge.reconciles?'Cầu nối khớp.':'CẦN KIỂM TRA CHÊNH LỆCH.'}</p>`
+      : '<p class="muted">Chưa có STEP 5 kỳ trước đủ điều kiện so sánh; không tự suy diễn nguyên nhân biến động GP.</p>'}
+    ${alerts.length ? `<div class="dx-intel-alert"><b>${alerts.length} giao dịch cần kiểm tra COGS/GP</b><p>${esc(alerts.slice(0,3).map(x=>x.invoice+' ('+x.product+')').join(' · '))}</p></div>` : ''}
+  </section>`;
   const stale = D5 && D5.fresh && D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>Số liệu STEP 5.2 có thể đã cũ</b> <span>${esc(D5.stale || D5.fresh)}</span>. Chạy lại STEP 5.2 để dashboard khớp với dữ liệu hiện tại.</div>` : '';
 
   const filters = `<div class="dx-filters" role="group" aria-label="${esc('Bộ lọc')}">
@@ -313,6 +340,7 @@ export function view(el) {
     <div class="dx-section-label"><div><span class="dx-eyebrow">FINANCIAL SNAPSHOT</span><h2>Tổng quan hiệu quả kinh doanh</h2></div><span class="dx-unit-label">VND · kỳ ${esc(S.period)}</span></div>
     <div class="dx-kpis">${kpis}</div>
     ${qualityBox}
+    ${intelBox}
 
     <div class="dx-section-label"><div><span class="dx-eyebrow">PERFORMANCE</span><h2>Xu hướng và kế hoạch</h2></div></div>
     <div class="dx-row r-trend">
@@ -360,6 +388,11 @@ export function view(el) {
       <p class="muted">Doanh thu, giá vốn FIFO và lãi gộp của từng mã sản phẩm (hàng trả lại trừ vào sản phẩm của nó).</p>
       <div id="dash-ptbl"></div>
     </section>
+    <section class="card dx-drill"><div class="dx-ch dx-drill-head"><h2>Truy xuất hóa đơn và giá vốn từ STEP 5</h2>
+      <button class="btn ghost" type="button" id="dx-toggle-detail">${F.detail ? 'Ẩn chi tiết giao dịch' : 'Xem chi tiết hóa đơn & FIFO'}</button></div>
+      <p class="muted">Bảng truy vết đọc trực tiếp các dòng STEP 5, không sửa dữ liệu. Mã lô FIFO chỉ hiển thị khi dữ liệu nguồn có trường nhận diện.</p>
+      ${F.detail ? '<div id="dx-invoice-table"></div>' : ''}
+    </section>
     <section class="card"><h2>Đối chiếu</h2>
       <p class="muted">Trạng thái tổng hợp: ${A.pill(worst)}${filtered ? ' · kiểm tra trên toàn kỳ, không theo bộ lọc' : ''}</p>
       <div class="dash-scroll"><table class="cp"><thead><tr><th>Kiểm tra</th><th class="r">Kỳ vọng</th><th class="r">Thực tế</th><th class="r">Chênh</th><th>Trạng thái</th></tr></thead><tbody>
@@ -374,10 +407,15 @@ export function view(el) {
   const prow = pp.rows.map((r, i) => ({ rank: i + 1, prod: r.prod === NO_PROD ? r.prod : r.prod, name: r.name, qty: r.qty, net: r.net, cogs: r.cogs, gp: r.gp, gpPct: r.gpPct }));
   A.mountTable(el.querySelector('#dash-ptbl'), { columns: PCOLS, rows: prow, height: 460, totals: ['qty', 'net', 'cogs', 'gp'], onExport: A.exportTable('Dashboard_SanPham', PCOLS) });
 
+  if (F.detail) A.mountTable(el.querySelector('#dx-invoice-table'), {
+    columns: invoiceCols, rows: invoiceRows, height: 520,
+    onExport: A.exportTable('Dashboard_Invoice_Detail', invoiceCols),
+  });
   const on = (sel, ev, fn) => { const n = el.querySelector(sel); if (n) n.addEventListener(ev, fn); };
   on('#dx-cust', 'change', (e) => { F.cust = e.target.value; view(el); });
   on('#dx-prod', 'change', (e) => { F.prod = e.target.value; view(el); });
   on('#dx-reset', 'click', () => { F.cust = ''; F.prod = ''; view(el); });
+  on('#dx-toggle-detail', 'click', () => { F.detail = !F.detail; view(el); });
   on('#dash-export', 'click', () => A.exportHachToan());
   on('#dx-plan-save', 'click', () => savePlan(el));
   loadHistory(S.period, el);

@@ -915,6 +915,20 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
 }
 @media (prefers-reduced-motion:reduce){ .dx .dx-kpi { transition:none; } .dx .dx-kpi:hover { transform:none; } }
 
+
+/* V3 intelligible profit bridge and transaction drilldown */
+.dx-bridge { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:13px 0; }
+.dx-bridge>div { padding:15px 12px; border-radius:10px; background:var(--panel-2); border:1px solid var(--rule-2);min-width:0; }
+.dx-bridge small { color:var(--muted); font-size:11px;display:block;line-height:1.45; }
+.dx-bridge b {display:block;margin-top:5px;font-size:clamp(17px,1.75vw,24px);letter-spacing:-.025em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums;}
+.dx-intel-alert {margin:10px 0;padding:12px 14px;background:var(--review-bg);border-left:3px solid var(--review);border-radius:8px;}
+.dx-intel-alert b {font-size:12px}.dx-intel-alert p{font-size:11.5px;margin:5px 0 0;overflow-wrap:anywhere}
+.dx-drill-head {display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;}
+.dx-drill-head h2 {margin:0;}
+.dx-drill {min-width:0;overflow:hidden;}
+.dx-drill .vt {min-width:0;}
+@media(max-width:900px){.dx-bridge{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:430px){.dx-bridge>div{padding:10px}.dx-bridge b{font-size:17px}}
 </style>
 </head>
 <body>
