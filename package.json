@@ -1,9 +1,9 @@
 {
   "name": "svl-costing",
-  "version": "1.14.69",
+  "version": "1.14.70",
   "description": "SVL Costing Master on the web",
   "scripts": {
-    "test": "node test/unit.mjs && node test/nrv-decision.mjs && node test/synth.mjs && node test/rules-syntax.mjs && node test/rules-contract.mjs && node test/xlsxstyle.mjs && node test/export-form.mjs && node test/approvals-logic.mjs && node test/notifications.mjs && node test/notification-fallback.mjs && node test/matcost-logic.mjs && node test/r6-basis.mjs",
+    "test": "node test/unit.mjs && node test/nrv-decision.mjs && node test/synth.mjs && node test/rules-syntax.mjs && node test/rules-contract.mjs && node test/xlsxstyle.mjs && node test/export-form.mjs && node test/approvals-logic.mjs && node test/notifications.mjs && node test/notification-fallback.mjs && node test/matcost-logic.mjs && node test/r6-basis.mjs && node test/provision-logic.mjs",
     "test:golden": "node test/verify.mjs ../costing.xlsm ../fixtures/erp && node test/verify2.mjs ../costing.xlsm ../fixtures/erp ../fixtures/sales_2026.xlsx && node test/verify5.mjs ../costing.xlsm ../fixtures/erp ../fixtures/sales_2026.xlsx",
     "test:e2e:authgate": "node test/e2e-authgate.mjs http://127.0.0.1:8765/",
     "test:e2e:cloud": "node test/e2e-cloud.mjs http://127.0.0.1:8765/ ../costing.xlsm .",

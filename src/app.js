@@ -33,7 +33,8 @@ import * as TPL from './engine/templates.js';
 import * as DQ from './engine/dataquality.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
-import { costAllocationSheet, fgLayerSheet } from './engine/exportform.js';
+import { costAllocationSheet, fgLayerSheet, provisionTrackSheet, provisionJournalSheet } from './engine/exportform.js';
+import { provisionTrack, provisionJournal } from './engine/provision.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
@@ -1619,6 +1620,10 @@ async function exportAll() {
     sheets.push(fgLayerSheet(r5.closing, 'closing', S.period));
     tbl('05_COGS_SUMMARY', P3.F5.SUM_FIELDS, P3.F5.SUM_HEADERS, r5.summary);
     if (r5.rollforward) tbl('05_FG_ROLLFORWARD', P3.F5.XNT_FIELDS, P3.F5.XNT_HEADERS, r5.rollforward.rows);
+    // provision on FG (v1.14.70): roll-forward per layer and the FAST entries (TK 2294 / 632)
+    const trk = provisionTrack(r5);
+    sheets.push(provisionTrackSheet(trk, S.period));
+    sheets.push(provisionJournalSheet(provisionJournal(trk, P3.nrvRecordedAmount(S, r5)), S.period));
   }
   if (S.d.fgHistory) tbl('05_FG_HISTORY', P3.F5.HIST_FIELDS, P3.F5.HIST_HEADERS, S.d.fgHistory.rows.map((r) => ({ ...r, date: typeof r.date === 'number' ? serialToISO(r.date) : r.date })));
   if (!sheets.length) { toast('Chưa có kết quả để xuất.', 'review'); return; }

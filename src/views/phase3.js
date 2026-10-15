@@ -4,6 +4,7 @@ import * as SP from '../engine/syncpolicy.js';
 import { ACTION_MANUAL_COST, approvalDocId, canonicalManualCost, isApprovedFor } from '../engine/approvals.js';
 import * as TPL from '../engine/templates.js';
 import * as F4 from '../engine/step4.js';
+import * as PROV from '../engine/provision.js';
 import * as P2 from './phase2.js';
 import * as FGP from './fgprod.js';
 import { splitBooks, bookOf } from '../engine/revenue.js';
@@ -46,19 +47,26 @@ export function returnStepStatus(S, D5) {
   const rc = D5.res.returnControl;
   return rc && rc.status === 'BLOCK' ? 'BLOCK' : rc && rc.status === 'REVIEW' ? 'PASS WITH REVIEW' : 'PASS';
 }
+/** NRV amount recorded in FAST for this STEP 5 result (signed; 0 when no current RECORDED decision). */
+export function nrvRecordedAmount(S, res) {
+  const nd = S.d.nrvDecision;
+  return nd && res && nd.key === nrvKey(res) && utxt(nd.status) === 'RECORDED' ? num(nd.recordedAmount ?? nd.amount) : 0;
+}
 /** Engine side of the FAST tie. */
 export function engineBalances(S, p2, res) {
   const d = S.d; const reg = d.register ? d.register.rows : [];
   const wf = p2 && p2.d3b ? p2.d3b.wf : null;
   const w632 = ((d.wipadj && d.wipadj.reg632) || []).filter((r) => r.record === 'RECORDED').reduce((a, r) => a + num(r.impact), 0);
   const nd = d.nrvDecision, nrvAdj = nd && res && nd.key === nrvKey(res) && utxt(nd.status) === 'RECORDED' ? num(nd.recordedAmount ?? nd.amount) : 0;
+  // provision released (Dr 2294 / Cr 632) by FIFO sales and FG consumption; a sales return puts it back (negative here) – v1.14.70
+  const relProv = res ? num(res.totals.provRelSales) + num(res.totals.provRelCons) : 0;
   return {
-    // DIRECT_632 impact > 0 = Dr 632 / Cr 154. NRV recorded adjustment > 0 = Dr 632 / Cr 2294.
+    // DIRECT_632 impact > 0 = Dr 632 / Cr 154. NRV recorded adjustment > 0 = Dr 632 / Cr 2294 (< 0 = release).
     a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0) - w632,
     a155: res ? res.totals.closeA : 0,
-    a2294: nrvAdj,
+    a2294: nrvAdj - relProv,
     // rework written off to 632 (unrepairable / scrap expensed, owner request 06/10/2026) is part of the 632 movement
-    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj + ((d.step2 && d.step2.total.cons) || 0) + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
+    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj - relProv + ((d.step2 && d.step2.total.cons) || 0) + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
     ...(() => { const bk = books(S); const rb = F5.revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions); return { a511: rb.a511, a5212: rb.a5212, a5213: rb.a5213 }; })(),
   };
 }
@@ -150,7 +158,7 @@ export function derive(S, p2) {
   const rStale = res && !(d.closed && d.closed.period === S.period) ? returnStale(S, r5) : '';
   if (!closeReason && rStale) closeReason = `STEP 5R (hàng bán bị trả lại) chưa hoàn tất: ${rStale}. Mở màn hình 5R → RUN STEP 5R.`;
   if (!closeReason && res && res.withReturns && res.returnControl && res.returnControl.status === 'BLOCK') closeReason = `STEP 5R Sales Return còn ${res.returnControl.blocked} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).`;
-  if (!closeReason && res && num(res.totals && res.totals.nrvProv) > 1 && !(d.closed && d.closed.period === S.period)) {
+  if (!closeReason && res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 && !(d.closed && d.closed.period === S.period)) {
     const nd = d.nrvDecision, key = nrvKey(res);
     if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
   }
@@ -322,13 +330,16 @@ export function viewOpen(el) {
     <div class="row">
       <button class="btn" data-act="s5-roll" type="button">Roll forward từ ${esc(prevPeriod(S.period))}</button>
       <label class="btn ghost">Import file FG đầu kỳ…<input type="file" id="f-fgopen" accept=".xlsx,.xlsm,.xls" hidden></label>
+      <label class="btn ghost">Nạp dự phòng đầu kỳ…<input type="file" id="f-provopen" accept=".xlsx,.xlsm,.xls" hidden></label>
       <button class="btn ghost" data-act="s5-template" type="button">Tải template</button>
       <button class="btn" data-act="s5-validate" type="button" ${op ? '' : 'disabled'}>Validate FG đầu kỳ</button>
     </div>
     ${op ? `<p class="muted">Nguồn: ${esc(op.source || '')} · nạp ${A.fmtTs(op.loadedAt)}</p>` : ''}
+    ${op && op.provSource ? `<p class="muted">Dự phòng đầu kỳ: ${esc(op.provSource.file)} · ${op.provSource.count} dòng · tổng ${A.fmtNum(op.provSource.sum)} VND = sổ cái ${A.fmtNum(op.provSource.glBalance)} · nạp ${A.fmtTs(op.provSource.at)}</p>` : `<p class="muted">Chưa nạp dự phòng đầu kỳ (template PROVISION_OPENING). Nạp sau khi đã nạp FG đầu kỳ, rồi Validate.</p>`}
     <div class="kpis">${A.kpiN('Số lớp', st.layers)}${A.kpiN('Số lượng', st.qty)}${A.kpi('Giá trị FG đầu kỳ', st.amt ?? null, true)}${A.kpiN('BLOCK', st.block)}${A.kpiN('REVIEW', st.review)}</div>
     <div id="t-op"></div></section>`;
   el.querySelector('#f-fgopen').addEventListener('change', (e) => importOpenFile(e.target.files[0]));
+  el.querySelector('#f-provopen').addEventListener('change', (e) => importProvFile(e.target.files[0]));
   if (!op) { el.querySelector('#t-op').innerHTML = A.emptyNote('Chưa có FG đầu kỳ.'); return; }
   const cols = colsOf(F5.LAYER_FIELDS, F5.LAYER_HEADERS, LAYER_T, LAYER_W);
   A.mountTable(el.querySelector('#t-op'), { columns: cols, rows: op.rows, filterKey: 'status', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot'], onExport: A.exportTable('05_FG_OPENING', cols) });
@@ -346,6 +357,27 @@ async function importOpenFile(file) {
       A.markDirty('fgOpen', 'fgRef', 'audit');
       A.toast(`Đã nạp ${S.d.fgOpen.stats.layers} lớp FG đầu kỳ. Bước tiếp: Validate.`, 'pass');
     } catch (e) { A.toast('Import FG đầu kỳ lỗi: ' + e.message, 'block'); }
+  });
+  A.render();
+}
+/** Provision on the opening FG (v1.14.70): the PROVISION_OPENING file is the source of truth; FG must be validated again. */
+async function importProvFile(file) {
+  if (!file || !A.guardEdit() || closedGuard()) return;
+  const S = A.S;
+  if (!S.d.fgOpen || !S.d.fgOpen.rows.length) { A.toast('Nạp FG đầu kỳ trước (5.1), rồi nạp dự phòng.', 'block'); return; }
+  await A.busy(`Đang đọc ${file.name}…`, async () => {
+    try {
+      const res = await A.parseFile(await file.arrayBuffer(), 'all');
+      const parsed = PROV.parseOpeningProvision(res.grids, file.name, S.period);
+      if (!parsed.ok) { A.toast('Chưa nạp dự phòng: ' + parsed.errors.slice(0, 3).join(' · '), 'block'); return; }
+      const app = PROV.applyOpeningProvision(S.d.fgOpen, parsed);
+      if (!app.ok) { A.toast('Chưa nạp dự phòng: ' + app.errors.slice(0, 3).join(' · '), 'block'); return; }
+      S.d.fgOpen.provSource = { file: file.name, glBalance: parsed.glBalance, sum: parsed.sum, count: parsed.rows.length, matched: app.matched, zeroLayers: app.zeroLayers, by: A.who(), at: nowISO() };
+      S.d.fgOpen.status = 'LOADED - NOT VALIDATED'; S.d.fgOpen.validatedAt = '';
+      A.audit('STEP 5 - IMPORT OPENING PROVISION', `Lớp=${app.matched}; Dự phòng=${A.fmtNum(parsed.sum)}; Sổ cái=${A.fmtNum(parsed.glBalance)}; File=${file.name}`);
+      A.markDirty('fgOpen', 'audit');
+      A.toast(`Đã nạp dự phòng cho ${app.matched} lớp. Bước tiếp: Validate FG đầu kỳ.`, 'pass');
+    } catch (e) { A.toast('Nạp dự phòng lỗi: ' + e.message, 'block'); }
   });
   A.render();
 }
@@ -370,7 +402,7 @@ export async function doRollOpen() {
     const nd = pd.nrvDecision; let provAdd = null;
     if (nd && utxt(nd.status) === 'RECORDED' && nd.key === nrvKey(pd.step5)) {
       const need = num(nd.amount), rec = num(nd.recordedAmount ?? nd.amount), f = need ? rec / need : 0;
-      provAdd = Object.fromEntries((pd.step5.closing || []).filter((c) => num(c.provNeed) > 0).map((c) => [c.lid, -num(c.provNeed) * f]));
+      provAdd = Object.fromEntries((pd.step5.closing || []).filter((c) => num(c.provNeed) !== 0).map((c) => [c.lid, -num(c.provNeed) * f]));
     }
     S.d.fgOpen = F5.openingFromClosing(pd.step5, S.period, reason, provAdd);
     refreshFgRef(S);
@@ -422,7 +454,7 @@ export function viewFIFO(el) {
     ${res && D5.fresh === 'CURRENT' && D5.retStale ? `<div class="alert review"><b>Bước tiếp: STEP 5R.</b> Kết quả 5.2 chỉ gồm bán hàng. Kỳ có ${salesReturnsInPeriod(S).length} dòng hàng bán bị trả lại – chạy riêng ở <a href="#salesreturn">màn hình 5R</a> (${esc(D5.retStale)}).</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
     <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}${step5Detail(res, c.rows, S)}</details>
-    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
+    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['prov', 'Dự phòng FG'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
     <div id="t5"></div></section>`;
   const modeSel = el.querySelector('#s5-mode');
   const rateIn = el.querySelector('#s5-rate');
@@ -449,7 +481,7 @@ export function viewFIFO(el) {
   } else if (tab === 'closing') {
     const cols = [...colsOf(F5.LAYER_FIELDS, F5.LAYER_HEADERS, LAYER_T, LAYER_W), { key: 'nrvUnit', label: 'NRV / đv (VND)', type: 'num', width: 120 }, { key: 'provNeed', label: 'Dự phòng đề xuất (VND)', type: 'num', width: 150 }];
     A.mountTable(box, { columns: cols, rows: res.closing, filterKey: 'status', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot', 'provNeed'], onExport: A.exportTable('05_FG_CLOSING', cols) });
-    box.insertAdjacentHTML('afterbegin', `<p class="muted">NRV = giá bán (Price Master × tỷ giá) × (1 − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% chi phí bán hàng ước tính). Dự phòng đề xuất = (giá thành sau dự phòng cũ − NRV) × SL tồn, chỉ khi dương. Tổng: <b>${A.fmtNum(res.totals.nrvProv || 0)}</b> VND.</p>`);
+    box.insertAdjacentHTML('afterbegin', `<p class="muted">NRV = giá bán (Price Master × tỷ giá) × (1 − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% chi phí bán hàng ước tính). Dự phòng đề xuất theo lớp = dự phòng đã ghi + max(0, giá vốn còn − NRV); dương = trích thêm, âm = hoàn nhập. Tổng: <b>${A.fmtNum(res.totals.nrvProv || 0)}</b> VND.</p>`);
   } else if (tab === 'sum') {
     const t = { openQ: 'qty', openA: 'num', prodQ: 'qty', prodA: 'num', cogsQ: 'qty', cogsRM: 'num', cogs622: 'num', cogs627: 'num', cogsA: 'num', closeQ: 'qty', closeA: 'num', eligQ: 'qty', layers: 'int', status: 'status', rwQ: 'qty', rwRM: 'num', rw622: 'num', rw627: 'num', rwTot: 'num', rollStatus: 'status' };
     const cols = colsOf(F5.SUM_FIELDS, F5.SUM_HEADERS, t, { name: 220, msg: 220 });
@@ -469,6 +501,22 @@ export function viewFIFO(el) {
     const cols = colsOf(F5.XNT_FIELDS, F5.XNT_HEADERS, t, { name: 260 });
     box.innerHTML = '<p class="muted">Tồn kho thành phẩm theo mã (đầu kỳ / nhập / xuất bán / tồn). Cột “check vs lots” = phần chênh với tồn theo lô – khác 0 khi có FG xuất rework.</p><div id="t5x"></div>';
     A.mountTable(box.querySelector('#t5x'), { columns: cols, rows: rf.rows, height: 520, totals: ['openQ', 'openA', 'inQ', 'inA', 'outQ', 'outA', 'balQ', 'balA', 'chkQ', 'chkA'], onExport: A.exportTable('05_FG_ROLLFORWARD', cols) });
+  } else if (tab === 'prov') {
+    // provision on FG (v1.14.70): roll-forward per layer and the FAST entries
+    const trk = PROV.provisionTrack(res), jr = PROV.provisionJournal(trk, nrvRecordedAmount(S, res)), tt = trk.totals;
+    const cols = [{ key: 'lid', label: 'Layer ID', width: 220 }, { key: 'source', label: 'Nguồn', width: 110 }, { key: 'pc', label: 'PC No.', width: 120 }, { key: 'prod', label: 'Mã SP', width: 130 }, { key: 'loc', label: 'Location', width: 90 },
+      { key: 'date', label: 'Ngày lô', type: 'date', width: 95 }, { key: 'qtyIn', label: 'SL vào', type: 'qty', width: 100 }, { key: 'qtyRem', label: 'SL còn', type: 'qty', width: 100 },
+      { key: 'open', label: 'DP đầu kỳ', type: 'num', width: 130 }, { key: 'restore', label: 'Hoàn lại (trả hàng)', type: 'num', width: 150 }, { key: 'relSale', label: 'Hoàn nhập khi bán', type: 'num', width: 150 },
+      { key: 'relCons', label: 'Hoàn nhập tiêu dùng', type: 'num', width: 150 }, { key: 'relRw', label: 'Chuyển rework (chờ)', type: 'num', width: 150 }, { key: 'closePre', label: 'DP trước NRV', type: 'num', width: 130 },
+      { key: 'nrvAdj', label: 'NRV (+ trích / − hoàn)', type: 'num', width: 160 }, { key: 'close', label: 'DP cuối kỳ', type: 'num', width: 130 }];
+    const je = jr.lines.map((l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.desc)}</td><td>${esc(l.dr)}</td><td>${esc(l.cr)}</td><td class="r">${A.fmtNum(l.amount)}</td></tr>`).join('')
+      + `<tr class="muted"><td>${esc(jr.pending.code)}</td><td>${esc(jr.pending.desc)}</td><td></td><td></td><td class="r">${A.fmtNum(jr.pending.amount)}</td></tr>`;
+    box.innerHTML = `<p class="muted">Dự phòng là số dư Có của TK ${PROV.PROV_ACC} theo lớp FIFO. Hoàn nhập = giảm dự phòng theo số lượng bán (Nợ ${PROV.PROV_ACC} / Có ${PROV.PROV_COST_ACC}). Hàng bán trả lại khôi phục dự phòng của hoá đơn gốc. Chuyển sang rework chưa ghi sổ.</p>
+      ${trk.ok ? '' : `<div class="alert review"><b>Dự phòng chưa khớp:</b> chênh lệch ${A.fmtNum(trk.check)} VND giữa đầu kỳ + biến động và số dư theo lớp.</div>`}
+      <div class="kpis">${A.kpi('DP đầu kỳ', tt.open, true)}${A.kpi('Hoàn lại (trả hàng)', tt.restore, true)}${A.kpi('Hoàn nhập khi bán', tt.relSale, true)}${A.kpi('Hoàn nhập tiêu dùng', tt.relCons, true)}${A.kpi('Chuyển rework (chờ)', tt.relRw, true)}${A.kpi('NRV đề xuất', tt.nrvAdj, true)}${A.kpi('DP cuối kỳ', tt.close, true)}</div>
+      <h2>Bút toán FAST (TK ${PROV.PROV_ACC} / ${PROV.PROV_COST_ACC})</h2><table class="cp"><thead><tr><th>Mã</th><th>Diễn giải</th><th>Nợ</th><th>Có</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>${je}</tbody></table>
+      <h2>Theo dõi theo lớp</h2><div id="t5p"></div>`;
+    A.mountTable(box.querySelector('#t5p'), { columns: cols, rows: trk.rows, filterKey: 'source', height: 520, totals: ['qtyIn', 'qtyRem', 'open', 'restore', 'relSale', 'relCons', 'relRw', 'closePre', 'nrvAdj', 'close'], onExport: A.exportTable('06_PROVISION_TRACK', cols) });
   } else if (tab === 'rec') {
     box.innerHTML = recTable(res.rec, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], REC_LABELS) + `<p class="muted">Run snapshot: chế độ ${esc(res.mode)} · ${res.openLayers} lớp đầu kỳ · override dùng ${res.overridesUsed} · kết quả ${esc(res.runResult)}</p>`;
   }
@@ -667,9 +715,9 @@ async function priorSalesFor(S) {
       if (x.fin === 'FIFO COGS' && num(x.fq) > 0 && ttxt(x.inv) && ttxt(x.prod)) {
         const key = keyOf(x.inv, x.prod), o = origins.get(key);
         if (o) {
-          o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot);
+          o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot); o.provRel = num(o.provRel) + num(x.provRel);
           o.date = Math.min(num(o.date), num(x.date));
-        } else origins.set(key, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), period: p });
+        } else origins.set(key, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), provRel: num(x.provRel), period: p });
       }
       if (x.fin === 'RETURN' && x.status === 'RETURNED' && ttxt(x.origInv || x.matchedOrigInv) && num(x.fq) < 0) {
         const key = keyOf(x.origInv || x.matchedOrigInv, x.prod);
@@ -775,7 +823,7 @@ export function viewClose(el) {
       <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
     </div>
     ${!closed && D5.closeReason && res ? `<div class="alert review"><b>Chưa đóng được:</b> ${esc(D5.closeReason)}</div>` : ''}
-    ${res && num(res.totals && res.totals.nrvProv) > 1 ? nrvDecisionHTML(S, res, closed) : ''}
+    ${res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 ? nrvDecisionHTML(S, res, closed) : ''}
     <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
     ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
     <div id="th"></div></section>`;
