@@ -1985,7 +1985,7 @@ export const MSG_WILD = [
 export const SRC_EXACT = {
 "Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ.": "Line unit cost = Amount ÷ issued qty. Reference cost = median line unit cost of the same system, material code and unit in the period.",
 "Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường": "Negative or wrong-type materials, or abnormal material issue prices",
-"D · Đơn giá thành phẩm theo lô PC (PC-P)": "D · Finished-goods unit cost by PC lot (PC-P)",
+"D · Đơn giá thành phẩm theo lô PC bất thường (PC-P)": "D · Abnormal finished-goods unit cost by PC lot (PC-P)",
 "Đơn giá thành phẩm theo lô PC bất thường (PC-P)": "Abnormal finished-goods unit cost by PC lot (PC-P)",
 "Số mã SP": "Product codes",
 "Mã SP (ví dụ)": "Product codes (examples)",

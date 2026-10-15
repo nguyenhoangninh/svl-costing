@@ -759,7 +759,7 @@ function dqSection(dq) {
   const pcKinds = [['DEV', 'Đơn giá lệch so với chuẩn'], ['QTY0', 'SL ≤ 0 nhưng có Total Cost'], ['COST0', 'SL > 0 nhưng Total Cost = 0']];
   const pcSum = pcKinds.map(([k, label]) => { const L = pcFlagged.filter((l) => l.kind === k); return L.length ? { erp: [...new Set(L.map((l) => l.erp))].join(', '), label, lots: L.length, prods: new Set(L.map((l) => `${l.erp}|${l.prod}`)).size, sample: [...new Set(L.map((l) => l.prod))].slice(0, 12).join(', ') } : null; }).filter(Boolean);
   const cardD = pcAll.length ? `<section class="dq-card ${pcFlagged.length ? 'dq-block' : 'dq-info'}">
-    <h3>D · Đơn giá thành phẩm theo lô PC (PC-P) ${pill(pcFlagged.length ? 'BLOCK' : 'CHECK')}</h3>
+    <h3>D · Đơn giá thành phẩm theo lô PC bất thường (PC-P) ${pill(pcFlagged.length ? 'BLOCK' : 'CHECK')}</h3>
     <p class="muted">Đơn giá lô = Total Cost ÷ SL hoàn thành, so với trung vị đơn giá các lô cùng hệ và cùng mã sản phẩm trong kỳ. Bất thường: lệch > 30 % và Total Cost ≥ 1.000.000 VND; hoặc SL ≤ 0 nhưng có cost; hoặc SL > 0 nhưng Total Cost = 0. Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP 2.</p>
     ${bar('D')}
     ${pcSum.length ? `<table class="cp"><thead><tr><th>Hệ</th><th>Loại bất thường</th><th class="r">Số lô</th><th class="r">Số mã SP</th><th>Mã SP (ví dụ)</th></tr></thead><tbody>
