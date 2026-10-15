@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.62 (15/10/2026):** Xuất Excel: cột **Lệch so với chuẩn** / **Lệch lớn nhất** (MI-M) được ghi đúng định dạng phần trăm. Trước đây file xuất hiện 153.00 thay vì 15.299,86 % (giá trị đúng, chỉ sai định dạng).
+>
 > **v1.14.61 (15/10/2026):** Kiểm tra dữ liệu ERP ở STEP 1 nay quét cả **hệ S** (PC-M-S, MI-M-S) cùng hệ T và O – các dòng SL ≠ 0 nhưng Total Cost = 0 hoặc số âm / sai kiểu của S cần được xác nhận trước khi chạy STEP 2. Bảng dòng bất thường có bộ lọc **theo Báo cáo**.
 >
 > **v1.14.60 (15/10/2026):** Rà soát tiếng Việt toàn hệ thống cho chế độ **English**: dịch thêm ~1.250 câu lấy trực tiếp từ mã nguồn (toast, hộp thoại xác nhận, cảnh báo OUTDATED, trạng thái xác nhận "Đã xác nhận bởi … lúc …", "Xóa xác nhận", chip "B · ĐÃ XÁC NHẬN", thông báo, truy xuất lô). Câu ghép được tách theo dấu câu để dịch từng phần; hộp thoại nhiều dòng dịch từng dòng. Ghi chú do người dùng nhập và dữ liệu (tên vật tư, sản phẩm) giữ nguyên.
