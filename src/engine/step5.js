@@ -650,6 +650,8 @@ const ymd = (serial) => { const { y, m, d } = serialToYMD(serial); return `${y}$
 // ---------------------------------------------------------------- 5B FG REWORK FIFO
 export const reworkCount = (register) => (register ? register.rows.filter((r) => r.active === 'Y' || r.active === 'B/F').length : 0);
 export const activeReworkCount = (register) => (register ? register.rows.filter((r) => r.active === 'Y' && utxt(r.rwStatus) !== 'CONSUMPTION').length : 0);
+/** FG rework source qty (= res.rework.srcQty): Σ issueQty of rework rows. Internal consumption (2B) is excluded – it is costed in STEP 5.2 and never goes through FIFO rework. */
+export const reworkSourceQty = (rows) => (rows || []).filter((r) => utxt(r.rwStatus) !== 'CONSUMPTION').reduce((a, r) => a + num(r.issueQty), 0);
 
 /** RW_CountChronologyConflicts — same-product sale of the period dated on/after the rework issue date. */
 export function chronologyConflicts(register, salesRows, period) {
@@ -822,7 +824,7 @@ export function runReworkFIFO(res, register, ctx) {
   // Batch 8
   const regRows = register.rows;
   const rwRows = regRows.filter((r) => utxt(r.rwStatus) !== 'CONSUMPTION'), consRegRows = regRows.filter((r) => utxt(r.rwStatus) === 'CONSUMPTION');
-  const srcQty = sumOf(rwRows, 'issueQty'), erpRef = sumOf(rwRows, 'erpRef');
+  const srcQty = reworkSourceQty(regRows), erpRef = sumOf(rwRows, 'erpRef');
   const consCost = sumOf(consRegRows.filter((r) => utxt(r.active) === 'Y'), 'fifoCost');
   const completed = sumOf(regRows, 'carryIn'), openWIP = sumOf(regRows, 'closingWIP');
   const writeOff = sumOf(regRows, 'writeOff'), returnedFG = sumOf(regRows, 'returnedFG'), out = writeOff + returnedFG;

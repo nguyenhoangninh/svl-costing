@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.78 (15/10/2026):** **Chỉ tiêu 11 (5B) không còn báo CHECK sau khi duyệt tiêu dùng nội bộ (2B).** Sổ rework không còn gồm dòng tiêu dùng nội bộ, vì tiêu dùng được tính giá ở STEP 5.2 chứ không đi qua FIFO rework, nên SL sổ và SL chuyển FIFO khớp nhau. Thêm dòng **11b** hiển thị SL tiêu dùng nội bộ. Khi còn dòng 2B chưa tính giá, các chỉ tiêu 11–13 báo RERUN FIFO thay vì CHECK.
+>
 > **v1.14.77 (15/10/2026):** **Tiêu hao NVL không còn vào WIP sau khi đổi lựa chọn.** STEP 3 được tính lại ngay khi chạy lại STEP 2 (không còn giữ kết quả cũ có dòng tiêu hao); STEP 3 bị chặn khi danh sách tiêu hao đã đổi mà chưa chạy STEP 2; cảnh báo "WIP chưa khớp STEP 2 hiện tại" khi kết quả STEP 3 cũ. **Bút toán WIP (JE02 / JE02B)** sửa lại: JE02 lấy đúng Stock Out đã vào WIP, tiêu hao nằm riêng ở JE02B (Nợ 632 / Có 152); trước đó tiêu hao bị trừ hai lần nên 154 và 152 đều thiếu.
 >
 > **v1.14.76 (15/10/2026):** **Template import FG đầu kỳ (5.1) v2 – 22 cột.** Thêm **RM cost** (PC RM) và **RM cost (Stock out)** để tách RM của lớp đầu kỳ (phần còn lại = điều chỉnh WIP / rework; phần tách đi tiếp vào FIFO và 05_FG_CLOSING), **Unit Cost** (đối chiếu Total / Qty), **Provision USD (memo)** và **Net Inventory** (đối chiếu Total + Provision VND). Các cột mới không bắt buộc; lệch Unit Cost / Net Inventory báo REVIEW, RM tách vượt RM Amount báo BLOCK. Template điền sẵn từ cuối kỳ trước có đủ các cột này (dự phòng gồm NRV đã duyệt). Template cũ 17 cột vẫn import được. Tên cột trùng với 05_FG_OPENING / 05_FG_CLOSING.

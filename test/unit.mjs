@@ -795,6 +795,16 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   F5.runReworkFIFO(rS2, regS, { period: P2, opening: opC, salesRows: salesC, step4Carry: 0 });
   eq('FG consumption STRICT: 2 consumed at 200, sales 300, rec 8–12 PASS',
     [regS.rows[0].fifoStatus, Math.round(rS2.totals.consA), Math.round(rS2.totals.cogsA - rS2.totals.consA), [8, 9, 10, 11, 12].map((k) => rS2.rec[k].status).join()], ['PASS', 200, 300, 'PASS,PASS,PASS,PASS,PASS']);
+  // checkpoint 11 (5B · SL rework = SL chuyển FIFO): the source qty of the screen = reworkSourceQty(rows) and must exclude 2B consumption
+  eq('checkpoint 11 basis, consumption only: source qty 0 = FIFO transfer qty 0 (2 consumed do not count as rework)',
+    [F5.reworkSourceQty(regS.rows), rS2.rework.fifoQty, rS2.rework.srcQty], [0, 0, 0]);
+  const mixR = { rows: [
+    { active: 'Y', rid: 'RW1', fg: 'A', issueQty: 1, issueDate: ser(2026, 8, 10), inputCheck: 'PASS', rwStatus: 'OPEN', rwType: 'NORMAL', period: P2 },
+    { active: 'Y', rid: 'CN2', fg: 'A', issueQty: 1, issueDate: ser(2026, 8, 10), inputCheck: 'PASS', rwStatus: 'CONSUMPTION', rwType: 'NORMAL', period: P2 }] };
+  const rM = F5.runFIFO({ ...baseC, mode: 'STRICT_DATE', register: mixR });
+  F5.runReworkFIFO(rM, mixR, { period: P2, opening: opC, salesRows: salesC, step4Carry: 0 });
+  eq('checkpoint 11 mixed: rework 1 + consumption 1 → source 1 = FIFO transfer 1 (consumption excluded on both sides)',
+    [F5.reworkSourceQty(mixR.rows), rM.rework.fifoQty, rM.rework.srcQty, mixR.rows[1].fifoStatus], [1, 1, 1, 'PASS']);
 }
 
 // ---- v1.14.19 audit Release A — the exact regression cases of the 13/10/2026 audit
