@@ -39,7 +39,7 @@ export const localKeys = () => tx('readonly', (s) => reqP(s.getAllKeys()));
  * No network operations, await, or rendering are permitted while the transaction is open.
  */
 export async function localReplacePeriod(period, blobMap, meta) {
-  if (!/^\\d{4}-\\d{2}$/.test(String(period || '')) || !meta || !Number.isInteger(meta.rev) || meta.rev < 1)
+  if (!/^\d{4}-\d{2}$/.test(String(period || '')) || !meta || !Number.isInteger(meta.rev) || meta.rev < 1)
     throw new Error('Snapshot local không có kỳ/revision Cloud hợp lệ.');
   const entries = Object.entries(blobMap || {}).filter(([, v]) => v !== undefined && v !== null);
   const prefix = `p/${period}/`, stamp = new Date().toISOString();
@@ -51,7 +51,7 @@ export async function localReplacePeriod(period, blobMap, meta) {
       const store = t.objectStore('kv');
       // Collect keys first. All destructive operations and replacements remain
       // in the same transaction, so any failure rolls back the entire operation.
-      const getKeys = store.getAllKeys(IDBKeyRange.bound(prefix, prefix + '\\uffff'));
+      const getKeys = store.getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff'));
       getKeys.onsuccess = () => {
         try {
           for (const k of getKeys.result) store.delete(k);
@@ -235,7 +235,7 @@ const CHUNK = 700000;
  *  chunks that the committed manifest still points to; legacy manifests (no key) use name__k. */
 const chunkId = (name, m, k) => `${m.key || name}__${k}`;
 const neighborPeriod = (p, direction) => {
-  const m = /^(\\d{4})-(\\d{2})$/.exec(String(p || ''));
+  const m = /^(\d{4})-(\d{2})$/.exec(String(p || ''));
   if (!m) throw new Error('Kỳ không hợp lệ.');
   const year = Number(m[1]), month = Number(m[2]);
   if (month < 1 || month > 12) throw new Error('Tháng không hợp lệ.');
@@ -454,7 +454,7 @@ export async function markAllNoticesRead() {
   await F.setDoc(readRef(), { uid: cloud.user.uid, seen: [], readThrough: F.serverTimestamp(), updatedAt: F.serverTimestamp() }, { merge: true });
 }
 export function watchPeriodMeta(period, onMeta, onError = () => {}) {
-  if (!cloud.user || !fb || !/^\\d{4}-\\d{2}$/.test(period)) return () => {};
+  if (!cloud.user || !fb || !/^\d{4}-\d{2}$/.test(period)) return () => {};
   return fb.F.onSnapshot(pdoc(period), (s) => onMeta(s.exists() ? s.data() : null, s.metadata), onError);
 }
 
