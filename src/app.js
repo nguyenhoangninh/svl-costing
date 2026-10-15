@@ -1507,11 +1507,11 @@ function periodTable() {
   return `<table class="cp"><thead><tr><th>Kỳ</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map((p) => { const x = st(p); const h = hid.has(p);
     return `<tr><td><a href="#cc" data-act="goto-period" data-p="${p}"><b>${p}</b></a>${p === S.period ? ' <span class="muted">(đang mở)</span>' : ''}${h ? ' <span class="muted">(đã ẩn)</span>' : ''}</td>
       <td>${x.closed ? pill('CLOSED') : x.ever ? `${pill('REVIEW')} <small>đã từng đóng – đang mở lại</small>` : pill('OPEN')}</td>
-      <td class="r">${admin && !x.ever ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá kỳ…</button>` : ''}
-        ${admin && x.ever && !h ? `<button class="btn ghost sm" data-act="hide-period" data-p="${p}" type="button" title="Kỳ đã từng đóng không xoá được (hồ sơ lưu trữ) – chỉ ẩn khỏi danh sách">Ẩn kỳ…</button>` : ''}
+      <td class="r">${admin && !x.ever && (!store.cloud.enabled || !(S.periodInfo[p] || {}).cloud) ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá bản nháp…</button>` : ''}
+        ${admin && !h && (store.cloud.enabled || x.ever) ? `<button class="btn ghost sm" data-act="hide-period" data-p="${p}" type="button" title="Ẩn kỳ nhưng giữ toàn bộ dữ liệu và lịch sử Cloud">Ẩn kỳ…</button>` : ''}
         ${admin && h ? `<button class="btn ghost sm" data-act="unhide-period" data-p="${p}" type="button">Hiện lại</button>` : ''}</td></tr>`; }).join('')}</tbody></table>
     ${hid.size ? `<p class="muted"><label><input type="checkbox" id="show-hidden" ${show ? 'checked' : ''}> Hiện cả ${hid.size} kỳ đã ẩn</label></p>` : ''}
-    <p class="muted">Kỳ <b>chưa từng đóng</b>: Xoá kỳ (xoá hẳn trên máy này và cloud). Kỳ <b>đã từng đóng</b> là hồ sơ kế toán – không xoá được, chỉ <b>Ẩn kỳ</b> khỏi danh sách (dữ liệu và lịch sử vẫn giữ trên cloud, hiện lại được).</p>`;
+    <p class="muted"><b>Lưu trữ an toàn:</b> kỳ đã từng được lưu lên Cloud (dù đang OPEN) không thể xoá vĩnh viễn vì revision cũ vẫn tham chiếu dữ liệu. Dùng <b>Ẩn kỳ</b> để bỏ khỏi danh sách mà không mất lịch sử; chỉ bản nháp chưa từng lưu Cloud mới có thể xoá khỏi máy.</p>`;
 }
 VIEWS.settings = (el) => {
   const c = store.cloud;
@@ -1981,12 +1981,12 @@ document.addEventListener('click', async (e) => {
       if (a.dataset.p && a.dataset.p !== S.period) { await openPeriod(a.dataset.p); location.hash = 'settings'; }
       if (S.d.closedEver) { toast(`Kỳ ${S.period} đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete kể cả sau REOPEN. Dùng “Ẩn kỳ” để bỏ khỏi danh sách.`, 'block'); break; }
       if (isClosed()) { toast(`Kỳ ${S.period} đang CLOSED và không được xoá.`, 'block'); break; }
-      if (prompt(`Gõ ${S.period} để xoá toàn bộ dữ liệu kỳ OPEN này trên máy này${store.cloud.user ? ' và trên cloud' : ''}:`) === S.period) {
+      if (prompt(`Gõ ${S.period} để xoá BẢN NHÁP CHƯA LƯU CLOUD trên máy này (kỳ đã có revision Cloud không thể xoá, hãy chọn Ẩn kỳ):`) === S.period) {
         const delP = S.period;
         clearTimeout(syncTimer); await saveChain; await pushChain; // no queued save may recreate the period after deletion
         // cloud first: if the cloud refuses, nothing is removed on this device either
         if (store.cloud.user) { try { await store.cloudDelete(delP); } catch (err) { toast('Không xoá được trên cloud (dữ liệu trên máy giữ nguyên): ' + err.message + (/CLOSED/.test(err.message) ? ' → dùng “Ẩn kỳ”.' : ''), 'block'); await refreshPeriods(); render(); break; } }
-        audit('DELETE PERIOD', `Xoá toàn bộ kỳ ${delP}${store.cloud.user ? ' (máy này + cloud)' : ' (máy này)'}`);
+        audit('DELETE LOCAL DRAFT', `Xoá bản nháp chưa lưu Cloud kỳ ${delP} trên máy này`);
         for (const k of await store.localKeys()) if (String(k).startsWith(`p/${delP}/`)) await store.localDel(k);
         await store.localSet('periods', ((await store.localGet('periods')) || []).filter((x) => x !== delP));
         toast(`Đã xoá kỳ ${delP}.`, 'pass');
