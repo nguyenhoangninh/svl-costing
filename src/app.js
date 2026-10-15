@@ -1507,7 +1507,7 @@ function periodTable() {
   return `<table class="cp"><thead><tr><th>Kỳ</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows.map((p) => { const x = st(p); const h = hid.has(p);
     return `<tr><td><a href="#cc" data-act="goto-period" data-p="${p}"><b>${p}</b></a>${p === S.period ? ' <span class="muted">(đang mở)</span>' : ''}${h ? ' <span class="muted">(đã ẩn)</span>' : ''}</td>
       <td>${x.closed ? pill('CLOSED') : x.ever ? `${pill('REVIEW')} <small>đã từng đóng – đang mở lại</small>` : pill('OPEN')}</td>
-      <td class="r">${admin && !x.ever && (!store.cloud.enabled || !(S.periodInfo[p] || {}).cloud) ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá bản nháp…</button>` : ''}
+      <td class="r">${admin && !x.ever && (!store.cloud.enabled || !(((S.periodInfo || {})[p] || {}).cloud)) ? `<button class="btn danger ghost sm" data-act="delete-period" data-p="${p}" type="button">Xoá bản nháp…</button>` : ''}
         ${admin && !h && (store.cloud.enabled || x.ever) ? `<button class="btn ghost sm" data-act="hide-period" data-p="${p}" type="button" title="Ẩn kỳ nhưng giữ toàn bộ dữ liệu và lịch sử Cloud">Ẩn kỳ…</button>` : ''}
         ${admin && h ? `<button class="btn ghost sm" data-act="unhide-period" data-p="${p}" type="button">Hiện lại</button>` : ''}</td></tr>`; }).join('')}</tbody></table>
     ${hid.size ? `<p class="muted"><label><input type="checkbox" id="show-hidden" ${show ? 'checked' : ''}> Hiện cả ${hid.size} kỳ đã ẩn</label></p>` : ''}
