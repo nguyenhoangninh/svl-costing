@@ -209,6 +209,7 @@ export function view(el) {
   // ---- comparisons: previous period (STEP 5 when available, else the Sales Database), same month last year (Sales Database)
   const db = monthlyRevenue(S.d.salesDB, S.d.returnsDB, F);
   const prevRes = HIST.get(prev) || null;
+  const comparisonSource = prevRes ? 'STEP 5 kỳ trước' : 'Sales Database kỳ trước · chỉ dùng đối chiếu doanh thu';
   const pT = totalsOf(prevRes);
   const pDb = db.get(prev) || null;
   const prevNet = pT ? pT.net : pDb ? pDb.net : null;
@@ -339,6 +340,7 @@ export function view(el) {
     ${filtered ? `<div class="alert info dx-filtered">Đang lọc: ${F.cust ? `khách hàng <b>${esc(F.cust)}</b>` : ''}${F.cust && F.prod ? ' · ' : ''}${F.prod ? `sản phẩm <b>${esc(F.prod)}</b>` : ''}. Tiêu dùng nội bộ không thuộc khách hàng / bán hàng nên không nằm trong số liệu lọc.</div>` : ''}
     <div class="dx-section-label"><div><span class="dx-eyebrow">FINANCIAL SNAPSHOT</span><h2>Tổng quan hiệu quả kinh doanh</h2></div><span class="dx-unit-label">VND · kỳ ${esc(S.period)}</span></div>
     <div class="dx-kpis">${kpis}</div>
+    <p class="dx-source-line">Nguồn so sánh: ${esc(comparisonSource)} · GP kỳ trước chỉ hiển thị khi có STEP 5 · Nhấn tên khách hàng / mã sản phẩm để truy xuất hóa đơn.</p>
     ${qualityBox}
     ${intelBox}
 
@@ -359,14 +361,14 @@ export function view(el) {
         ${pl.rows.length ? `<div class="dash-scroll">${chartGp(pl.rows.slice(0, 10), avg)}</div>` : A.emptyNote('Chưa có khách hàng trong kỳ.')}
       </section>
       <section class="card dx-card"><div class="dx-ch"><h2>Top sản phẩm theo doanh thu</h2></div>
-        ${topP.length ? `<ol class="dx-bars">${topP.map((r, i) => `<li><span class="dx-rank">${i + 1}</span><span class="dx-name" title="${esc(r.name)}">${esc(r.prod)}<small>${esc(cut(r.name || '', 34))}</small></span><span class="dx-track"><i style="width:${(Math.max(0, r.net) / maxP * 100).toFixed(1)}%"></i></span><b>${esc(short(r.net))}</b><em class="dx-gpp ${gpCls(r.gpPct, avg)}">${pct(r.gpPct)}</em></li>`).join('')}</ol>` : A.emptyNote('Chưa có sản phẩm trong kỳ.')}
+        ${topP.length ? `<ol class="dx-bars">${topP.map((r, i) => `<li><span class="dx-rank">${i + 1}</span><button type="button" class="dx-name dx-drill-action" data-dx-prod="${esc(r.prod)}" aria-label="Lọc sản phẩm ${esc(r.prod)}" title="${esc(r.name)}">${esc(r.prod)}<small>${esc(cut(r.name || '', 34))}</small></button><span class="dx-track"><i style="width:${(Math.max(0, r.net) / maxP * 100).toFixed(1)}%"></i></span><b>${esc(short(r.net))}</b><em class="dx-gpp ${gpCls(r.gpPct, avg)}">${pct(r.gpPct)}</em></li>`).join('')}</ol>` : A.emptyNote('Chưa có sản phẩm trong kỳ.')}
       </section>
     </div>
 
     <div class="dx-row r-3">
       <section class="card dx-card"><div class="dx-ch"><h2>Top khách hàng theo doanh thu</h2></div>
         <div class="dash-scroll"><table class="cp dx-t"><thead><tr><th>Khách hàng</th><th class="r">Doanh thu</th><th class="r">% DT</th><th class="r">Lãi gộp</th><th class="r">GP %</th></tr></thead><tbody>
-          ${topC.map((r) => `<tr><td title="${esc(r.cust)}">${esc(cut(r.cust, 28))}</td><td class="r">${esc(short(r.net))}</td><td class="r">${pct(Math.abs(t.net) > TOL ? r.net / t.net : null)}</td><td class="r">${esc(short(r.gp))}</td><td class="r"><em class="dx-gpp ${gpCls(r.gpPct, avg)}">${pct(r.gpPct)}</em></td></tr>`).join('')}
+          ${topC.map((r) => `<tr><td><button type="button" class="dx-drill-action dx-customer-link" data-dx-cust="${esc(r.cust)}" title="Xem khách hàng ${esc(r.cust)}">${esc(cut(r.cust, 28))}</button></td><td class="r">${esc(short(r.net))}</td><td class="r">${pct(Math.abs(t.net) > TOL ? r.net / t.net : null)}</td><td class="r">${esc(short(r.gp))}</td><td class="r"><em class="dx-gpp ${gpCls(r.gpPct, avg)}">${pct(r.gpPct)}</em></td></tr>`).join('')}
         </tbody></table></div>
       </section>
       <section class="card dx-card"><div class="dx-ch"><h2>Cơ cấu doanh thu theo khách hàng</h2></div>
@@ -374,7 +376,7 @@ export function view(el) {
       </section>
       <section class="card dx-card"><div class="dx-ch"><h2>Sản phẩm GP % thấp nhất</h2></div>
         ${lowGp.length ? `<table class="cp dx-t"><thead><tr><th>Sản phẩm</th><th class="r">Doanh thu</th><th class="r">Lãi gộp</th><th class="r">GP %</th></tr></thead><tbody>
-          ${lowGp.map((r) => `<tr><td title="${esc(r.name)}">${esc(r.prod)}</td><td class="r">${esc(short(r.net))}</td><td class="r">${esc(short(r.gp))}</td><td class="r"><em class="dx-gpp ${gpCls(r.gpPct, avg)}">${pct(r.gpPct)}</em></td></tr>`).join('')}
+          ${lowGp.map((r) => `<tr><td><button type="button" class="dx-drill-action dx-customer-link" data-dx-prod="${esc(r.prod)}" title="Xem sản phẩm ${esc(r.prod)}">${esc(r.prod)}</button></td><td class="r">${esc(short(r.net))}</td><td class="r">${esc(short(r.gp))}</td><td class="r"><em class="dx-gpp ${gpCls(r.gpPct, avg)}">${pct(r.gpPct)}</em></td></tr>`).join('')}
         </tbody></table><p class="muted dx-note">Đỏ: lỗ gộp · cam: dưới GP % tổng hợp (${pct(avg)}).</p>` : A.emptyNote('Chưa có sản phẩm trong kỳ.')}
       </section>
     </div>
@@ -416,6 +418,15 @@ export function view(el) {
   on('#dx-prod', 'change', (e) => { F.prod = e.target.value; view(el); });
   on('#dx-reset', 'click', () => { F.cust = ''; F.prod = ''; view(el); });
   on('#dx-toggle-detail', 'click', () => { F.detail = !F.detail; view(el); });
+  // Event delegation survives dashboard re-render. Each click selects the entity and opens
+  // the existing STEP 5 invoice detail, without changing original costing/revenue lines.
+  el.querySelectorAll('[data-dx-cust], [data-dx-prod]').forEach((btn) => btn.addEventListener('click', () => {
+    if (btn.hasAttribute('data-dx-cust')) { F.cust = btn.getAttribute('data-dx-cust'); F.prod = ''; }
+    else { F.prod = btn.getAttribute('data-dx-prod'); F.cust = ''; }
+    F.detail = true;
+    view(el);
+    el.querySelector('.dx-drill')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }));
   on('#dash-export', 'click', () => A.exportHachToan());
   on('#dx-plan-save', 'click', () => savePlan(el));
   loadHistory(S.period, el);
