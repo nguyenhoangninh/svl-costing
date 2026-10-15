@@ -1319,7 +1319,7 @@ async function rollWIP() {
 }
 /** Has the previous period changed since its balances were rolled into this one? (sets S.prevDrift) */
 /**
- * v1.14.85 (audit AUD-02 / AUD-03 / NEW-05): another period as the cloud holds it NOW, not this device's cache.
+ * v1.14.86 (audit AUD-02 / AUD-03 / NEW-05): another period as the cloud holds it NOW, not this device's cache.
  * Signed in: the cloud revision is read; when this device's copy is older (or missing) the listed blobs are loaded from
  * the cloud. Returns { d, source: 'OPEN'|'LOCAL'|'CLOUD', verified, rev, offline, error }.
  * verified = false with an error means the cloud could not be read – callers must not treat the local copy as current.
@@ -1351,7 +1351,7 @@ async function checkPrevDrift() {
   const p = (op && op.period) || (bs && bs.period) || fgRoll;
   let verifyErr = '';
   if (p) {
-    // v1.14.85 (AUD-02): read the previous period as the cloud holds it now; never fall back silently to a stale copy
+    // v1.14.86 (AUD-02): read the previous period as the cloud holds it now; never fall back silently to a stale copy
     const rv = await readPeriodVerified(p, ['step3', 'register', 'closed', 'step5', 'nrvDecision']).catch((e) => ({ verified: false, error: (e && e.message) || String(e) }));
     if (!rv.verified && !rv.offline) verifyErr = `Không xác minh được kỳ ${p} trên cloud (${rv.error || 'không đọc được'}). Số dư đầu kỳ ${S.period} chưa được đối chiếu với số mới nhất của kỳ ${p}; kiểm tra kết nối rồi mở lại màn hình trước khi CLOSE.`;
     const prevD = rv.d;

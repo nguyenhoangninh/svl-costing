@@ -68,7 +68,7 @@ export function nrvApprovedFor(S, res) {
   return PROV.nrvApproved((res && res.closing) || [], res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
 }
 /**
- * v1.14.85 (audit AUD-02): FG opening rolled forward from the previous period's closing (layers, cost and provision)
+ * v1.14.86 (audit AUD-02): FG opening rolled forward from the previous period's closing (layers, cost and provision)
  * must still match that closing. Returns the drift message, or '' when it matches or the opening was not rolled.
  * The provision is left out of the comparison when the opening provision was loaded from a file afterwards.
  */
@@ -197,7 +197,7 @@ export function derive(S, p2) {
   if (res && stale && !(d.closed && d.closed.period === S.period)) closeReason = `STEP 5 OUTDATED: ${stale}. Chạy lại theo thứ tự STEP 4 → RUN FIFO → BUILD FG HISTORY.`;
   if (!closeReason && res && !(d.closed && d.closed.period === S.period)) { const b = P2.threeBBlock(S, p2 ? p2.d3b : null, { forClose: true }); if (b) closeReason = b; }
   if (!closeReason && res && (S.prevDrift || []).length && !(d.closed && d.closed.period === S.period)) closeReason = `Số dư đầu kỳ đã lệch so với kỳ trước: ${S.prevDrift[0]}`;
-  // v1.14.85 (AUD-02): the previous period could not be read from the cloud → no CLOSE on an unverified opening
+  // v1.14.86 (AUD-02): the previous period could not be read from the cloud → no CLOSE on an unverified opening
   if (!closeReason && res && S.prevVerifyErr && !(d.closed && d.closed.period === S.period)) closeReason = S.prevVerifyErr;
   if (!closeReason && res && res.undated && res.undated.length) closeReason = `Sales Database có ${res.undated.length} dòng thiếu / sai ngày hoá đơn (vd. ${res.undated.slice(0, 3).map((u) => u.inv || 'dòng ' + u.dbRow).join(', ')}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.`;
   if (!closeReason && res && dups.pending) closeReason = `Còn ${dups.pending} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).`;
@@ -1038,7 +1038,7 @@ export async function doReopen() {
     } catch (e) { A.toast(cloudTransitionMessage('REOPEN preflight', e), 'block'); return; }
   }
   const np = nextP(S.period);
-  // v1.14.85 (audit AUD-03): the next period's status is read from the cloud itself, not from this device's cache
+  // v1.14.86 (audit AUD-03): the next period's status is read from the cloud itself, not from this device's cache
   if (A.cloudOn() && A.cloudMeta) {
     let nm;
     try { nm = await A.cloudMeta(np); } catch (e) { A.toast(`Không thể mở lại ${S.period}: không đọc được trạng thái kỳ kế tiếp ${np} trên cloud (${e.message || e}). Thử lại khi có kết nối.`, 'block'); return; }

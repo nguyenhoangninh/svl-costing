@@ -1239,7 +1239,7 @@ export const EN = {
 "Dashboard": "Dashboard",
 "Dashboard doanh thu & GP": "Revenue & GP dashboard",
 "Theo khách hàng · GP %": "By customer · GP %",
-// v1.14.85: audit wave 2
+// v1.14.86: audit wave 2
 "Chưa xác minh được kỳ trước": "Previous period not verified",
 "FG / dự phòng cuối kỳ {#} đã thay đổi sau khi chuyển sang FG đầu kỳ {#} – chuyển lại ở {#} (Roll forward), Validate rồi chạy lại STEP {#}.": "FG / provision closing of {#} changed after it was carried into the FG opening of {#} – roll forward again in {#}, Validate, then rerun STEP {#}.",
 "FG cuối kỳ {#} đã thay đổi sau khi chuyển sang FG đầu kỳ {#} – chuyển lại ở {#} (Roll forward), Validate rồi chạy lại STEP {#}.": "FG closing of {#} changed after it was carried into the FG opening of {#} – roll forward again in {#}, Validate, then rerun STEP {#}.",

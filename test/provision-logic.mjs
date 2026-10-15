@@ -202,7 +202,7 @@ const gMsg = P3.provisionGate(badS, bad);
 ok('5P gate: provision with no source on a production layer blocks CLOSE (50,000)', /5P Dự phòng FG \(TK 2294\) chưa khớp/.test(gMsg) && /50000/.test(gMsg));
 ok('5P gate: no STEP 5 result → no 5P block (STEP 5 gates apply)', P3.provisionGate(gS, null) === '');
 
-// ---- v1.14.85 (audit AUD-02): FG opening rolled from last period's closing must still match that closing
+// ---- v1.14.86 (audit AUD-02): FG opening rolled from last period's closing must still match that closing
 {
   const prevStep5 = { ...structuredClone(ret), period: '2026-07', runResult: 'PASS' };
   const prevD = { step5: prevStep5, nrvDecision: null };

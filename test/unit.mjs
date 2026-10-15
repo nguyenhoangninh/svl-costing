@@ -1213,7 +1213,7 @@ eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP
   eq('customer name case: monthly trend filter matches any spelling', monthlyRevenue(db, null, { cust: 'Tectronic' }).get('2026-08').net, 50);
 }
 
-// ---- v1.14.85 (audit AUD-02 / 03 / NEW-05): which copy of another period may be trusted
+// ---- v1.14.86 (audit AUD-02 / 03 / NEW-05): which copy of another period may be trusted
 eq('read plan: not signed in → this device only (unverified)', SP.periodReadPlan({ signedIn: false }), 'OFFLINE');
 eq('read plan: cloud unreadable → error, local copy not trusted', SP.periodReadPlan({ signedIn: true, metaError: 'offline' }), 'ERROR');
 eq('read plan: period not on the cloud → local is the only copy', SP.periodReadPlan({ signedIn: true, meta: null }), 'NO_CLOUD');

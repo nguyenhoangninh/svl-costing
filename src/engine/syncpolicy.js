@@ -19,7 +19,7 @@ export const outboxOthers = (periods, current) => [...new Set((periods || []).fi
 export const closeCommitted = (meta, closedAt) => !!(meta && meta.summary && closedAt && meta.summary.closed === closedAt);
 
 /**
- * v1.14.85 (audit AUD-02 / AUD-03 / NEW-05): which copy of another period may be trusted.
+ * v1.14.86 (audit AUD-02 / AUD-03 / NEW-05): which copy of another period may be trusted.
  *   OFFLINE   – not signed in: only this device's copy exists (cannot be verified)
  *   ERROR     – the cloud could not be read: the local copy must not be treated as current
  *   NO_CLOUD  – the period is not on the cloud: this device's copy is the only one

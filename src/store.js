@@ -308,7 +308,7 @@ export async function cloudMeta(period) {
   return s.exists() ? s.data() : null;
 }
 
-/** names (optional, v1.14.85): load only these blobs – a check of another period needs a few blobs, not its ERP datasets. */
+/** names (optional, v1.14.86): load only these blobs – a check of another period needs a few blobs, not its ERP datasets. */
 export async function cloudLoad(period, onProgress, names = null) {
   const meta = await cloudMeta(period);
   if (!meta) return null;

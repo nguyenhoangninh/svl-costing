@@ -56,6 +56,8 @@ DB.install(A);
 DB.view(el);
 let html = el.innerHTML;
 ok('header, filter bar and export button', html.includes('Dashboard điều hành') && html.includes('id="dx-cust"') && html.includes('id="dx-prod"') && html.includes('id="dash-export"'));
+ok('ranking links can drill to invoice detail', html.includes('data-dx-cust="B"') && html.includes('data-dx-prod="P2"'));
+ok('comparative revenue source is transparently named', html.includes('Nguồn so sánh:') && html.includes('Sales Database kỳ trước'));
 ok('six KPI cards', (html.match(/class="dx-kpi /g) || []).length === 6);
 ok('monthly trend chart with the period month highlighted', html.includes('dx-trend') && html.includes('class="dx-ax cur">T8<'));
 ok('last year line drawn from the Sales Database', html.includes('class="dx-last"'));
@@ -91,7 +93,7 @@ html = el.innerHTML;
 ok('plan saved as a period blob', S.d.dashPlan && S.d.dashPlan.revenue === 250 && Math.abs(S.d.dashPlan.gpPct - 0.4) < 1e-9 && saved.includes('dashPlan'));
 ok('gauge shows 120,0% of plan', html.includes('120,0%') && html.includes('Sửa kế hoạch kỳ'));
 
-// v1.14.85 (NEW-05): the previous period is read through the verified reader and its source is shown
+// v1.14.86 (NEW-05): the previous period is read through the verified reader and its source is shown
 {
   const S2 = { ...S, period: '2026-08', d: { ...S.d } };
   const el3 = { isConnected: true, innerHTML: '', querySelector: (q) => (q === '#dash-tbl' || q === '#dash-ptbl' ? { mounted: null } : node(q)) };

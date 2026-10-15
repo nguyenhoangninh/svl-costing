@@ -930,6 +930,16 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
 .dx-drill .vt {min-width:0;}
 @media(max-width:900px){.dx-bridge{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:430px){.dx-bridge>div{padding:10px}.dx-bridge b{font-size:17px}}
+
+/* Executive Dashboard entity drill-down: keyboard-visible, responsive, theme-neutral */
+.dx .dx-drill-action { appearance:none; -webkit-appearance:none; border:0; background:none; color:var(--ink); font:inherit; text-align:left; cursor:pointer; padding:3px 4px; margin:-3px -4px; border-radius:6px; min-width:0; max-width:100%; }
+.dx .dx-drill-action:hover { color:var(--accent); background:var(--accent-soft); }
+.dx .dx-drill-action:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.dx .dx-customer-link { font-weight:650; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:3px; text-decoration-color:var(--rule); }
+.dx .dx-verify { margin:-12px 0 16px; padding:0 2px; }
+.dx .dx-source-line { margin:-8px 0 16px; padding:0 2px; color:var(--muted); font-size:11.5px; line-height:1.65; }
+.dx .dx-drill { scroll-margin-top:80px; }
+@media (max-width:699px) { .dx .dx-drill-action { min-height:30px; } .dx .dx-source-line { font-size:11px; } }
 </style>
 </head>
 <body>
