@@ -1,6 +1,14 @@
 // v1.14.59: English UI strings. Keys are the Vietnamese text as rendered (trimmed, single spaces), numbers replaced by {#}.
 // Generated from a crawl of every screen and tab; values keep {#} in the same order.
 export const EN = {
+"lệch lớn nhất {#} %": "largest deviation {#} %",
+"Chạy lại theo thứ tự (STEP {#} nếu cần) → RUN FIFO COGS → BUILD FG HISTORY.": "Re-run in order (STEP {#} if needed) → RUN FIFO COGS → BUILD FG HISTORY.",
+"Chạy lại theo thứ tự STEP {#} → RUN FIFO → BUILD FG HISTORY.": "Re-run in order STEP {#} → RUN FIFO → BUILD FG HISTORY.",
+"Đóng thông báo": "Close notifications",
+" (cloud đã xác nhận)": " (cloud confirmed)",
+"Lọc thông báo": "Filter notifications",
+"thông báo": "notifications",
+"Thông báo": "Notifications",
 "% tiêu hao": "% consumption",
 "% tổng phân bổ": "% of total allocated",
 "(ERP {#} so với FIFO {#} VND) – đơn giá ERP của các dòng này bất thường, cần kiểm tra giá xuất kho trên ERP (tab \"ERP vs FIFO\", lọc \"BẤT THƯỜNG\"). Không tính các dòng đó, ERP {#} ≤ FIFO {#} VND đúng như nguyên tắc.": "(ERP {#} vs FIFO {#} VND) – the ERP unit price of these lines is abnormal; check the issue price in ERP (tab \"ERP vs FIFO\", filter \"ABNORMAL\"). Excluding them, ERP {#} ≤ FIFO {#} VND as expected.",
@@ -1962,4 +1970,2502 @@ export const MSG_WILD = [
 "en": "Saved {*} revenue lines (REVIEW {*}, replaced {*} old lines)",
 "prefix": true
 }
+];
+
+// v1.14.60: every other Vietnamese text segment of the source code (states not seen in the crawl: confirmed cards, errors, trace screens…).
+// SRC_WILD: '{*}' marks a value inserted by the code.
+export const SRC_EXACT = {
+"Đang lưu lên cloud…": "Saving to the cloud…",
+"Kỳ đã đóng – mở lại kỳ (5.3) nếu cần xoá": "Period closed – reopen it (5.3) if you need to delete",
+"Tiếp tục?": "Continue?",
+"Huỷ = giữ bản trên máy, không ghi đè cloud.": "Cancel = keep this computer's copy, do not overwrite the cloud.",
+"OK = tải bản cloud về (BỎ các thay đổi chưa đồng bộ trên máy này).": "OK = load the cloud copy (DISCARDS unsynced changes on this computer).",
+"Quy trình chuẩn: BUILD FG HISTORY → CLOSE MONTH → ROLL FORWARD.": "Standard flow: BUILD FG HISTORY → CLOSE MONTH → ROLL FORWARD.",
+"Nhập lý do để vẫn roll forward (chỉ dùng khi thiết lập ban đầu / khôi phục), để trống để huỷ:": "Enter a reason to roll forward anyway (initial setup / recovery only); leave blank to cancel:",
+"Price Master → OUTDATED, hãy Update Price Master.": "Price Master → OUTDATED, please run Update Price Master.",
+"(CHÚ Ý: chưa có / chưa cập nhật FIFO kỳ này)": "(NOTE: FIFO for this period missing / not updated)",
+"(CHÚ Ý: chưa cập nhật đủ từ STEP 4.3)": "(NOTE: not fully updated from STEP 4.3)",
+"(CHƯA ĐÓNG – lý do:": "(NOT CLOSED – reason:",
+"(bình quân tháng)": "(monthly average)",
+"(bạn)": "(you)",
+"(bỏ)": "(excluded)",
+"(chưa có lý do)": "(no reason yet)",
+"(chủ sở hữu)": "(owner)",
+"(cloud đã xác nhận)": "(confirmed by the cloud)",
+"(dừng ở giới hạn 20.000 – xuất Excel theo từng đợt)": "(stopped at the 20,000 limit – export Excel in batches)",
+"(không PC)": "(no PC)",
+"(không phát sinh)": "(none this period)",
+"(không rõ)": "(unknown)",
+"(kỳ trước chưa đóng)": "(previous period not closed)",
+"(máy này + cloud)": "(this device + cloud)",
+"(máy này)": "(this device)",
+"(quản trị viên)": "(administrator)",
+"(tiêu dùng nội bộ)": "(internal consumption)",
+"(trống)": "(empty)",
+"(tự khớp hoá đơn gần nhất hoặc đơn giá nhập tay) – xem bảng \"Xử lý dòng trả lại\".": "(auto-matched to the nearest invoice or a manual unit cost) – see the \"Return line handling\" table.",
+"(xoá)": "(delete)",
+"(ô vuông có mũi tên lên) →": "button (square with an up arrow) →",
+"(đã ẩn)": "(hidden)",
+"(đầy đủ)": "(complete)",
+"(ưu tiên) hoặc": "(preferred) or",
+"+ Nhập kho từ sản xuất": "+ Received from production",
+", khối \"Tiêu dùng nội bộ\".": ", block \"Internal consumption\".",
+". Cần kiểm tra trước khi tiếp tục.": ". Check it before continuing.",
+". Hoàn tác hoặc xác nhận ở màn": ". Undo or confirm on screen",
+"03_WIP_DIRECT_ADJ_INPUT chưa có vật tư nào.": "03_WIP_DIRECT_ADJ_INPUT has no materials.",
+"100% (dòng)": "100% (rows)",
+"21 báo cáo T · S · O": "21 reports T · S · O",
+"2B · Sổ FG Stock Out / Rework": "2B · FG Stock Out / Rework register",
+"5B · Rework lấy lớp hoàn thành sau ngày xuất": "5B · Rework took layers completed after the issue date",
+"622 / 627 theo lô": "622 / 627 by lot",
+"622 / đv": "622 / unit",
+"622 lũy kế": "YTD 622",
+"622/đv": "622/unit",
+"627 / đv": "627 / unit",
+"627 lũy kế": "YTD 627",
+"627/đv": "627/unit",
+": chưa tìm được hoá đơn gốc.": ": original invoice not found yet.",
+": dùng đơn giá vốn nhập tay – chỉ được áp dụng sau khi": ": uses a manual unit cost – applied only after",
+": hệ thống tự chọn hoá đơn gần nhất của cùng khách – sản phẩm (cần xác nhận).": ": the system chose the nearest invoice of the same customer – product (needs confirmation).",
+"= FIFO theo tháng, tách theo hoá đơn: lần lượt từng dòng hoá đơn trong tháng (theo ngày) lấy lô cũ nhất còn tồn; một hoá đơn lấy nhiều lô thì tự tách thành nhiều dòng ở tab FIFO detail (gắn tháng, hoá đơn, khách, lô). Tổng giá vốn tháng giống workbook Excel; lô sản xuất trong tháng dùng được cho mọi hoá đơn của tháng. Phân bổ theo lô xem thêm ở 4.4 → Phân bổ giá vốn theo hoá đơn.": "= FIFO by month, split by invoice: each invoice line in the month (by date) takes the oldest lot in stock; an invoice taking several lots is split into several lines in the FIFO detail tab (with month, invoice, customer, lot). The monthly COGS total is the same as the Excel workbook; lots produced in the month can serve any invoice of the month. For the allocation by lot see 4.4 → COGS allocation by invoice.",
+"= Tồn cuối kỳ": "= Closing stock",
+"Biên lợi nhuận": "Margin",
+"Bán hàng (COGS)": "Sales (COGS)",
+"Báo cáo PC": "PC report",
+"Báo cáo này chưa được import.": "This report has not been imported.",
+"Bước tiếp: STEP 5R.": "Next step: STEP 5R.",
+"Bạn chỉ xem được dữ liệu, không lưu thay đổi lên cloud.": "You can only view data; changes are not saved to the cloud.",
+"BẤT": "ABN.",
+"Bấm Update Price Master (tab Price Master) để danh sách giá phủ đúng các lô hiện tại.": "Click Update Price Master (Price Master tab) so the price list covers the current lots.",
+"Bấm một dòng để sửa hoặc mở lại (OPEN).": "Click a line to edit or reopen it (OPEN).",
+"Bấm một dòng để xử lý.": "Click a line to handle it.",
+"Bấm một lô để xem vật tư của lô đó.": "Click a lot to see its materials.",
+"Bất thường": "Abnormal",
+"BẬT": "ON",
+"BẬT tiêu hao (Nợ 632 / Có 152)": "Turn consumption ON (Dr 632 / Cr 152)",
+"Bắt đầu một kỳ giá thành": "Start a costing period",
+"Bắt đầu năm mới (mang tồn kho)": "Start a new year (carry stock)",
+"Bỏ qua:": "Skipped:",
+"CHI TIẾT": "DETAIL",
+"CHƯA CÓ SỐ": "NO FIGURES",
+"CHƯA XÁC NHẬN": "NOT CONFIRMED",
+"CHƯA mở lại kỳ": "Period NOT reopened",
+"CHƯA đóng kỳ": "Period NOT closed",
+"CHỈ CÓ Ở PC-M": "ONLY IN PC-M",
+"CHỈ CÓ Ở PC-P": "ONLY IN PC-P",
+"Cao nhất": "Highest",
+"Chi phí": "Expense",
+"Chia sẻ": "Share",
+"Chênh /đv": "Diff. /unit",
+"Chênh PC-M − PC-P (VND)": "Diff. PC-M − PC-P (VND)",
+"Chênh PC-P − PC-M": "Diff. PC-P − PC-M",
+"Chênh SL (4.4 − 5)": "Qty diff. (4.4 − 5)",
+"Chênh SL = thực tế − định mức trung vị × SL lô. Ảnh hưởng định mức = chênh SL × đơn giá BQ; ảnh hưởng đơn giá = (đơn giá lô − BQ) × SL.": "Qty diff. = actual − median norm × lot qty. Norm impact = qty diff. × average unit cost; price impact = (lot unit cost − average) × qty.",
+"Chênh giá trị (4.4 − 5)": "Value diff. (4.4 − 5)",
+"Chênh giá trị (VND)": "Value diff. (VND)",
+"Chênh lệch PC-P và PC-M": "PC-P vs PC-M difference",
+"Chênh lệch đã được xác nhận": "Differences confirmed",
+"Chưa BUILD FG HISTORY.": "BUILD FG HISTORY not run.",
+"Chưa BUILD. Bấm “1 · BUILD / REFRESH”.": "Not BUILT. Click “1 · BUILD / REFRESH”.",
+"Chưa chạy": "Not run",
+"Chưa chạy FIFO kỳ này": "FIFO not run this period",
+"Chưa chạy STEP 2 – chưa có danh sách lô PC của kỳ.": "STEP 2 not run – no list of PC lots for the period yet.",
+"Chưa chạy STEP 3.": "STEP 3 has not run.",
+"Chưa chạy STEP 3. Cần STEP 2 = PASS và Opening WIP đã validate.": "STEP 3 not run. STEP 2 = PASS and a validated Opening WIP are required.",
+"Chưa chạy STEP 3A": "STEP 3A not run",
+"Chưa chạy STEP 3B": "STEP 3B not run",
+"Chưa chạy STEP 4": "STEP 4 not run",
+"Chưa chạy STEP 4.": "STEP 4 has not run.",
+"Chưa chạy STEP 5": "STEP 5 not run",
+"Chưa chạy STEP 5 (FIFO giá vốn) cho kỳ này.": "STEP 5 (FIFO COGS) has not run for this period.",
+"Chưa chạy STEP 5.": "STEP 5 has not run.",
+"Chưa chạy STEP 5.2 (RUN FIFO bán hàng)": "STEP 5.2 not run (RUN FIFO sales)",
+"Chưa chạy STEP 5.2.": "STEP 5.2 has not run.",
+"Chưa chạy STEP 5R": "STEP 5R not run",
+"Chưa chạy STEP 5R sau lần RUN FIFO gần nhất": "STEP 5R not run after the latest RUN FIFO",
+"Chưa chạy STEP 5R.": "STEP 5R has not run.",
+"Chưa chạy Update Price Master": "Update Price Master not run",
+"Chưa chọn kỳ.": "No period selected.",
+"Chưa có FG History.": "No FG History yet.",
+"Chưa có FG đầu kỳ.": "No opening FG yet.",
+"Chưa có Opening WIP cho kỳ này.": "No Opening WIP for this period yet.",
+"Chưa có duyệt hợp lệ – bấm Lưu để gửi duyệt": "No valid approval yet – click Save to request approval",
+"Chưa có dòng FG nào đang hoạt động trong kỳ này để chọn tiêu dùng nội bộ.": "No active FG lines in this period to choose for internal consumption.",
+"Chưa có dòng Stock Out vật tư (non-FG) trong kỳ.": "No material (non-FG) Stock Out lines in the period.",
+"Chưa có dữ liệu doanh thu trong vùng staging.": "No revenue data in staging yet.",
+"Chưa có dữ liệu hàng trả lại / giảm giá.": "No returns / discounts data yet.",
+"Chưa có kết quả STEP 2. Hãy chạy phân bổ Stock Out trước.": "No STEP 2 result yet. Run the Stock Out allocation first.",
+"Chưa có kết quả STEP 4.3 – chạy Phân bổ giá thành; kết quả tự chuyển vào bảng này.": "No STEP 4.3 result yet – run Cost allocation; the results move into this table automatically.",
+"Chưa có kết quả. Cần đủ PC-P-T, PC-P-O và STOCK OUT T/S/O rồi bấm Chạy STEP 2.": "No results yet. PC-P-T, PC-P-O and STOCK OUT T/S/O are needed, then click Run STEP 2.",
+"Chưa có số STEP 5.1 / 5.2 để đối chiếu.": "No STEP 5.1 / 5.2 figures to reconcile yet.",
+"Chưa có thời điểm import ERP.": "No ERP import time yet.",
+"Chưa cấu hình Firebase — dữ liệu chỉ nằm trong trình duyệt này.": "Firebase not configured — data stays in this browser only.",
+"Chưa cập nhật Price Master.": "Price Master not updated yet.",
+"Chưa nhập (3A)": "Not entered (3A)",
+"Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213 (STEP 5.3 → tab Đối chiếu FAST).": "FAST balances / movements 154 / 155 / 2294 / 632 / 511 / 5212 / 5213 not entered (STEP 5.3 → FAST reconciliation tab).",
+"Chưa nạp FG đầu kỳ ở STEP 5.1": "Opening FG not loaded in STEP 5.1",
+"Chưa nạp Opening FG.": "Opening FG not loaded.",
+"Chưa đăng nhập để xem thông báo.": "Not signed in to view notifications.",
+"Chưa đăng nhập.": "Not signed in.",
+"Chưa đọc": "Unread",
+"Chưa đủ số liệu": "Not enough data",
+"Chạy 1 BUILD (tự dựng lại ENGINE)": "Run 1 BUILD (rebuild ENGINE)",
+"Chạy FIFO COGS": "Run FIFO COGS",
+"Chạy RUN FIFO COGS (bán hàng) trước – STEP 5R cần giá vốn của hoá đơn gốc.": "Run RUN FIFO COGS (sales) first – STEP 5R needs the COGS of the original invoices.",
+"Chạy RUN FIFO COGS trước để có số dư cuối kỳ.": "Run RUN FIFO COGS first to get the closing balances.",
+"Chạy STEP 2 – Phân bổ Stock Out": "Run STEP 2 – Stock Out allocation",
+"Chạy STEP 3 – Material WIP": "Run STEP 3 – Material WIP",
+"Chạy STEP 3A trước": "Run STEP 3A first",
+"Chạy STEP 5 – FIFO COGS": "Run STEP 5 – FIFO COGS",
+"Chạy STEP 5R (hàng bán bị trả lại) ở màn hình 5R": "Run STEP 5R (sales returns) on screen 5R",
+"Chạy UPDATE PRICE / xử lý giá thiếu": "Run UPDATE PRICE / resolve missing prices",
+"Chạy lại RUN FIFO (STEP 5.2) để cập nhật tồn kho / 154.": "Re-run RUN FIFO (STEP 5.2) to update stock / 154.",
+"Chạy lại STEP 4.3 rồi RUN FIFO.": "Re-run STEP 4.3, then RUN FIFO.",
+"Chế độ import phải là MONTHLY hoặc YTD.": "The import mode must be MONTHLY or YTD.",
+"Chế độ offline": "Offline mode",
+"Chế độ tương thích:": "Compatibility mode:",
+"Chỉ người gửi yêu cầu hoặc quản trị viên mới xoá được.": "Only the requester or an administrator can delete it.",
+"Chỉ quản trị viên được xoá kỳ trên cloud.": "Only administrators can delete a period in the cloud.",
+"Chỉ quản trị viên được đóng kỳ": "Only administrators can close the period",
+"Chỉ tài khoản đã được cấp quyền mới có thể xem dữ liệu giá thành trên cloud.": "Only authorised accounts can see costing data in the cloud.",
+"Chỉ xem – không lưu thay đổi": "View only – changes are not saved",
+"Chọn hoá đơn gốc hoặc nhập đơn giá vốn ở bảng \"Xử lý dòng trả lại\" bên dưới, rồi RUN STEP 5R lại.": "Choose the original invoice or enter a unit cost in the \"Return line handling\" table below, then RUN STEP 5R again.",
+"Chọn kỳ báo cáo (YYYY-MM). Dữ liệu ERP, kết quả từng bước và sổ rework được lưu theo kỳ.": "Choose the reporting period (YYYY-MM). ERP data, step results and the rework register are stored per period.",
+"Chọn tiêu dùng nội bộ ở khối \"Tiêu dùng nội bộ (632 / 155)\" phía trên.": "Choose internal consumption in the \"Internal consumption (632 / 155)\" block above.",
+"Chờ duyệt": "Awaiting approval",
+"Chờ người khác duyệt": "Waiting for someone else to approve",
+"Chứng từ xuất": "Issue document",
+"Cloud có bản mới hơn bản trên máy – chưa tải về, thay đổi trên máy sẽ không được đẩy lên.": "The cloud has a newer version than this device – not loaded; changes on this device will not be pushed.",
+"Cloud đã có revision mới. Tải lại bản Cloud trước khi ghi.": "The cloud has a new revision. Reload the Cloud version before saving.",
+"Complete Qty âm": "Negative Complete Qty",
+"CÒN TỒN": "IN STOCK",
+"Cài SVL Costing lên máy": "Install SVL Costing on this device",
+"Cài lên iPhone / iPad": "Install on iPhone / iPad",
+"Cài ứng dụng": "Install app",
+"Các file được chọn thuộc nhiều kỳ khác nhau. Hãy import từng tháng một.": "The selected files belong to different periods. Import one month at a time.",
+"Các lô": "Lots",
+"Các lô kỳ này": "Lots this period",
+"Các lần xuất bán từ lớp này trong kỳ": "Sales issued from this layer in the period",
+"Các lớp FIFO đã lấy cho dòng bán này": "FIFO layers taken for this sales line",
+"Các vật tư chung của lô nằm trong định mức; chênh lệch giá thành đến từ đơn giá vật tư, Stock Out, 3B hoặc phân bổ 622/627 – xem các dòng số liệu ở trên.": "The lot's common materials are within the norm; the cost difference comes from material unit costs, Stock Out, 3B or the 622/627 allocation – see the figures above.",
+"Cách xử lý: xuất lại PC-P và PC-M cùng lúc từ ERP rồi import lại. Nếu chênh lệch nhỏ đã được giải trình, STEP 3 có chức năng \"Điều chỉnh PC-P theo PC-M\" (có lưu số gốc để hoàn tác).": "How to fix: export PC-P and PC-M from ERP at the same time and re-import. If a small difference has been explained, STEP 3 has \"Adjust PC-P to PC-M\" (the original figures are kept for undo).",
+"Còn WIP SL": "WIP qty left",
+"Còn lại WIP (SL)": "Remaining in WIP (qty)",
+"Có FG Rework Active trong kỳ. STEP 5 bắt buộc STRICT_DATE để không lấy layer hoàn thành sau ngày xuất rework.": "Active FG Rework in the period. STEP 5 requires STRICT_DATE so that layers completed after the rework issue date are not used.",
+"Có biểu tượng trên màn hình chính, mở toàn màn hình, xem được khi mất mạng.": "Home-screen icon, full-screen window, viewable offline.",
+"Có bản Cloud mới hơn #": "A newer Cloud version exists #",
+"Có dòng không còn trong sổ kỳ này – tải lại màn hình.": "Some lines are no longer in this period's register – reload the screen.",
+"Có dòng xuất rework kỳ này chưa có giá FIFO – chạy STEP 5.2 RUN FIFO COGS.": "Rework issues this period have no FIFO cost yet – run STEP 5.2 RUN FIFO COGS.",
+"Có dòng đã xử lý hoặc đã là tiêu dùng nội bộ – tải lại màn hình.": "Some lines are already handled or already internal consumption – reload the screen.",
+"Có giá trị nhưng SL = 0": "Has a value but qty = 0",
+"Có rework chuyển vào": "Has rework transferred in",
+"Có thay đổi chưa lưu.": "There are unsaved changes.",
+"Có điều chỉnh WIP 3B": "Has 3B WIP adjustment",
+"Cơ cấu giá thành": "Cost structure",
+"Cả sản phẩm": "Whole product",
+"Cảnh báo (đã import):": "Warnings (imported):",
+"Cần chạy STEP 2 trước (danh sách sản phẩm lấy từ PC-P).": "STEP 2 must run first (the product list comes from PC-P).",
+"Cần chạy STEP 3A (Material WIP) trước.": "Run STEP 3A (Material WIP) first.",
+"Cần chạy STEP 4 (và STEP 5 cho giá vốn) của kỳ này trước.": "Run STEP 4 (and STEP 5 for COGS) for this period first.",
+"Cần ít nhất 2 kỳ có số liệu để vẽ xu hướng.": "At least 2 periods with figures are needed to draw a trend.",
+"Cần đăng nhập Google để gửi / duyệt": "Google sign-in is required to send / approve",
+"Cần đăng nhập Google để gửi hoặc duyệt đơn giá nhập tay.": "Google sign-in is required to send or approve a manual unit cost.",
+"Danh sách sản phẩm": "Product list",
+"Danh sách tiêu hao đã thay đổi sau lần chạy STEP 2 gần nhất – bấm": "The consumption list changed after the latest STEP 2 run – click",
+"Danh sách đã thay đổi": "The list has changed",
+"Date không đọc được": "Date cannot be read",
+"Direct 622/627 đã được duyệt": "Direct 622/627 approved",
+"Duyệt": "Approve",
+"Duyệt Direct 622/627": "Approve Direct 622/627",
+"Duyệt giá đang chờ": "Approve pending prices",
+"Dòng PC-M (chứng từ gốc)": "PC-M lines (source documents)",
+"Dòng PC-M của lô (chứng từ gốc)": "PC-M lines of the lot (source documents)",
+"Dòng bán": "Sales line",
+"Dòng bán #": "Sales line #",
+"Dòng doanh thu bán hàng – không thuộc file trả lại / giảm giá, import ở màn hình 4.1": "Sales revenue line – not part of the returns / discounts file, import it on screen 4.1",
+"Dòng file": "File row",
+"Dòng hàng bán bị trả lại / giảm giá (SALES RETURN / CREDIT NOTE) – không thuộc file doanh thu, import ở màn hình 5R": "Sales return / discount line (SALES RETURN / CREDIT NOTE) – not part of the revenue file, import it on screen 5R",
+"Dòng này không ở trạng thái tiêu dùng nội bộ.": "This line is not in internal consumption status.",
+"Dòng này là": "This line is",
+"Dòng rework": "Rework line",
+"Dòng tiêu đề 4 của template bị thay đổi:": "Header row 4 of the template has been changed:",
+"Dòng âm trên PC-M: thường là điều chỉnh / trả lại vật tư – kiểm tra chứng từ gốc của dòng đó.": "Negative PC-M lines: usually adjustments / material returns – check that line's source document.",
+"Dòng đang là tiêu dùng nội bộ: dùng nút Hoàn tác ở khối phía trên.": "This line is internal consumption: use the Undo button in the block above.",
+"Dùng cho kỳ": "For period",
+"Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.": "ERP data changed — re-run STEP 2 and STEP 3.",
+"Dữ liệu ERP được import sau lần chạy STEP 2 gần nhất. Chạy lại STEP 2 trước STEP 3.": "ERP data was imported after the latest STEP 2 run. Re-run STEP 2 before STEP 3.",
+"Dữ liệu doanh thu đã import nhưng chưa Validate & Save hoặc còn dòng BLOCK.": "Revenue data imported but not yet Validated & Saved, or BLOCK rows remain.",
+"Dữ liệu giá thành đã cập nhật": "Costing data updated",
+"Dữ liệu hàng trả lại hoặc cách xử lý (hoá đơn gốc / đơn giá) đã đổi sau lần chạy STEP 5R": "Return data or its handling (original invoice / unit cost) changed after the STEP 5R run",
+"Dữ liệu được mở lại để điều chỉnh. Cần kiểm tra các checkpoint.": "The data has been reopened for adjustment. Check the checkpoints.",
+"Dữ liệu đầu vào đã thay đổi": "Input data changed",
+"Dự phòng: chưa có phân bổ R5a–c cho lô nhận trong kỳ.": "Fallback: no R5a–c allocation to receiving lots in the period.",
+"Dự phòng: nhóm không có lô nhận, chia theo PC RM Cost trên O.": "Fallback: group without receiving lots, split by PC RM Cost across O.",
+"ERP MAP đã cập nhật – không có vật tư mới.": "ERP MAP updated – no new materials.",
+"FG tiêu dùng nội bộ (FIFO, tính trước giá vốn bán hàng)": "FG internal consumption (FIFO, costed before sales COGS)",
+"FG đầu kỳ đã validate lại": "Opening FG validated again",
+"FG đầu ra": "Output FG",
+"FIFO đã chạy lại": "FIFO re-run",
+"FILE CHI TIẾT": "DETAIL FILE",
+"File không có dòng SALES RETURN / CREDIT NOTE nào.": "The file has no SALES RETURN / CREDIT NOTE lines.",
+"File không có dòng SALES RETURN / CREDIT NOTE nào. Kỳ không có hàng trả lại / giảm giá thì không cần import.": "The file has no SALES RETURN / CREDIT NOTE lines. If the period has no returns / discounts, no import is needed.",
+"File không có dòng doanh thu bán hàng nào (toàn bộ là SALES RETURN / CREDIT NOTE – import ở màn hình 5R).": "The file has no sales revenue lines (all are SALES RETURN / CREDIT NOTE – import them on screen 5R).",
+"File không có dòng dữ liệu.": "The file has no data rows.",
+"File đầu kỳ cũ": "Old opening file",
+"GT còn lại": "Value left",
+"Giá bán": "Selling price",
+"Giá bán / đv": "Price / unit",
+"Giá bán USD": "Price USD",
+"Giá bán/đv": "Price/unit",
+"Giá bán/đv (VND)": "Price/unit (VND)",
+"Giá thành / đv": "Cost / unit",
+"Giá thành > giá bán": "Cost > selling price",
+"Giá thành STEP 4 đã đổi (điều chỉnh 3B / rework hoàn thành)": "STEP 4 cost changed (3B adjustment / completed rework)",
+"Giá thành SX kỳ này / đv": "Production cost this period / unit",
+"Giá thành kỳ này": "Cost this period",
+"Giá thành lô mới": "New lot cost",
+"Giá thành lũy kế": "YTD cost",
+"Giá thành từng lô ở STEP 4 đã đổi (điều chỉnh 3B / rework chuyển giữa các lô)": "Lot costs in STEP 4 changed (3B adjustment / rework moved between lots)",
+"Giá thành ÷ trung vị": "Cost ÷ median",
+"Giá thành/đv kỳ này": "Cost/unit this period",
+"Giá thủ công thay đổi sau lần cập nhật Price Master:": "Manual prices changed after the Price Master update:",
+"Giá trị (VND)": "Value (VND)",
+"Giá trị 4.4 (VND)": "Value 4.4 (VND)",
+"Giá trị STEP 5 (VND)": "Value STEP 5 (VND)",
+"Giá trị chuyển vào": "Value transferred in",
+"Giá trị còn lại": "Value remaining",
+"Giá trị còn lại (VND)": "Value remaining (VND)",
+"Giá trị theo định mức": "Value at norm",
+"Giá trị thực tế": "Actual value",
+"Giá trị vẫn treo ở 154.": "The value stays pending in 154.",
+"Giá trị xuất rework": "Value to rework",
+"Giá trị – SX năm nay": "Value – produced this year",
+"Giá trị – SX năm trước": "Value – produced last year",
+"Giá vốn (632)": "COGS (632)",
+"Giá vốn / đv": "COGS / unit",
+"Giá vốn / đv bình quân": "Average COGS / unit",
+"Giá vốn hàng bán": "Cost of goods sold",
+"Giá vốn xuất bán trong tháng": "COGS in the month",
+"Giá vốn đã xuất": "COGS issued",
+"Giá vốn đã xuất (VND)": "COGS issued (VND)",
+"Giá vốn đã xuất YTD": "YTD COGS issued",
+"Giá vốn đã xuất trước kỳ (VND)": "COGS issued before the period (VND)",
+"Giá vốn/đv": "COGS/unit",
+"Giảm giá": "Discount",
+"Giảm giá vốn hàng trả lại (5R)": "COGS reduction for returns (5R)",
+"Gồm các tháng": "Months included",
+"Gợi ý kiểm tra": "Suggested checks",
+"Hiện lại": "Show again",
+"Hoàn tác": "Undo",
+"Hoàn tác điều chỉnh": "Undo adjustment",
+"Hoàn tất FX / GL": "Complete FX / GL",
+"Hoàn tất STEP 4 trước": "Complete STEP 4 first",
+"Hoá đơn / phiếu": "Invoice / slip",
+"Hoá đơn / phiếu đã lấy lô (FIFO)": "Invoices / slips that took the lot (FIFO)",
+"Hoá đơn gốc": "Original invoice",
+"Hoá đơn trả": "Return invoice",
+"Hàng bán bị trả lại nhập lại kho": "Sales returns received back into stock",
+"Hàng hỏng tính vào": "Scrap charged to",
+"HĐ gốc": "Original inv.",
+"Hướng xử lý": "Outcome",
+"Hết lớp FG của tháng (đã dùng cho hoá đơn trước)": "FG layers of the month used up (taken by earlier invoices)",
+"Hệ thống giá thành sản xuất tháng": "Monthly production costing system",
+"Họ": "Family",
+"Hỏng tính vào": "Scrap charged to",
+"Import ERP, kiểm soát WIP, phân bổ giá thành, FIFO COGS, Sales Return và đóng kỳ trên một quy trình có kiểm soát.": "ERP import, WIP control, cost allocation, FIFO COGS, sales returns and month close in one controlled process.",
+"Import bị chặn.": "Import blocked.",
+"Import các báo cáo còn thiếu": "Import the missing reports",
+"KHÔNG CÓ trong lô": "NOT IN the lot",
+"KHÔNG ghi đè cloud:": "Cloud NOT overwritten:",
+"Khoản mục thay đổi nhiều nhất là nơi cần xem trước: NVL → xem bảng Vật tư (đơn giá, định mức); 622/627 → xem tổng chi phí GL kỳ và cơ sở phân bổ (STEP 4.2–4.3).": "Look first at the element that changed most: RM → see the Materials table (unit cost, usage norm); 622/627 → see the period's GL totals and the allocation basis (STEP 4.2–4.3).",
+"Không": "No",
+"Không có Product Code trong PC-P hoặc Sales Database của kỳ.": "No Product Code in PC-P or the Sales Database for the period.",
+"Không có WIP âm – không cần STEP 3B. Chạy STEP 4": "No negative WIP – STEP 3B not needed. Run STEP 4",
+"Không có chi tiết PC-M": "No PC-M detail",
+"Không có cơ sở phân bổ dương cho pool 622/627 chung.": "No positive allocation basis for the common 622/627 pool.",
+"Không có dòng FG History để tạo.": "No FG History lines to build.",
+"Không có dòng doanh thu nào lặp lại trong kỳ.": "No repeated revenue lines in the period.",
+"Không có dòng giao dịch nào.": "No transaction rows.",
+"Không có dòng nào.": "No rows.",
+"Không có giá bán trong Price Master – 622/627 không phân bổ được theo đóng góp.": "No selling price in the Price Master – 622/627 cannot be allocated by contribution.",
+"Không có lô nào chênh lệch.": "No lots with differences.",
+"Không có lô nào giá vốn > NRV.": "No lots with cost > NRV.",
+"Không có lớp FG ngày ≤ ngày hoá đơn": "No FG layer dated on or before the invoice date",
+"Không có mạng": "Offline",
+"Không có phát sinh.": "No movements.",
+"Không có rework đang treo.": "No pending rework.",
+"Không có vật tư âm – kỳ này không cần điều chỉnh WIP (không BUILD / APPLY)": "No negative materials – no WIP adjustment needed this period (no BUILD / APPLY)",
+"Không có yêu cầu đang chờ duyệt cho dòng này.": "No request awaiting approval for this line.",
+"Không có điều chỉnh COGS báo cáo": "No reported COGS adjustment",
+"Không kết nối được Firebase — chưa xác thực phiên nên chưa hiển thị dữ liệu kế toán trên máy này. Kết nối lại rồi tải lại trang.": "Cannot connect to Firebase — the session is not authenticated, so no accounting data is shown on this device. Reconnect and reload the page.",
+"Không nhận 622/627": "No 622/627 received",
+"Không nhận diện được báo cáo ERP nào. Cần PC-P/PC-M/MI-P/MI-M/STOCK OUT/MR-P/MR-M + T/S/O trong tên file.": "No ERP report recognised. The file name needs PC-P/PC-M/MI-P/MI-M/STOCK OUT/MR-P/MR-M + T/S/O.",
+"Không nhận diện được báo cáo ERP từ tên file": "ERP report cannot be identified from the file name",
+"Không phát hiện điểm bất thường theo các quy tắc kiểm tra.": "No anomalies found by the check rules.",
+"Không phải file SVL Costing Master (thiếu 00_CONTROL_CENTER).": "Not an SVL Costing Master file (00_CONTROL_CENTER missing).",
+"Không tìm thấy bảng WIP closing/opening trong file.": "No WIP closing/opening table found in the file.",
+"Không tìm thấy bảng có các cột Kỳ, Product Code, Complete Qty và Tổng giá thành (hoặc RM / 622 / 627). Dùng nút \"Tải template\".": "No table found with Period, Product Code, Complete Qty and Total cost (or RM / 622 / 627) columns. Use the \"Download template\" button.",
+"Không tìm thấy bảng có cột Product Code và Unit Price USD.": "No table found with Product Code and Unit Price USD columns.",
+"Không tìm thấy bảng mẫu chi tiết (dòng tiêu đề có PC No., Product code, Complete Qty, Cost month).": "Detail table not found (header row with PC No., Product code, Complete Qty, Cost month).",
+"Không tìm thấy sheet doanh thu có Invoice Date, Product Number, Quantity và Amount (USD).": "No revenue sheet found with Invoice Date, Product Number, Quantity and Amount (USD).",
+"Không xác định được tháng sản xuất (Date trống, số PC không theo PC-YYMM-…)": "Production month cannot be determined (Date blank, PC number not in PC-YYMM-… form)",
+"Không được tự duyệt yêu cầu của chính mình.": "You cannot approve your own request.",
+"Không đọc được kỳ báo cáo ở 00_CONTROL_CENTER!E4.": "Cannot read the reporting period at 00_CONTROL_CENTER!E4.",
+"Khớp FAST": "Matches FAST",
+"Kiểm tra & tải bản Cloud": "Check & load Cloud version",
+"Kiểm tra cầu nối posting (13-16)": "Check posting bridges (13-16)",
+"Kiểm tra giá bán và tỷ giá trên hoá đơn (Sales DB) nếu doanh thu thấp bất thường.": "Check the selling price and FX rate on the invoice (Sales DB) if revenue is unusually low.",
+"Kiểm tra hoá đơn gốc / SL trả / giảm giá vốn": "Check original invoices / returned qty / COGS reduction",
+"Kiểm tra đơn giá RM": "RM unit cost check",
+"Kiểu": "Kind",
+"Kết quả STEP 4 không CURRENT. Chạy lại STEP 4 trước.": "STEP 4 result is not CURRENT. Re-run STEP 4 first.",
+"Kết quả STEP 5 đã cũ (OUTDATED). Chạy lại RUN FIFO COGS.": "The STEP 5 result is OUTDATED. Re-run RUN FIFO COGS.",
+"Kết quả cần kiểm tra / chạy lại": "Results to check / re-run",
+"Kết quả này chưa có chi tiết. Bấm RUN FIFO COGS để tạo lại.": "This result has no detail yet. Click RUN FIFO COGS to rebuild it.",
+"Kỳ (YYYY-MM)": "Period (YYYY-MM)",
+"Kỳ GL Input không khớp kỳ báo cáo.": "The GL Input period does not match the reporting period.",
+"Kỳ Price Master không khớp.": "Price Master period does not match.",
+"Kỳ STEP 2 không khớp.": "STEP 2 period does not match.",
+"Kỳ STEP 3 không khớp.": "STEP 3 period does not match.",
+"Kỳ STEP 3A = kỳ báo cáo": "STEP 3A period = reporting period",
+"Kỳ SX": "Prod. period",
+"Kỳ báo cáo phải có dạng YYYY-MM, ví dụ 2026-08.": "The reporting period must be in the form YYYY-MM, e.g. 2026-08.",
+"Kỳ của STEP 2 không phải kỳ hiện tại. Chạy lại STEP 2.": "The STEP 2 period is not the current period. Re-run STEP 2.",
+"Kỳ giá thành đã đóng trên Cloud": "Costing period closed in the Cloud",
+"Kỳ giá thành đã được cập nhật": "Costing period updated",
+"Kỳ gốc": "Source period",
+"Kỳ khác": "Different period",
+"Kỳ không có PC lot nhưng vẫn có RM / 622 / 627 / direct allocation cần xử lý.": "The period has no PC lots but still has RM / 622 / 627 / direct allocations to handle.",
+"Kỳ không phát sinh sản xuất; STEP 5 chỉ chạy tồn đầu kỳ / bán hàng.": "No production in the period; STEP 5 only runs opening stock / sales.",
+"Kỳ không đọc được (dùng YYYY-MM)": "Period cannot be read (use YYYY-MM)",
+"Kỳ nhập kho": "Receipt period",
+"Kỳ này": "This period",
+"Kỳ này STEP 3A không có vật tư WIP âm (CHECK NEGATIVE) – không cần BUILD / APPLY. Chuyển sang STEP 4.": "STEP 3A has no negative-WIP materials this period (CHECK NEGATIVE) – no BUILD / APPLY needed. Go to STEP 4.",
+"Kỳ này còn mục REVIEW. Xác nhận đã được quản lý review trước khi đóng.": "This period still has REVIEW items. Confirm they were reviewed by management before closing.",
+"Kỳ này có": "This period has",
+"Kỳ này không có FG xuất rework (sổ 2B trống).": "No FG issued to rework this period (register 2B is empty).",
+"Kỳ này vừa được ghi là CLOSED trên cloud; không xoá.": "This period has just been recorded as CLOSED in the cloud; not deleted.",
+"Kỳ này vừa được lưu lại trên cloud trong lúc xoá; chưa xoá dữ liệu. Thử lại sau khi kiểm tra.": "This period was saved again in the cloud during the delete; data not deleted. Try again after checking.",
+"Kỳ này đã từng CLOSED nên là hồ sơ kế toán lưu trữ; không được hard-delete. Chỉ REOPEN để điều chỉnh rồi CLOSE lại.": "This period was CLOSED before, so it is an archived accounting record; it cannot be hard-deleted. Only REOPEN to adjust, then CLOSE again.",
+"Kỳ này đã từng CLOSED trong revision history; không được hard-delete.": "This period was CLOSED in the revision history; it cannot be hard-deleted.",
+"Kỳ sản xuất": "Production period",
+"Kỳ đã đóng hoặc bạn không có quyền sửa – chỉ xem.": "The period is closed or you have no edit rights – view only.",
+"Kỳ đã đóng trên cloud – chỉ quản trị viên ghi được.": "The period is closed in the cloud – only administrators can write.",
+"Kỳ đã đóng trên cloud; chỉ quản trị viên được ghi.": "The period is closed in the cloud; only administrators can write.",
+"Kỳ đã đóng – cloud giữ nguyên bản đóng kỳ.": "The period is closed – the cloud keeps the closed version.",
+"Kỳ đã đóng – mở lại kỳ (5.3) nếu cần xoá": "Period closed – reopen the period (5.3) if it must be deleted",
+"Kỳ được chuyển sang chỉ đọc. Các Step không còn được chỉnh sửa.": "The period is now read-only. The steps can no longer be edited.",
+"Loại xuất": "Issue type",
+"Luân chuyển thành phẩm": "Finished-goods movement",
+"Lãi gộp": "Gross margin",
+"Lãi gộp theo dòng bán": "Gross margin by sales line",
+"Lãi gộp theo giá bán": "Gross margin at selling price",
+"Lô PC": "PC lot",
+"Lô không có trong 4.4": "Lot not in 4.4",
+"Lô không nhận 622/627 chung vì doanh thu theo giá bán − NVL ≤ 0: kiểm tra giá bán trong Price Master và NVL của lô.": "The lot receives no common 622/627 because revenue at selling price − RM ≤ 0: check the Price Master selling price and the lot's RM.",
+"Lô lệch: mở PC-P và PC-M của PC No. đó trên ERP, cộng cột Total Cost của PC-M và so với PC-P.": "Lots with differences: open PC-P and PC-M for that PC No. in ERP, add up the PC-M Total Cost column and compare with PC-P.",
+"Lô rework": "Rework lot",
+"Lô sản xuất trong năm (gộp các dòng của lô). Bấm vào một lô để xem các dòng chi tiết và hoá đơn kỳ này.": "Lots produced in the year (lines of each lot combined). Click a lot to see its detail lines and this period's invoices.",
+"Lô trong 4.4 không đủ số lượng còn tồn": "Lot in 4.4 does not have enough quantity in stock",
+"Lý do / căn cứ": "Reason / basis",
+"Lưu": "Save",
+"Lưu xử lý": "Save handling",
+"LỆCH GIÁ TRỊ": "VALUE MISMATCH",
+"LỆCH SỐ LƯỢNG": "QUANTITY MISMATCH",
+"Lệch đơn giá": "Price deviation",
+"Lệch định mức": "Norm deviation",
+"Lệch – cần xác nhận trước khi đóng kỳ": "Difference – confirm before month close",
+"Lọc theo cột": "Filter by column",
+"Lọc trạng thái MISSING PRICE / NOT IN PRICE MASTER ở bảng dưới; bổ sung giá ở tab Sales Order fallback hoặc Giá thủ công rồi Update Price Master.": "Filter status MISSING PRICE / NOT IN PRICE MASTER in the table below; add prices in the Sales Order fallback or Manual price tab, then Update Price Master.",
+"Lỗi đồng bộ:": "Sync error:",
+"Lỗi — file bị chặn, chưa import:": "Errors — files blocked, not imported:",
+"Lỗi:": "Error:",
+"Lớp FIFO": "FIFO layer",
+"Lớp tô màu: giá vốn/đv cao hơn giá bán/đv. Mở \"Truy xuất\" của lô đó (tab Giá thành sản xuất) để xem vì sao giá thành cao.": "Highlighted layers: COGS/unit above price/unit. Open the \"Trace\" of that lot (Production cost tab) to see why its cost is high.",
+"Lớp đã xuất bán": "Layers sold",
+"Lớp đầu kỳ (OPENING) mang giá thành của kỳ gốc; lớp PRODUCTION mang giá thành kỳ này. Chênh lớn giữa các lớp thường do một lô có NVL/đv bất thường – mở tab Giá thành sản xuất để xem lô đó.": "Opening layers (OPENING) carry the cost of their source period; PRODUCTION layers carry this period's cost. A large gap between layers usually comes from one lot with abnormal RM/unit – open the Production cost tab to see that lot.",
+"Lựa chọn xử lý FIFO (override) đã đổi": "FIFO override choices changed",
+"MONTHLY lấy lớp cũ nhất còn lại sau bán hàng – dùng STRICT_DATE để FIFO theo ngày xuất": "MONTHLY takes the oldest layer left after sales – use STRICT_DATE for FIFO by issue date",
+"Màn hình 5R → RUN STEP 5R": "Screen 5R → RUN STEP 5R",
+"Mã": "Code",
+"Mọi thay đổi được tự động lưu lên Firestore (đã nén).": "Every change is saved to Firestore automatically (compressed).",
+"Mỗi dòng là một lô (hoặc một sản phẩm / tháng). Bắt buộc: Kỳ (YYYY-MM, cùng năm và trước kỳ dùng), Product Code, Complete Qty, Tổng giá thành (hoặc RM + 622 + 627). Không đổi tiêu đề dòng 4. Hướng dẫn chi tiết và ví dụ: sheet HUONG_DAN.": "Each line is one lot (or one product / month). Required: Period (YYYY-MM, same year and before the period used), Product Code, Complete Qty, Total cost (or RM + 622 + 627). Do not rename the row-4 headers. Detailed guide and examples: sheet HUONG_DAN.",
+"Mỗi dòng là một lô còn tồn. Bắt buộc: PC No., Layer Date, Product Code, Qty, RM / 622 / 627 / Total Amount. Không đổi tiêu đề dòng 4 và dấu A1. Hướng dẫn chi tiết và ví dụ: sheet HUONG_DAN.": "Each line is one lot in stock. Required: PC No., Layer Date, Product Code, Qty, RM / 622 / 627 / Total Amount. Do not change the row-4 headers or the A1 marker. Detailed guide and examples: sheet HUONG_DAN.",
+"Mỗi dòng là một phần của lô (PC No. + Product code). Có Cost month (YYYYMM) = đã ghi nhận giá vốn / đã xuất trong tháng đó; KHÔNG có Cost month = còn tồn. Tổng dòng chưa có Cost month = FG đầu kỳ. Không đổi tiêu đề dòng 4. Hướng dẫn: sheet HUONG_DAN.": "Each line is part of a lot (PC No. + Product code). With a Cost month (YYYYMM) = COGS recognised / issued in that month; WITHOUT a Cost month = still in stock. Total of lines without a Cost month = opening FG. Do not rename the row-4 headers. Guide: sheet HUONG_DAN.",
+"Một phiên bản dữ liệu mới đã được lưu lên Cloud.": "A new data version has been saved to the Cloud.",
+"Mở Opening WIP → Roll forward": "Open Opening WIP → Roll forward",
+"Mở STEP 1": "Open STEP 1",
+"Mở STEP 2": "Open STEP 2",
+"Mở STEP 3A": "Open STEP 3A",
+"Mở STEP 4": "Open STEP 4",
+"Mở STEP 5": "Open STEP 5",
+"Mở STEP 5.2": "Open STEP 5.2",
+"Mở lại kỳ…": "Reopen period…",
+"Mở trang này bằng": "Open this page in",
+"Mở từ biểu tượng SVL Costing trên màn hình chính. Ứng dụng tự cập nhật khi có phiên bản mới.": "Open it from the SVL Costing icon on the home screen. The app updates itself when a new version is available.",
+"Mức": "Level",
+"NOT COSTED (PC No. không bắt đầu PC-)": "NOT COSTED (PC No. does not start with PC-)",
+"NRV: so giá thành/đv của lớp với giá bán quy đổi (Price Master × tỷ giá). Tồn lâu: xác nhận với kho/bán hàng khả năng tiêu thụ, cân nhắc trích lập dự phòng.": "NRV: compare the layer's cost/unit with the converted selling price (Price Master × FX). Slow-moving: confirm saleability with warehouse/sales and consider a provision.",
+"NVL / đv": "RM / unit",
+"NVL vật tư chung theo định mức": "Common materials RM at norm",
+"NVL vật tư chung thực tế": "Common materials RM actual",
+"NVL/đv": "RM/unit",
+"NVL/đv ÷ trung vị": "RM/unit ÷ median",
+"Nguồn dòng": "Line source",
+"Ngày HĐ / xuất": "Invoice / issue date",
+"Ngày ghi nhận": "Recognition date",
+"Ngày lô": "Lot date",
+"Người duyệt: APPROVE / HOLD trong CONTROL": "Reviewer: APPROVE / HOLD in CONTROL",
+"Người dùng khác": "Another user",
+"Người xử lý": "Handled by",
+"Nhân công 622": "Labour 622",
+"Nhân công 622 / đv": "Labour 622 / unit",
+"Nhóm": "Group",
+"Nhóm Stock Out": "Stock Out group",
+"Nhập FX / GL rồi chạy STEP 4": "Enter FX / GL, then run STEP 4",
+"Nhập tỷ giá, GL 622, GL 627 của kỳ": "Enter the FX rate, GL 622 and GL 627 for the period",
+"Năm mới – tồn kho": "New year – stock",
+"Nếu PC-M thiếu hẳn: import lại file PC-M của hệ tương ứng ở STEP 1.": "If PC-M is missing entirely: re-import the PC-M file of that system in STEP 1.",
+"O VE* (kèm SVL-VE) -> O VE*.": "O VE* (incl. SVL-VE) -> O VE*.",
+"Opening WIP thay đổi sau STEP 3. Chạy lại STEP 3.": "Opening WIP changed after STEP 3. Re-run STEP 3.",
+"PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG": "PASS - ANOMALIES CONFIRMED",
+"PC No. (lô)": "PC No. (lot)",
+"PC-P ≠ tổng PC-M": "PC-P ≠ total PC-M",
+"Phiên bản": "Version",
+"Phiếu trả lại (MR-M)": "Return slips (MR-M)",
+"Phiếu xuất kho (MI-M) của vật tư cho sản phẩm": "Material issue slips (MI-M) for the product",
+"Phân bổ (VND)": "Allocated (VND)",
+"Phân bổ 622/627": "622/627 allocation",
+"Phải bằng 0 ở chế độ MONTHLY": "Must be 0 in MONTHLY mode",
+"Qua các kỳ": "Across periods",
+"Quan trọng / Khẩn": "Important / Urgent",
+"Quyết định dòng nghi trùng đã đổi": "Suspected-duplicate decisions changed",
+"Quyết định trước không còn áp dụng: phân bổ theo PC đã đổi (hoặc chưa có dấu vân tay) – duyệt lại": "The earlier decision no longer applies: the PC allocation changed (or has no fingerprint) – review again",
+"RM gốc": "Original RM",
+"RM gốc (PC + Stock Out)": "Original RM (PC + Stock Out)",
+"RM lũy kế": "YTD RM",
+"RUN FIFO để tính giá rework": "RUN FIFO to cost the rework",
+"Return: no earlier invoice of this customer/product with returnable quantity – chọn hoá đơn gốc hoặc nhập đơn giá vốn ở STEP 5R;": "Return: no earlier invoice of this customer/product with returnable quantity – choose the original invoice or enter a unit cost in STEP 5R;",
+"Review NRV (sau dự phòng)": "NRV review (after provision)",
+"Rework chuyển vào": "Rework transferred in",
+"Rework hoàn thành chuyển vào": "Completed rework transferred in",
+"Rework hoàn thành – vào giá thành lô mới (qua STEP 4.3)": "Rework completed – into the cost of a new lot (via STEP 4.3)",
+"Rework ra chi phí (hủy / không sửa được / hàng hỏng)": "Rework expensed (scrapped / not repairable / damaged)",
+"Rework trả về kho": "Rework returned to stock",
+"Rework trả về kho nguyên trạng": "Rework returned to stock unchanged",
+"Roll forward / import FG đầu kỳ": "Roll forward / import opening FG",
+"Roll forward / upload file đầu kỳ (mẫu chi tiết)": "Roll forward / upload opening file (detail layout)",
+"S other -> T+O theo tỷ lệ R5a/R5b/R5c.": "S other -> T+O by the R5a/R5b/R5c shares.",
+"SANDBOX – dữ liệu thử, không đồng bộ cloud": "SANDBOX – test data, no cloud sync",
+"SL / Total Cost là chữ, không phải số": "Qty / Total Cost is text, not a number",
+"SL / giá trị âm": "Negative qty / value",
+"SL / sp bình quân": "Average qty / unit",
+"SL / sản phẩm": "Qty / unit",
+"SL > 0 nhưng giá thành ≤ 0": "Qty > 0 but cost ≤ 0",
+"SL còn lại": "Qty remaining",
+"SL còn tồn cuối của lô": "Lot closing qty in stock",
+"SL hỏng": "Scrap qty",
+"SL kỳ này": "Qty this period",
+"SL lô": "Lot qty",
+"SL lũy kế": "YTD qty",
+"SL lấy": "Qty taken",
+"SL lớp": "Layer qty",
+"SL nhập kho": "Qty received",
+"SL theo định mức": "Qty at norm",
+"SL thực tế": "Actual qty",
+"SL tiêu hao": "Qty consumed",
+"SL trả": "Qty returned",
+"SL vào": "Qty in",
+"SL xuất bán": "Qty sold",
+"SL xuất bán trong tháng": "Qty sold in the month",
+"SL xuất rework": "Qty to rework",
+"SL đã xuất bán": "Qty sold",
+"SL đã xuất bán YTD": "YTD qty sold",
+"SL đã xuất trước kỳ": "Qty issued before the period",
+"SL đã xuất trước kỳ phải từ 0 đến Complete Qty": "Qty issued before the period must be between 0 and Complete Qty",
+"SL – SX năm nay": "Qty – produced this year",
+"SL – SX năm trước": "Qty – produced last year",
+"STEP 2 - TIÊU HAO NVL": "STEP 2 - RM CONSUMPTION",
+"STEP 2 chạy lại sau lần Update Price Master gần nhất": "STEP 2 re-run after the latest Update Price Master",
+"STEP 2 còn checkpoint BLOCK. Xử lý/duyệt fallback trước khi chạy STEP 3.": "STEP 2 still has BLOCK checkpoints. Handle / approve the fallback before running STEP 3.",
+"STEP 2 mới hơn STEP 3. Chạy lại STEP 3.": "STEP 2 is newer than STEP 3. Re-run STEP 3.",
+"STEP 2 – Phân bổ Stock Out vào lô PC": "STEP 2 – Stock Out allocation to PC lots",
+"STEP 3B chưa APPLY sau lần BUILD gần nhất (2 - APPLY & SYNC).": "STEP 3B not APPLIED after the latest BUILD (2 - APPLY & SYNC).",
+"STEP 3B chưa BUILD.": "STEP 3B not BUILT.",
+"STEP 3B đã đóng kỳ, không điều chỉnh WIP.": "STEP 3B closed the period with no WIP adjustment.",
+"STEP 3B đóng không điều chỉnh: lý do quá ngắn (tối thiểu 5 ký tự).": "STEP 3B closed without adjustment: reason too short (at least 5 characters).",
+"STEP 3B: INPUT / ERP map / STEP 3A đổi sau BUILD – BUILD lại.": "STEP 3B: INPUT / ERP map / STEP 3A changed after BUILD – BUILD again.",
+"STEP 3B: INPUT / ERP map đã đổi sau BUILD": "STEP 3B: INPUT / ERP map changed after BUILD",
+"STEP 4 BLOCKED – bổ sung giá / FX / GL / phân bổ trực tiếp.": "STEP 4 BLOCKED – add prices / FX / GL / direct allocations.",
+"STEP 4 bị BLOCK.": "STEP 4 BLOCKED.",
+"STEP 4 chưa có kết quả": "STEP 4 has no result",
+"STEP 4 có giá thành / sản lượng nhưng 04_COST_ALLOCATION không có lô sản xuất.": "STEP 4 has cost / output but 04_COST_ALLOCATION has no production lots.",
+"STEP 4 đã chạy lại": "STEP 4 re-run",
+"STEP 4.3 đã thay đổi": "STEP 4.3 changed",
+"STEP 5.2 OUTDATED – chạy lại RUN FIFO rồi STEP 5R": "STEP 5.2 OUTDATED – re-run RUN FIFO, then STEP 5R",
+"STEP 5: FG đầu kỳ chưa VALIDATED hoặc STEP 4 chưa chạy được – chưa chạy FIFO.": "STEP 5: opening FG not VALIDATED or STEP 4 cannot run – FIFO not run.",
+"STEP 5R cần chạy lại:": "STEP 5R needs to be re-run:",
+"SVL - THÀNH PHẨM SẢN XUẤT LŨY KẾ TỪ ĐẦU NĂM (FILE ĐẦU KỲ CHO STEP 4.4)": "SVL - FG PRODUCED YEAR TO DATE (OPENING FILE FOR STEP 4.4)",
+"SX chung 627 / đv": "Overhead 627 / unit",
+"SX năm": "Produced in year",
+"SX năm trước – SL": "Produced in prior year – qty",
+"SX năm trước – VND": "Produced in prior year – VND",
+"Sales Database mới hơn Price Master. Chạy Update Price Master.": "The Sales Database is newer than the Price Master. Run Update Price Master.",
+"Sales Database trống.": "The Sales Database is empty.",
+"Sales Database đang trống. Hãy Validate & Save doanh thu trước.": "The Sales Database is empty. Validate & Save the revenue first.",
+"Sales Database đã lưu lại": "Sales Database saved again",
+"Sandbox (thử nghiệm)": "Sandbox (testing)",
+"Sau khi lưu: chạy lại STEP 4 (nếu hoàn thành → lô mới) rồi RUN FIFO để cập nhật giá trị.": "After saving: re-run STEP 4 (if completed → new lot), then RUN FIFO to update the values.",
+"So sánh với các lô khác của sản phẩm": "Compared with the product's other lots",
+"So với kỳ trước": "Vs previous period",
+"Stock Out NVL phân bổ vào các lô": "RM Stock Out allocated to the lots",
+"Stock Out lớn": "Large Stock Out",
+"Stock Out phân bổ": "Stock Out allocated",
+"Stock Out → lô PC": "Stock Out → PC lots",
+"Sắp xếp từ dòng lỗ nhiều nhất.": "Sorted from the biggest loss.",
+"Sắp xếp từ lớp có giá vốn/đv cao nhất.": "Sorted from the highest COGS/unit.",
+"Số HĐ": "Invoice no.",
+"Số NRV đã ghi FAST": "NRV amount booked in FAST",
+"Số SP": "Products",
+"Số chứng từ": "Document no.",
+"Số dư đầu kỳ cần chuyển lại": "Opening balances need to be carried again",
+"Số không hợp lệ": "Invalid number",
+"Số lô / SL hoàn thành": "Lots / completed qty",
+"Số lô dùng": "Lots using it",
+"Số lô lệch": "Lots with difference",
+"Số lượng hoàn thành": "Completed quantity",
+"Số mã thành phẩm": "Finished-goods codes",
+"Số âm (SL hoặc Total Cost)": "Negative (qty or Total Cost)",
+"Sổ FG Rework được tạo khi chạy STEP 2.": "The FG Rework register is created when STEP 2 runs.",
+"Sổ được tạo khi chạy STEP 2.": "The register is created when STEP 2 runs.",
+"Sửa INPUT": "Fix INPUT",
+"THAY ĐỔI – XÁC NHẬN LẠI": "CHANGED – CONFIRM AGAIN",
+"THEO LÔ": "BY LOT",
+"THIẾU": "SHORT",
+"TIÊU HAO NVL – Nợ 632 / Có 152 (không phân bổ vào lô PC)": "RM CONSUMPTION – Dr 632 / Cr 152 (not allocated to PC lots)",
+"TK chi phí": "Expense account",
+"Template không có dòng dữ liệu (dữ liệu bắt đầu từ dòng 5).": "The template has no data rows (data starts at row 5).",
+"Thao tác duyệt không hợp lệ.": "Invalid approval action.",
+"Theo khoản mục (VND/sp)": "By cost element (VND/unit)",
+"Theo từng lô": "By lot",
+"Thiếu #notice-root": "#notice-root missing",
+"Thiếu FG": "FG short",
+"Thiếu FG cho cả kỳ (chế độ PRORATA)": "FG short for the whole period (PRORATA mode)",
+"Thiếu PC No. (dòng theo sản phẩm, không theo lô)": "Missing PC No. (line per product, not per lot)",
+"Thiếu Product Code": "Missing Product Code",
+"Thiếu Product code": "Missing Product code",
+"Thu gọn": "Collapse",
+"Thành phẩm xuất đi rework (FIFO)": "Finished goods issued to rework (FIFO)",
+"Tháng 1: roll forward để mang các dòng còn tồn từ tháng 12 sang (hoặc upload file chi tiết).": "January: roll forward to carry the lines still in stock from December (or upload the detail file).",
+"Tháng sản xuất": "Production month",
+"Tháng xuất": "Issue month",
+"Thêm": "Add",
+"Thêm dòng": "Add line",
+"Thêm vào MH chính": "Add to Home Screen",
+"Thông báo phát sinh khi dữ liệu đã được Cloud xác nhận. Chỉ hiển thị 80 bản ghi gần nhất.": "Notifications appear once the data is confirmed by the Cloud. Only the latest 80 records are shown.",
+"Thấp nhất": "Lowest",
+"Thời điểm (server)": "Time (server)",
+"Thứ tự FIFO: lớp cũ nhất trước (ngày lô, lớp đầu kỳ trước lớp sản xuất).": "FIFO order: oldest layer first (lot date, opening layers before production layers).",
+"Thực tế / định mức": "Actual / norm",
+"Tiêu dùng nội bộ": "Internal consumption",
+"Tiêu dùng nội bộ FG theo FIFO (tiêu hao)": "FG internal consumption by FIFO (consumption)",
+"Tiêu dùng nội bộ FG: không đủ lớp FG": "FG internal consumption: not enough FG layers",
+"Tiêu dùng nội bộ FG: không đủ lớp FG ngày ≤ ngày xuất": "FG internal consumption: no FG layers dated on or before the issue date",
+"Tiêu hao (PC-M) SL": "Consumed (PC-M) qty",
+"Tiêu hao (VND)": "Consumption (VND)",
+"Tiêu hao GT": "Consumed value",
+"Tiêu hao NVL – xuất thẳng vào 632": "RM consumption – issued directly to 632",
+"Tiêu hao SL": "Consumed qty",
+"Tiêu hao giá trị": "Consumed value",
+"Toàn bộ hàng trả lại đã khớp hoá đơn gốc và giảm giá vốn đúng giá gốc.": "All returns are matched to their original invoices and COGS is reduced at the original cost.",
+"Toàn bộ vật tư xuất cho MO trong kỳ (một MO có thể gồm nhiều lô PC).": "All materials issued to the MO in the period (one MO can cover several PC lots).",
+"Treo · hoàn thành · chi phí": "Pending · completed · expensed",
+"Trong đó SX năm": "Of which produced in year",
+"Trong đó xuất rework – SL": "Of which issued to rework – qty",
+"Trung vị (STEP 4)": "Median (STEP 4)",
+"Trung vị NVL / đv các lô": "Median RM / unit of the lots",
+"Trung vị giá thành / đv": "Median cost / unit",
+"Truy xuất chi tiết": "Detailed trace",
+"Truy xuất giá thành": "Cost trace",
+"Trùng ERP + PC No. + Product Code:": "Duplicate ERP + PC No. + Product Code:",
+"Trùng:": "Duplicates:",
+"Trạng thái STEP 2 chưa PASS.": "STEP 2 status is not PASS.",
+"Trạng thái đã đọc đang lưu trên thiết bị này; chưa đồng bộ giữa các thiết bị.": "Read state is stored on this device; not synced across devices.",
+"Trả hàng (có SL)": "Return (with qty)",
+"Trả lại (MR) SL": "Returned (MR) qty",
+"Trả lại SL": "Returned qty",
+"Tuổi (ngày)": "Age (days)",
+"Tài khoản của bạn chỉ có quyền xem. Nhờ quản trị viên cấp quyền Chỉnh sửa nếu cần.": "Your account has view-only access. Ask an administrator for Edit access if needed.",
+"Tên": "Name",
+"Tạm giữ": "On hold",
+"Tạo kỳ": "Create period",
+"Tất cả các bước đã PASS – CLOSE MONTH.": "All steps PASS – CLOSE MONTH.",
+"Tất cả kỳ": "All periods",
+"Tất cả lớp FIFO của sản phẩm": "All FIFO layers of the product",
+"TẮT": "OFF",
+"TẮT tiêu hao (phân bổ vào lô PC)": "Turn consumption OFF (allocate to PC lots)",
+"Tồn lâu": "Slow-moving",
+"Tồn đầu kỳ": "Opening stock",
+"Tồn đầu kỳ – SL": "Opening stock – qty",
+"Tồn đầu kỳ – VND": "Opening stock – VND",
+"TỔNG GIÁ THÀNH": "TOTAL COST",
+"Tổng NVL": "Total RM",
+"Tổng Total Cost PC-M (VND)": "Total PC-M Total Cost (VND)",
+"Tổng chi tiết PC-M": "PC-M detail total",
+"Tổng dòng chưa có Cost month của 4.4 = FG đầu kỳ (5.1) và = FG cuối kỳ sau FIFO (5.2)": "Total of 4.4 lines without a Cost month = opening FG (5.1) and = closing FG after FIFO (5.2)",
+"Tổng giá thành": "Total cost",
+"Tổng giá thành (VND)": "Total cost (VND)",
+"Tổng giá trị NVL trên PC-P của từng lô so với tổng các dòng vật tư PC-M cùng PC No.": "Total RM value of each lot on PC-P vs the total of the PC-M material lines with the same PC No.",
+"Tỷ giá · chi phí": "FX · costs",
+"Tỷ lệ": "Ratio",
+"Tỷ lệ NRV": "NRV rate",
+"Tỷ lệ chi phí bán hàng (NRV) đã đổi": "Selling cost rate (NRV) changed",
+"Tỷ lệ phân bổ": "Allocation share",
+"Validate & lưu doanh thu": "Validate & save revenue",
+"Vào lô mới": "New lot",
+"VƯỢT": "OVER",
+"Vẫn import?": "Import anyway?",
+"Vật tư SL ≠ 0 nhưng Total Cost = 0": "Materials with qty ≠ 0 but Total Cost = 0",
+"Vật tư WIP âm (CHECK NEGATIVE) ở STEP 3A": "Negative-WIP materials (CHECK NEGATIVE) in STEP 3A",
+"Vật tư của lô so với định mức các lô khác": "Lot materials vs the norm of other lots",
+"Vật tư giá trị 0 (PC-M & WIP = 0 VND) – chia theo SL, ghi sổ 0 VND": "Zero-value materials (PC-M & WIP = 0 VND) – split by qty, posted 0 VND",
+"Vật tư số âm hoặc sai kiểu dữ liệu · đơn giá xuất NVL bất thường (MI-M trong kỳ)": "Negative or wrong-type materials · abnormal material issue price (MI-M in the period)",
+"Vật tư × lô": "Materials × lots",
+"Vật tư đã xuất kho nhưng chưa vào lô hoàn thành nào: phần này nằm trong WIP cuối kỳ (STEP 3).": "Materials issued but not yet in any completed lot: this part sits in closing WIP (STEP 3).",
+"WIP cuối = Closing ERP (không điều chỉnh)": "Closing WIP = ERP closing (no adjustment)",
+"WIP âm → lô PC": "Negative WIP → PC lots",
+"Worker lỗi": "Worker error",
+"Xem lại WIP âm còn lại / sổ 632": "Review remaining negative WIP / account 632",
+"Xem lại cầu nối STEP 4": "Review the STEP 4 bridges",
+"Xem đối chiếu 4.4 ↔ STEP 5 (chênh lệch)": "View the 4.4 ↔ STEP 5 reconciliation (differences)",
+"Xoá": "Delete",
+"Xoá dữ liệu giá thành lưu trên máy này khi đăng xuất? (Nên chọn OK nếu là máy dùng chung. Dữ liệu trên cloud không bị ảnh hưởng.)": "Delete the costing data stored on this device when signing out? (Choose OK on a shared computer. Cloud data is not affected.)",
+"Xoá toàn bộ dữ liệu giá thành lưu trên máy này? Dữ liệu trên cloud không bị ảnh hưởng.": "Delete all costing data stored on this device? Cloud data is not affected.",
+"Xung đột cloud –": "Cloud conflict –",
+"Xuất Excel hồ sơ sản phẩm": "Export product file to Excel",
+"Xuất kho": "Stock issue",
+"Xuất kho (MI) SL": "Issued (MI) qty",
+"Xuất kho (MI) và trả lại (MR) là chứng từ kỳ này theo mã sản phẩm; tiêu hao (PC-M) là phần đã vào lô hoàn thành. Phần còn lại nằm trong WIP. Bấm một vật tư để xem theo từng lô.": "Issues (MI) and returns (MR) are this period's documents by product code; consumption (PC-M) is the part that went into completed lots. The rest sits in WIP. Click a material to see it by lot.",
+"Xuất kho GT": "Issued value",
+"Xuất kho SL": "Issued qty",
+"Xuất kho giá trị": "Issued value",
+"Xuất rework": "Issued to rework",
+"Xuất rework – VND": "Issued to rework – VND",
+"Xuất rework – giá trị": "Issued to rework – value",
+"Xuất theo tháng (SL)": "Issued by month (qty)",
+"Xuất đi rework": "Issued to rework",
+"Xác nhận chênh lệch": "Confirm differences",
+"Xác nhận fallback >5%": "Confirm fallback >5%",
+"Xóa xác nhận": "Clear confirmation",
+"Xử lý BLOCK trong CONTROL": "Clear BLOCKs in CONTROL",
+"Xử lý các checkpoint STEP 3A, chạy lại STEP 3": "Clear the STEP 3A checkpoints, re-run STEP 3",
+"Xử lý dòng trả lại": "Return line handling",
+"Xử lý rework đã đổi (hoàn thành / trả về kho / ra chi phí)": "Rework handling changed (completed / returned to stock / expensed)",
+"YTD · đầu kỳ · roll": "YTD · opening · roll",
+"archive đóng kỳ": "closed-period archive",
+"bấm Duyệt; không dùng để trả vượt số lượng còn lại của hoá đơn gốc. Nhập": "clicks Approve; it cannot be used to return more than the quantity left on the original invoice. Enter",
+"chưa chạy STEP 2": "STEP 2 not run",
+"chưa có STEP 5": "no STEP 5",
+"chưa có số liệu": "no figures yet",
+"chưa cập nhật": "not updated",
+"chưa nhập": "not entered",
+"chưa đọc": "unread",
+"dòng": "lines",
+"dòng FIFO kỳ này lấy từ lô không có / không đủ trong bảng 4.4 (xem tab Đối chiếu).": "FIFO lines this period took lots missing / short in the 4.4 table (see the Reconciliation tab).",
+"giá trị": "value",
+"giảm": "down",
+"hệ": "system",
+"khi hàng bán trước thời kỳ dùng web, kèm ghi chú, rồi bấm RUN STEP 5R lại.": "when the goods were sold before the web was used, with a note, then click RUN STEP 5R again.",
+"không có cờ": "no flags",
+"không tính giá vốn FIFO": "not costed by FIFO",
+"khớp": "match",
+"khớp đầu kỳ + vào − ra": "matches opening + in − out",
+"kỳ trước": "previous period",
+"kỳ đang xem": "period shown",
+"lô sản xuất kỳ trước": "previous-period production lots",
+"lệch": "difference",
+"lớp FG đầu kỳ": "opening FG layers",
+"mang tồn kho sang năm mới": "carry stock into the new year",
+"một người dùng khác": "another user",
+"người khác": "someone else",
+"phù hợp bộ lọc": "matching the filter",
+"register chưa đóng": "register not closed",
+"sau lần chuyển gần nhất (chạy lại phân bổ / 3B / rework). Bấm": "after the latest transfer (allocation / 3B / rework re-run). Click",
+"sau lần chuyển gần nhất – dòng tách theo Cost month chưa cập nhật. Bấm": "after the latest transfer – lines split by Cost month not updated. Click",
+"số lượng": "quantity",
+"thiết bị này": "this device",
+"thấp": "low",
+"tiêu dùng nội bộ (632 / 155)": "internal consumption (632 / 155)",
+"tăng": "up",
+"tất cả hệ": "all systems",
+"và trên cloud": "and in the cloud",
+"và ĐÓNG KỲ": "and CLOSED the period",
+"xoá dòng": "delete line",
+"· chuyển từ Sales Database cũ": "· moved from the old Sales Database",
+"· đã ghi": "· booked",
+"Áp dụng điều chỉnh về PC-M": "Apply adjustment to PC-M",
+"Ít lô dùng": "Used by few lots",
+"Đang APPLY STEP 3B…": "Running STEP 3B APPLY…",
+"Đang BUILD STEP 3B…": "Running STEP 3B BUILD…",
+"Đang Validate & Save doanh thu…": "Validating & saving revenue…",
+"Đang Validate & Save hàng trả lại / giảm giá…": "Validating & saving returns / discounts…",
+"Đang chạy FIFO COGS (bán hàng)…": "Running FIFO COGS (sales)…",
+"Đang chạy STEP 2…": "Running STEP 2…",
+"Đang chạy STEP 3…": "Running STEP 3…",
+"Đang chạy STEP 4…": "Running STEP 4…",
+"Đang chạy STEP 5R – hàng bán bị trả lại…": "Running STEP 5R – sales returns…",
+"Đang chạy như ứng dụng": "Running as an app",
+"Đang cập nhật Price Master…": "Updating Price Master…",
+"Đang dùng file Excel Costing Master? Vào": "Using the Costing Master Excel file? Go to",
+"Đang kết nối Google…": "Connecting to Google…",
+"Đang tạo FG History…": "Building FG History…",
+"Đang tải danh sách…": "Loading list…",
+"Đang tải dữ liệu từ cloud…": "Loading data from the cloud…",
+"Đang đọc file ERP…": "Reading ERP files…",
+"Đang đồng bộ": "Syncing",
+"Điều chỉnh": "Adjust",
+"Điều chỉnh 3B": "3B adjustment",
+"Điều chỉnh WIP 3B": "WIP adjustment 3B",
+"Điều chỉnh WIP trực tiếp (3B) đã post": "Direct WIP adjustment (3B) posted",
+"Điểm cần kiểm tra": "Points to check",
+"ĐÃ XÁC NHẬN": "CONFIRMED",
+"Đã bán": "Sold",
+"Đã bán kỳ này": "Sold this period",
+"Đã bỏ chọn": "Deselected",
+"Đã chọn": "Selected",
+"Đã có phiên bản mới của SVL Costing.": "A new version of SVL Costing is available.",
+"Đã lưu nhưng CHƯA gửi duyệt được:": "Saved but NOT sent for approval:",
+"Đã lưu và gửi duyệt đơn giá. Bấm RUN STEP 5R sau khi được duyệt.": "Saved and sent the unit cost for approval. Click RUN STEP 5R once it is approved.",
+"Đã mở lại kỳ giá thành": "Costing period reopened",
+"Đã xuất (file đầu kỳ)": "Issued (opening file)",
+"Đã xác nhận bởi": "Confirmed by",
+"Đã đóng kỳ giá thành": "Costing period closed",
+"Đóng": "Close",
+"Đóng kỳ": "Month close",
+"Đăng nhập Google": "Sign in with Google",
+"Đăng nhập Google để chỉnh sửa dữ liệu.": "Sign in with Google to edit data.",
+"Đăng nhập bằng Google": "Sign in with Google",
+"Đơn giá": "Unit cost",
+"Đơn giá / sp": "Unit cost / unit",
+"Đơn giá RM (kiểm tra STEP 4)": "RM unit cost (STEP 4 check)",
+"Đơn giá bình quân": "Average unit cost",
+"Đơn giá bình quân YTD": "YTD average unit cost",
+"Đơn giá các lớp FIFO đã xuất bán": "Unit cost of the FIFO layers sold",
+"Đơn giá kỳ này": "Unit cost this period",
+"Đơn giá lô": "Lot unit cost",
+"Đơn giá nhập tay phải lớn hơn 0.": "The manual unit cost must be greater than 0.",
+"Đơn giá tiêu hao BQ": "Average consumption unit cost",
+"Đơn giá vật tư": "Material unit cost",
+"Đơn giá vốn": "Unit cost",
+"Đơn giá vốn/sp (VND)": "Unit cost/unit (VND)",
+"Đơn giá xuất kho BQ": "Average issue unit cost",
+"Đơn giá đã đổi sau khi gửi duyệt – người gửi cần gửi lại.": "The unit cost changed after the approval request – the requester must resend it.",
+"Định mức": "Norm",
+"Định mức /sp": "Norm /unit",
+"Định mức = trung vị SL/sp của vật tư ở các lô có dùng (chỉ tính vật tư có ở ≥ 50% số lô). Giá trị theo định mức = định mức × SL lô × đơn giá bình quân của sản phẩm.": "Norm = median qty/unit of the material in the lots that use it (only materials used in ≥ 50% of lots). Value at norm = norm × lot qty × the product's average unit cost.",
+"Định mức tiêu hao": "Consumption norm",
+"Định mức trung vị /sp": "Median norm /unit",
+"Đọc tất cả": "Mark all read",
+"Đọc từ Sales Database cũ": "Read from the old Sales Database",
+"Đối chiếu PC-P ↔ PC-M theo lô": "PC-P ↔ PC-M reconciliation by lot",
+"Đối chiếu STEP 2 chưa PASS.": "STEP 2 reconciliation not PASS.",
+"Đối chiếu kế toán STEP 3 chưa PASS.": "STEP 3 accounting reconciliation not PASS.",
+"Đổi chế độ FIFO": "FIFO mode changed",
+"đang Active": "active",
+"đang theo dõi revision Cloud, chưa có chi tiết chỉnh sửa hoặc Step. Admin cần publish Firestore Rules v1.14.43 để bật đầy đủ thông báo realtime.": "following Cloud revisions, no edit or step detail yet. An admin needs to publish Firestore Rules v1.14.43 to enable full realtime notifications.",
+"đang tải…": "loading…",
+"đã lưu trên Cloud. Chế độ tương thích không có chi tiết thao tác / Step.": "saved to the Cloud. Compatibility mode has no action / step detail.",
+"đã thay đổi trạng thái sau khi dữ liệu được cập nhật.": "changed status after the data was updated.",
+"đã từng đóng – đang mở lại": "closed before – reopened",
+"đã xác nhận": "confirmed",
+"đơn giá": "unit cost",
+"để cập nhật số liệu.": "to update the figures.",
+"để nạp nguyên một kỳ từ file .xlsm.": "to load a whole period from the .xlsm file.",
+"Ảnh hưởng": "Impact",
+"Ảnh hưởng trên tồn cuối": "Impact on closing stock",
+"Ảnh hưởng đơn giá": "Price impact",
+"Ảnh hưởng định mức": "Norm impact",
+"Ẩn kỳ…": "Hide period…",
+"– chưa được tính. Xem tab \"Số đầu kỳ\", sửa file rồi upload lại.": "– not counted. See the \"Opening figures\" tab, fix the file and upload again.",
+"– kiểm tra file xuất ERP trước khi chạy STEP 2:": "– check the ERP export before running STEP 2:",
+"– sẽ tự thử lại.": "– will retry automatically.",
+"– đã đóng kỳ": "– period closed",
+"— PC-P đã import lại sau điều chỉnh, điều chỉnh không còn khớp dữ liệu.": "— PC-P was re-imported after the adjustment; the adjustment no longer matches the data.",
+"→ bấm nút": "→ tap the",
+"→ dùng “Ẩn kỳ”.": "→ use “Hide period”.",
+"− Xuất bán (FIFO)": "− Sold (FIFO)",
+"− Xuất rework": "− Issued to rework"
+};
+export const SRC_WILD = [
+["Validate & Save doanh thu bán hàng ({*})", "Validate & Save sales revenue ({*})"],
+["Validate & Save hàng trả lại / giảm giá ({*})", "Validate & Save returns / discounts ({*})"],
+["Kỳ {*}: cả máy này và cloud đều có thay đổi.", "Period {*}: both this computer and the cloud have changes."],
+["Cloud: cập nhật {*} bởi {*}.", "Cloud: updated {*} by {*}."],
+["Kỳ {*} CHƯA ĐÓNG.", "Period {*} is NOT CLOSED."],
+["Kỳ {*} chưa đóng. Lý do: {*}", "Period {*} not closed. Reason: {*}"],
+["Thay thế toàn bộ dòng cũ từ {*} đến {*}: {*} dòng", "Replace all old lines from {*} to {*}: {*} lines"],
+["Thay thế dòng trả lại cũ từ {*} đến {*}: {*} dòng", "Replace old return lines from {*} to {*}: {*} lines"],
+["Thêm mới từ file: {*} dòng", "Add from file: {*} lines"],
+["Giữ nguyên ngoài khoảng: {*} dòng", "Kept outside the range: {*} lines"],
+["Bỏ qua {*} dòng SALES RETURN / CREDIT NOTE (import ở màn hình 5R)", "Skipped {*} SALES RETURN / CREDIT NOTE lines (import on screen 5R)"],
+["Kỳ có {*} dòng hàng trả lại → bước tiếp: RUN STEP 5R ở màn hình 5R.", "The period has {*} return lines → next: RUN STEP 5R on screen 5R."],
+["Kỳ có {*} dòng trả lại có SL → RUN STEP 5R.", "The period has {*} return lines with qty → RUN STEP 5R."],
+["Kỳ {*} đã ĐÓNG{*}. Rework WIP chuyển kỳ: {*} dòng / {*} VND. Bước tiếp: tạo kỳ {*} → Roll forward.", "Period {*} CLOSED{*}. Rework WIP carried forward: {*} lines / {*} VND. Next: create period {*} → Roll forward."],
+["Đã lưu {*} dòng doanh thu (REVIEW {*}, thay thế {*} dòng cũ){*}. Price Master → OUTDATED, hãy Update Price Master.", "Saved {*} revenue lines (REVIEW {*}, replaced {*} old lines){*}. Price Master → OUTDATED, please run Update Price Master."],
+[
+"Cloud có revision mới (#{*}).",
+"The cloud has a new revision (#{*})."
+],
+[
+"{*} đã cập nhật kỳ {*}{*}. Dữ liệu trên màn hình có thể đã cũ; hệ thống chặn chỉnh sửa để tránh ghi đè.",
+"{*} updated period {*}{*}. The data on screen may be out of date; editing is blocked to avoid overwriting."
+],
+[
+"Kỳ {*} trên cloud mới hơn (cập nhật {*} bởi {*}). Tải bản cloud về máy này?",
+"Period {*} in the cloud is newer (updated {*} by {*}). Load the cloud version to this device?"
+],
+[
+"Kỳ {*} còn thay đổi CHƯA đồng bộ lên cloud và sẽ MẤT. Vẫn xoá toàn bộ dữ liệu trên máy này?",
+"Period {*} has changes NOT yet synced to the cloud and they will be LOST. Delete all data on this device anyway?"
+],
+[
+"{*} · chờ đồng bộ kỳ {*}",
+"{*} · waiting to sync period {*}"
+],
+[
+"SVL – Starry Vietnam Co., Ltd. · Kỳ {*} · {*} · Xuất lúc {*}",
+"SVL – Starry Vietnam Co., Ltd. · Period {*} · {*} · Exported {*}"
+],
+[
+"{*} báo cáo",
+"{*} reports"
+],
+[
+"{*} dòng treo quá {*} tháng",
+"{*} lines pending over {*} months"
+],
+[
+"{*}/{*} đã xử lý",
+"{*}/{*} handled"
+],
+[
+"Kỳ đã đóng. Tạo kỳ {*} và roll forward.",
+"Period closed. Create period {*} and roll forward."
+],
+[
+"Lệch {*}",
+"Difference {*}"
+],
+[
+"Điều chỉnh 3B: {*}{*}",
+"3B adjustment: {*}{*}"
+],
+[
+"{*} FG khả dụng",
+"{*} of FG available"
+],
+[
+"Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ ({*}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.",
+"ERP data check: PC-P = PC-M in every system ({*}); no abnormal material lines in PC-M / MI-M / MR-M."
+],
+[
+"{*} PC lệch PC-P / PC-M",
+"{*} PCs with PC-P / PC-M difference"
+],
+[
+"{*} dòng SL ≠ 0 nhưng Total Cost = 0",
+"{*} lines with qty ≠ 0 but Total Cost = 0"
+],
+[
+"{*} dòng số âm / sai kiểu",
+"{*} negative / wrong-type lines"
+],
+[
+"{*} dòng xuất NVL đơn giá bất thường",
+"{*} material issue lines with abnormal unit cost"
+],
+[
+"lúc {*}: {*}",
+"at {*}: {*}"
+],
+[
+"sau lần xác nhận {*} của {*} – cần xác nhận lại.",
+"after the confirmation of {*} by {*} – confirm again."
+],
+[
+"Xác nhận lại phần {*}",
+"Confirm part {*} again"
+],
+[
+"Xác nhận phần {*}",
+"Confirm part {*}"
+],
+[
+"A · Chênh lệch PC-P và PC-M {*}",
+"A · PC-P vs PC-M difference {*}"
+],
+[
+"B · Vật tư SL ≠ 0 nhưng Total Cost = 0 {*}",
+"B · Materials with qty ≠ 0 but Total Cost = 0 {*}"
+],
+[
+"C · Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường {*}",
+"C · Negative, wrong-type or abnormally priced material issues {*}"
+],
+[
+"Kiểm tra dữ liệu ERP: {*} {*}",
+"ERP data check: {*} {*}"
+],
+[
+"· chưa có MI-M hệ {*}",
+"· no MI-M for system {*}"
+],
+[
+"Chưa có dữ liệu MI-M trong kỳ {*}.",
+"No MI-M data in period {*}."
+],
+[
+"{*}: {*} dòng ({*}){*}",
+"{*}: {*} rows ({*}){*}"
+],
+[
+"Có dòng ngày ngoài kỳ {*}",
+"Rows dated outside period {*}"
+],
+[
+"Hệ {*}",
+"System {*}"
+],
+[
+"{*} báo cáo · {*} hệ",
+"{*} reports · {*} systems"
+],
+[
+"Đang đọc {*} ({*}/{*})…",
+"Reading {*} ({*}/{*})…"
+],
+[
+"{*} · {*} · {*} dòng",
+"{*} · {*} · {*} rows"
+],
+[
+"… (+{*} mã)",
+"… (+{*} codes)"
+],
+[
+"{*}: {*} dòng SL ≠ 0 nhưng Total Cost = 0 – chỉ thông tin: PC-M-S không dùng trong giá thành (hệ S không có lô PC).",
+"{*}: {*} lines with qty ≠ 0 but Total Cost = 0 – information only: PC-M-S is not used in costing (system S has no PC lots)."
+],
+[
+"{*}: {*} dòng SL ≠ 0 nhưng Total Cost = 0 ({*} vật tư: {*}). Xem và xác nhận ở mục \"Dữ liệu ERP bất thường\" bên dưới.",
+"{*}: {*} lines with qty ≠ 0 but Total Cost = 0 ({*} materials: {*}). Review and confirm in \"ERP data anomalies\" below."
+],
+[
+"Chọn dòng tiêu hao · {*} dòng Stock Out NVL kỳ này · đã chọn {*} dòng",
+"Select consumption lines · {*} RM Stock Out lines this period · {*} lines selected"
+],
+[
+"{*} hàng loạt {*} dòng ({*})",
+"{*} in bulk {*} lines ({*})"
+],
+[
+"Lần chạy gần nhất {*}",
+"Last run {*}"
+],
+[
+"ngoài kỳ {*}",
+"outside period {*}"
+],
+[
+"trống ngày {*}",
+"date blank {*}"
+],
+[
+"ngày lỗi {*}",
+"invalid date {*}"
+],
+[
+"thiếu cột Date {*}",
+"Date column missing {*}"
+],
+[
+"{*} · NVL phân bổ {*} · FG rework {*} dòng",
+"{*} · RM allocated {*} · FG rework {*} lines"
+],
+[
+"Đã tick {*} dòng · SL {*}",
+"Ticked {*} lines · qty {*}"
+],
+[
+"{*} dòng tiêu dùng nội bộ chưa được tính giá – chạy RUN FIFO (STEP 5.2) để ghi Nợ 632 / Có 155.",
+"{*} internal consumption lines not yet costed – run RUN FIFO (STEP 5.2) to post Dr 632 / Cr 155."
+],
+[
+"(đã đóng {*})",
+"(closed {*})"
+],
+[
+"kỳ {*} chưa đóng khi chuyển",
+"period {*} not closed when carried"
+],
+[
+"; lý do: {*}",
+"; reason: {*}"
+],
+[
+"Nguồn: Closing WIP {*} {*} · chuyển lúc {*}",
+"Source: Closing WIP {*} {*} · carried at {*}"
+],
+[
+"Đang đọc {*}…",
+"Reading {*}…"
+],
+[
+"{*} · {*} dòng · {*} VND · {*}",
+"{*} · {*} rows · {*} VND · {*}"
+],
+[
+"{*}{*} dòng / {*} VND từ {*} {*}",
+"{*}{*} lines / {*} VND from {*} {*}"
+],
+[
+"Closing WIP kỳ {*} đã thay đổi sau khi chuyển sang Opening WIP kỳ {*} – roll forward lại.",
+"Closing WIP of period {*} changed after it was carried to the Opening WIP of period {*} – roll forward again."
+],
+[
+"Opening WIP được chuyển khi kỳ {*} chưa đóng; kỳ {*} nay đã đóng – roll forward lại để dùng số chính thức.",
+"Opening WIP was carried while period {*} was not closed; period {*} is now closed – roll forward again to use the official figures."
+],
+[
+"Kỳ {*} đã MỞ LẠI sau khi số dư được chuyển sang kỳ {*} – đóng lại kỳ {*}, rồi roll forward lại trước khi đóng kỳ {*}.",
+"Period {*} was REOPENED after its balances were carried to period {*} – close period {*} again, then roll forward again before closing period {*}."
+],
+[
+"Rework WIP cuối kỳ {*} khác số đã chuyển sang B/F kỳ {*}{*}.",
+"Closing rework WIP of period {*} differs from the amount carried as B/F to period {*}{*}."
+],
+[
+"Đã điều chỉnh {*} dòng PC-P về PC-M · tổng {*} VND · {*} · {*} · lý do: {*}{*}",
+"Adjusted {*} PC-P lines to PC-M · total {*} VND · {*} · {*} · reason: {*}{*}"
+],
+[
+"Có {*} PC chỉ có ở PC-M và {*} PC chỉ có ở PC-P. Không điều chỉnh tự động được; kiểm tra lại file ERP.",
+"{*} PCs only in PC-M and {*} PCs only in PC-P. Cannot adjust automatically; check the ERP files."
+],
+[
+"Chênh lệch PC-M − PC-P: {*} VND ở {*} dòng. Áp dụng sẽ đặt Total Cost PC-P bằng PC-M cho từng PC và sản phẩm; số gốc được lưu để hoàn tác.",
+"PC-M − PC-P difference: {*} VND on {*} lines. Applying sets the PC-P Total Cost equal to PC-M for each PC and product; the original figures are kept for undo."
+],
+[
+"Vật tư={*}; Mới={*}; Closing={*}",
+"Materials={*}; New={*}; Closing={*}"
+],
+[
+"Đang tải nhật ký cloud… {*}",
+"Loading cloud audit log… {*}"
+],
+[
+"Nhật ký cloud: {*} sự kiện{*}",
+"Cloud audit log: {*} events{*}"
+],
+[
+"Hiện cả {*} kỳ đã ẩn",
+"Also show {*} hidden periods"
+],
+[
+"Đăng nhập Google để lưu và mở dữ liệu trên mọi máy. {*}",
+"Sign in with Google to save and open data on any device. {*}"
+],
+[
+"Không đọc được danh sách: {*}",
+"Cannot read the list: {*}"
+],
+[
+"Cập nhật lần cuối {*} bởi {*}",
+"Last updated {*} by {*}"
+],
+[
+"Đang đọc {*} (file lớn có thể mất 10–30 giây)…",
+"Reading {*} (large files may take 10–30 seconds)…"
+],
+[
+"Kỳ {*} trên web đã ĐÓNG – không ghi đè. Quản trị viên mở lại kỳ trước nếu thật sự cần.",
+"Period {*} on the web is CLOSED – not overwritten. An administrator can reopen the period first if really needed."
+],
+[
+"CẢNH BÁO: kỳ {*} còn thay đổi CHƯA đồng bộ lên cloud. OK = vẫn xoá dữ liệu trên máy này khi đăng xuất (mất các thay đổi đó). Huỷ = đăng xuất nhưng giữ dữ liệu trên máy.",
+"WARNING: period {*} has changes NOT yet synced to the cloud. OK = still delete the data on this device when signing out (those changes are lost). Cancel = sign out but keep the data on this device."
+],
+[
+"{*} dòng · tổng {*} VND · {*}",
+"{*} lines · total {*} VND · {*}"
+],
+[
+"{*} dòng · {*}",
+"{*} lines · {*}"
+],
+[
+"{*} · lỗi {*}",
+"{*} · error {*}"
+],
+[
+"• MI-M {*} {*} {*}: {*} dòng, lệch lớn nhất {*} %",
+"• MI-M {*} {*} {*}: {*} lines, largest deviation {*} %"
+],
+[
+"• PC-P vs PC-M hệ {*}: chênh {*} VND – {*} PC lệch, {*} chỉ ở PC-M, {*} chỉ ở PC-P",
+"• PC-P vs PC-M system {*}: difference {*} VND – {*} PCs with difference, {*} only in PC-M, {*} only in PC-P"
+],
+[
+"• {*}: {*} – {*} dòng, {*} vật tư",
+"• {*}: {*} – {*} lines, {*} materials"
+],
+[
+"Phần {*} ({*}) · {*} mục · {*}",
+"Part {*} ({*}) · {*} items · {*}"
+],
+[
+"Phần {*} ({*}) · xóa xác nhận · {*}",
+"Part {*} ({*}) · confirmation cleared · {*}"
+],
+[
+"{*} dòng tick · {*}",
+"{*} lines ticked · {*}"
+],
+[
+"{*} dòng · SL {*} · {*} · {*}",
+"{*} lines · qty {*} · {*} · {*}"
+],
+[
+"Đã xoá {*} báo cáo: {*} · Lý do: {*}",
+"Cleared {*} reports: {*} · Reason: {*}"
+],
+[
+"Tổng hợp phân bổ Stock Out · kỳ {*}",
+"Stock Out allocation summary · period {*}"
+],
+[
+"Đã lưu lên cloud (bản {*}).",
+"Saved to the cloud (version {*})."
+],
+[
+"Đã ẩn kỳ {*}.",
+"Period {*} hidden."
+],
+[
+"Kỳ {*} hiện lại trong danh sách.",
+"Period {*} shown in the list again."
+],
+[
+"Xoá toàn bộ kỳ {*}{*}",
+"Delete the whole period {*}{*}"
+],
+[
+"Sửa / xuất lại {*} báo cáo có lỗi ngày giao dịch trước khi chạy STEP 2",
+"Fix / re-export {*} reports with transaction-date errors before running STEP 2"
+],
+[
+"và {*} PC lệch PC-P / PC-M",
+"and {*} PCs with PC-P / PC-M difference"
+],
+[
+"Rà soát và xác nhận {*} dòng dữ liệu ERP bất thường{*} (STEP 1) trước khi chạy STEP 2",
+"Review and confirm {*} abnormal ERP data lines{*} (STEP 1) before running STEP 2"
+],
+[
+"Kỳ vọng = ngưỡng {*}% × tổng đã phân bổ; Chênh lệch = số tiền vượt ngưỡng (VND). Tỷ lệ thực tế {*}. Vượt ngưỡng phải được Quản trị xác nhận kèm lý do",
+"Expected = threshold {*}% × total allocated; Difference = amount above the threshold (VND). Actual share {*}. Above the threshold must be confirmed by an Admin with a reason"
+],
+[
+"Ghi sổ 0 VND: {*}",
+"Posted 0 VND: {*}"
+],
+[
+"Thiếu cột: {*} (dòng tiêu đề {*} của sheet {*}).",
+"Missing columns: {*} (header row {*} of sheet {*})."
+],
+[
+"Lô sản xuất {*} không trước kỳ {*} (lô của kỳ này lấy từ STEP 4.3)",
+"Production lot {*} is not before period {*} (lots of this period come from STEP 4.3)"
+],
+[
+"Tháng theo Date ({*}) khác tháng trên số PC ({*})",
+"Month from Date ({*}) differs from the month in the PC number ({*})"
+],
+[
+"Thiếu {*}",
+"Missing {*}"
+],
+[
+"Cột {*} không phải số",
+"Column {*} is not a number"
+],
+[
+"RM + Direct labors + Production cost lệch Total cost {*}",
+"RM + Direct labors + Production cost differs from Total cost {*}"
+],
+[
+"RM cost (L) lệch RM cost + RM cost (ST) {*}",
+"RM cost (L) differs from RM cost + RM cost (ST) {*}"
+],
+[
+"Cost month '{*}' không đọc được (dùng YYYYMM, ví dụ 202608)",
+"Cost month '{*}' cannot be read (use YYYYMM, e.g. 202608)"
+],
+[
+"Cost month {*} không trước kỳ {*} – coi là CÒN TỒN",
+"Cost month {*} is not before period {*} – treated as IN STOCK"
+],
+[
+"Cost month {*} trước tháng sản xuất {*}",
+"Cost month {*} is before the production month {*}"
+],
+[
+"{*} dòng {*}",
+"{*} lines {*}"
+],
+[
+"{*} – {*} Định dạng: {*}",
+"{*} – {*} Format: {*}"
+],
+[
+"SVL - THÀNH PHẨM SẢN XUẤT & TỒN KHO CHI TIẾT THEO DÒNG (STEP 4.4 · đầu kỳ {*})",
+"SVL - FG PRODUCTION & STOCK DETAIL BY LINE (STEP 4.4 · opening {*})"
+],
+[
+"Thành phẩm chi tiết theo dòng – đầu kỳ {*}",
+"FG detail by line – opening {*}"
+],
+[
+"TỔNG HỢP THEO COST MONTH – file đầu kỳ {*}",
+"SUMMARY BY COST MONTH – opening file {*}"
+],
+[
+"Dòng \"CÒN TỒN\" = FG đầu kỳ {*}: SL {*} · {*} VND{*}",
+"\"IN STOCK\" lines = opening FG {*}: qty {*} · {*} VND{*}"
+],
+[
+"4.4 tổng hợp theo cost month {*}",
+"4.4 summary by cost month {*}"
+],
+[
+"Kỳ {*} không thuộc năm {*}",
+"Period {*} is not in year {*}"
+],
+[
+"Kỳ {*} không trước kỳ {*} (số kỳ này lấy từ STEP 4.3)",
+"Period {*} is not before period {*} (this period's figures come from STEP 4.3)"
+],
+[
+"{*} không phải số",
+"{*} is not a number"
+],
+[
+"RM + 622 + 627 = {*} khác Tổng giá thành {*}",
+"RM + 622 + 627 = {*} differs from Total cost {*}"
+],
+[
+"Năm mới {*}",
+"New year {*}"
+],
+[
+"Kỳ {*} chưa chuyển kết quả STEP 4.3 vào bảng Thành phẩm SX lũy kế (mở kỳ {*} → 4.4 → Cập nhật từ STEP 4.3).",
+"Period {*} has not moved its STEP 4.3 results into the FG produced (cumulative) table (open period {*} → 4.4 → Update from STEP 4.3)."
+],
+[
+"{*}từ {*}",
+"{*}from {*}"
+],
+[
+"{*} → {*} ({*} tháng)",
+"{*} → {*} ({*} months)"
+],
+[
+"{*}-01 … tháng trước {*}",
+"{*}-01 … month before {*}"
+],
+[
+"Ví dụ: {*}",
+"Example: {*}"
+],
+[
+"{*} – {*} Định dạng: {*}{*}",
+"{*} – {*} Format: {*}{*}"
+],
+[
+"Thành phẩm SX lũy kế – file đầu kỳ {*}",
+"FG produced (cumulative) – opening file {*}"
+],
+[
+"THÀNH PHẨM SẢN XUẤT LŨY KẾ – TỔNG HỢP THEO THÁNG (file đầu kỳ {*})",
+"FG PRODUCED (CUMULATIVE) – MONTHLY SUMMARY (opening file {*})"
+],
+[
+"Số liệu của sheet FG_PRODUCTION · {*} dòng",
+"Figures from sheet FG_PRODUCTION · {*} lines"
+],
+[
+"Thành phẩm SX lũy kế – tổng hợp {*}",
+"FG produced (cumulative) – summary {*}"
+],
+[
+"{*} thao tác được ghi nhận trong lần lưu này.",
+"{*} actions recorded in this save."
+],
+[
+"Có {*} PC chỉ có ở PC-M và {*} PC chỉ có ở PC-P. Không tự điều chỉnh được; kiểm tra lại file ERP.",
+"{*} PCs only in PC-M and {*} PCs only in PC-P. Cannot adjust automatically; check the ERP files."
+],
+[
+"Thiếu PC-P-{*} để hoàn tác.",
+"PC-P-{*} missing for the undo."
+],
+[
+"PC-P đã thay đổi sau khi điều chỉnh ({*}). Không hoàn tác tự động.",
+"PC-P changed after the adjustment ({*}). No automatic undo."
+],
+[
+"Return: đơn giá vốn nhập tay {*} đang CHỜ DUYỆT – cần một người dùng khác người nhập ({*}) bấm Duyệt ở STEP 5R;",
+"Return: manual unit cost {*} is AWAITING APPROVAL – a user other than the one who entered it ({*}) must click Approve in STEP 5R;"
+],
+[
+"Return: Original Invoice {*} not found for product {*} – chọn hoá đơn khác hoặc nhập đơn giá vốn ở STEP 5R;",
+"Return: Original Invoice {*} not found for product {*} – choose another invoice or enter a unit cost in STEP 5R;"
+],
+[
+"Return qty {*} vượt số còn trả được {*} của hoá đơn {*} (vượt {*}); không dùng đơn giá tay để vượt hoá đơn gốc;",
+"Return qty {*} exceeds the {*} still returnable on invoice {*} (over by {*}); a manual unit cost cannot be used to exceed the original invoice;"
+],
+[
+"{*}-{*}: tên file ghi NO DATA nhưng có {*} dòng có số liệu. Đổi tên file (bỏ NO DATA) hoặc xuất lại báo cáo.",
+"{*}-{*}: the file name says NO DATA but has {*} rows with figures. Rename the file (remove NO DATA) or re-export the report."
+],
+[
+"{*} dòng ÂM (dòng Excel {*}{*}; vật tư {*})",
+"{*} NEGATIVE rows (Excel rows {*}{*}; materials {*})"
+],
+[
+"{*} dòng Quantity/Total Cost là chữ, không phải số (dòng Excel {*})",
+"{*} rows with Quantity/Total Cost as text, not numbers (Excel rows {*})"
+],
+[
+"PC-M-{*}: file bị CHẶN, chưa import. {*}. Sửa trên ERP rồi xuất lại PC-M.",
+"PC-M-{*}: file BLOCKED, not imported. {*}. Fix in ERP and re-export PC-M."
+],
+[
+"{*} - không phải file Excel",
+"{*} - not an Excel file"
+],
+[
+"Kỳ của file ERP ({*}) không khớp kỳ báo cáo {*}. Import bị CHẶN để tránh tính giá lẫn kỳ.",
+"The ERP file period ({*}) does not match the reporting period {*}. Import BLOCKED to avoid mixing periods."
+],
+[
+"Thiếu PC-P-{*}. Hãy import dữ liệu ERP trước.",
+"PC-P-{*} missing. Import the ERP data first."
+],
+[
+"Thiếu STOCK OUT-{*}. Hãy import dữ liệu ERP trước.",
+"STOCK OUT-{*} missing. Import the ERP data first."
+],
+[
+"Closing WIP được chọn là kỳ {*}, trong khi kỳ mở là {*}.",
+"The selected Closing WIP is period {*}, while the open period is {*}."
+],
+[
+"Opening WIP được chọn là kỳ {*}, trong khi kỳ báo cáo là {*}.",
+"The selected Opening WIP is period {*}, while the reporting period is {*}."
+],
+[
+"STEP 2 còn Stock Out chưa phân bổ {*}.",
+"STEP 2 still has unallocated Stock Out {*}."
+],
+[
+"Chưa có Opening WIP cho kỳ {*}. Import hoặc roll forward Opening WIP rồi Validate.",
+"No Opening WIP for period {*}. Import or roll forward the Opening WIP, then Validate."
+],
+[
+"Opening WIP kỳ {*} chưa sẵn sàng ({*}).",
+"Opening WIP for period {*} is not ready ({*})."
+],
+[
+"Thiếu dữ liệu {*}.",
+"Missing data {*}."
+],
+[
+"REVIEW - ERP CHANGED (kỳ {*}: {*})",
+"REVIEW - ERP CHANGED (period {*}: {*})"
+],
+[
+"Kỳ {*} chỉ có phát sinh ở hệ {*} ({*}) nhưng map đang là {*}. Xác nhận bằng User ERP Override.",
+"Period {*} only has movements in system {*} ({*}) but the map is {*}. Confirm with User ERP Override."
+],
+[
+"{*} vật tư có phát sinh kỳ này ở hệ ERP khác map – cần xác nhận (Review = ERP CHANGED).",
+"{*} materials have movements this period in an ERP system different from the map – confirmation needed (Review = ERP CHANGED)."
+],
+[
+"ERP MAP: {*} vật tư mới, {*} cần REVIEW.",
+"ERP MAP: {*} new materials, {*} need REVIEW."
+],
+[
+"STEP 2 chưa chạy cho kỳ {*}. Chạy STEP 2 trước.",
+"STEP 2 has not run for period {*}. Run STEP 2 first."
+],
+[
+"Column 'Total Cost' not found in PC-M-{*} (cần cho phân bổ theo giá trị).",
+"Column 'Total Cost' not found in PC-M-{*} (needed for value-based allocation)."
+],
+[
+"{*} ({*}, {*}/{*} dòng PC-M Total Cost ≤ 0, SL {*})",
+"{*} ({*}, {*}/{*} PC-M lines with Total Cost ≤ 0, qty {*})"
+],
+[
+"ACTUAL_USAGE đang chọn AMOUNT nhưng {*} vật tư có PC-M Total Cost tổng ≤ 0 (SL > 0): {*}. Không tự fallback sang QTY. Sửa PC-M trên ERP rồi import lại, hoặc chọn QTY như một ngoại lệ legacy có chủ ý.",
+"ACTUAL_USAGE is set to AMOUNT but {*} materials have total PC-M Total Cost ≤ 0 (qty > 0): {*}. No automatic fallback to QTY. Fix PC-M in ERP and re-import, or deliberately choose QTY as a legacy exception."
+],
+[
+"Không thể đóng STEP 3B với HOLD / NO ADJ: còn {*} vật tư CONTROL chưa PASS ({*}). Sửa DETAIL / BUILD rồi mới quyết định.",
+"STEP 3B cannot close with HOLD / NO ADJ: {*} CONTROL materials not PASS ({*}). Fix DETAIL / BUILD before deciding."
+],
+[
+"APPLY dừng, chưa post gì. Dòng APPROVE bị BLOCK: {*}; vật tư không có trong WIP: {*}.",
+"APPLY stopped, nothing posted. APPROVE lines BLOCKed: {*}; materials not in WIP: {*}."
+],
+[
+"APPLY dừng bởi kiểm tra chiều số dư: {*} dòng làm tăng |WIP ERP|. Xem lại INPUT / CONTROL.",
+"APPLY stopped by the balance-direction check: {*} lines increase |ERP WIP|. Review INPUT / CONTROL."
+],
+[
+"STEP 3B còn {*} vật tư CONTROL chưa PASS ({*}). HOLD không gỡ được BLOCK: sửa nguyên nhân rồi BUILD lại.",
+"STEP 3B still has {*} CONTROL materials not PASS ({*}). HOLD cannot clear a BLOCK: fix the cause, then BUILD again."
+],
+[
+"STEP 3B còn {*} dòng chưa có quyết định (APPROVE / HOLD / REVIEW).",
+"STEP 3B still has {*} lines without a decision (APPROVE / HOLD / REVIEW)."
+],
+[
+"STEP 3B có {*} dòng đã APPROVE nhưng chưa APPLY.",
+"STEP 3B has {*} APPROVED lines not yet APPLIED."
+],
+[
+"STEP 3B: {*} dòng đổi quyết định sau lần APPLY – bấm 2 - APPLY & SYNC lại.",
+"STEP 3B: {*} lines changed decision after APPLY – click 2 - APPLY & SYNC again."
+],
+[
+"STEP 3B còn {*} bút toán DIRECT_632 chưa ghi FAST (cột Record phải là RECORDED).",
+"STEP 3B still has {*} DIRECT_632 entries not posted in FAST (the Record column must be RECORDED)."
+],
+[
+"03_WIP_ALLOCATION chưa chạy cho kỳ {*}. Chạy STEP 3A trước.",
+"03_WIP_ALLOCATION has not run for period {*}. Run STEP 3A first."
+],
+[
+"{*} validation có {*} dòng BLOCK. Sửa Recognition/Bill Date, Transaction Type, Product/Quantity rồi Validate & Save lại.",
+"{*} validation has {*} BLOCK rows. Fix Recognition/Bill Date, Transaction Type, Product/Quantity, then Validate & Save again."
+],
+[
+"Chế độ YTD sẽ XOÁ toàn bộ doanh thu từ 01/01/{*} đến cuối kỳ {*} rồi thay bằng file này, nhưng file chỉ bắt đầu từ {*}/{*}/{*}. Các tháng 01–{*}/{*} sẽ bị mất. Không lưu. Với file theo tháng: chọn Chế độ = MONTHLY rồi chọn lại file; hoặc dùng file doanh thu đủ từ tháng 01.",
+"YTD mode DELETES all revenue from 01/01/{*} to the end of period {*} and replaces it with this file, but the file only starts at {*}/{*}/{*}. Months 01–{*}/{*} would be lost. Not saved. For a monthly file: set Mode = MONTHLY and choose the file again; or use a revenue file complete from month 01."
+],
+[
+"Price Master thuộc kỳ {*}",
+"Price Master belongs to period {*}"
+],
+[
+"BLOCK - MANUAL OVERLAP ({*} dòng hiệu lực)",
+"BLOCK - MANUAL OVERLAP ({*} active lines)"
+],
+[
+"{*}: dòng giá thủ công đã bị xoá sau lần cập nhật Price Master gần nhất.",
+"{*}: a manual price line was deleted after the latest Price Master update."
+],
+[
+"{*}: giá thủ công đã thay đổi sau lần cập nhật Price Master gần nhất.",
+"{*}: the manual price changed after the latest Price Master update."
+],
+[
+"{*}: nguồn giá thủ công đã thay đổi.",
+"{*}: the manual price source changed."
+],
+[
+"Staging doanh thu thuộc kỳ {*}, không phải kỳ {*}.",
+"The revenue staging belongs to period {*}, not period {*}."
+],
+[
+"Price Master chưa CURRENT ({*}). Chạy Update Price Master sau lần Validate & Save gần nhất.",
+"Price Master is not CURRENT ({*}). Run Update Price Master after the latest Validate & Save."
+],
+[
+"Thiếu Product Code ở PC-P-{*} ({*}).",
+"Missing Product Code in PC-P-{*} ({*})."
+],
+[
+"Stock Out phân bổ trên PC-P không khớp STEP 2. Chênh lệch {*}",
+"Stock Out allocated on PC-P does not match STEP 2. Difference {*}"
+],
+[
+"RM STEP 4 không khớp cầu nối WIP STEP 3 (RM lô PC + Stock Out phân bổ + tiêu hao 632/152). Chênh lệch {*}",
+"STEP 4 RM does not match the STEP 3 WIP bridge (PC lot RM + allocated Stock Out + consumption 632/152). Difference {*}"
+],
+[
+"Opening Period trên template (C2) là '{*}' nhưng kỳ đang mở là {*}.",
+"The Opening Period in the template (C2) is '{*}' but the open period is {*}."
+],
+[
+"cột {*} phải là '{*}' (đang là '{*}')",
+"column {*} must be '{*}' (currently '{*}')"
+],
+[
+"Không thấy template (A1 = {*}) hay sheet 'month detail' trong {*}.",
+"No template (A1 = {*}) or 'month detail' sheet found in {*}."
+],
+[
+"Không thấy dòng tiêu đề (PC No. / Product code / Complete Qty / Cost month) trong 30 dòng đầu của {*}.",
+"No header row (PC No. / Product code / Complete Qty / Cost month) in the first 30 rows of {*}."
+],
+[
+"Thiếu cột trong {*} (dòng tiêu đề {*}): {*}",
+"Missing columns in {*} (header row {*}): {*}"
+],
+[
+"Chưa có Closing FG của kỳ {*} trên web.",
+"No Closing FG for period {*} on the web."
+],
+[
+"Closing FG {*} chưa đối chiếu xong (Run Result = {*}). Sửa STEP 5 của {*} trước.",
+"Closing FG {*} not fully reconciled (Run Result = {*}). Fix STEP 5 of {*} first."
+],
+[
+"Opening FG đang ở trạng thái '{*}'. Chạy VALIDATE OPENING FG (không còn BLOCK) trước.",
+"Opening FG is in status '{*}'. Run VALIDATE OPENING FG (no BLOCK left) first."
+],
+[
+"Kỳ của Opening FG khác kỳ {*}.",
+"The Opening FG period differs from period {*}."
+],
+[
+"STEP 4 tổng thể chưa PASS ({*}).",
+"STEP 4 overall not PASS ({*})."
+],
+[
+"BLOCK - STRICT DATE REQUIRED: có {*} dòng FG Rework Active. Rework phải chạy STRICT_DATE để không lấy layer FG hoàn thành sau ngày xuất.",
+"BLOCK - STRICT DATE REQUIRED: {*} active FG Rework lines. Rework must run STRICT_DATE so that FG layers completed after the issue date are not used."
+],
+[
+"Rework trả về kho: {*}",
+"Rework returned to stock: {*}"
+],
+[
+"Kỳ {*} đã đóng lúc {*} bởi {*}.",
+"Period {*} was closed at {*} by {*}."
+],
+[
+"FG Rework Batch 8 = {*}. Mọi kiểm soát Rework FIFO phải PASS.",
+"FG Rework Batch 8 = {*}. All Rework FIFO controls must PASS."
+],
+[
+"Batch 7 (giá thành STEP 5) = {*}.",
+"Batch 7 (STEP 5 cost) = {*}."
+],
+[
+"FG History = {*}. Chạy BUILD FG HISTORY trước.",
+"FG History = {*}. Run BUILD FG HISTORY first."
+],
+[
+"Giá thành/đv {*} {*}% so với trung vị",
+"Cost/unit {*} {*}% vs median"
+],
+[
+"Lô {*}: giá thành đơn vị {*} = {*} so với trung vị các lô ({*}). Ảnh hưởng {*} VND.",
+"Lot {*}: unit cost {*} = {*} vs the lot median ({*}). Impact {*} VND."
+],
+[
+"Lô {*}: PC-P có NVL {*} nhưng PC-M-{*} không có dòng nào cùng PC No.",
+"Lot {*}: PC-P has RM {*} but PC-M-{*} has no rows with the same PC No."
+],
+[
+"Lô {*}: Total Cost trên PC-P ({*}) khác tổng chi tiết PC-M ({*}), chênh {*} VND.",
+"Lot {*}: Total Cost on PC-P ({*}) differs from the PC-M detail total ({*}), difference {*} VND."
+],
+[
+"Lô {*}: đóng góp ≤ 0 (doanh thu theo giá bán − RM) nên không nhận 622/627 chung. Kiểm tra giá bán / RM.",
+"Lot {*}: contribution ≤ 0 (revenue at selling price − RM), so it receives no common 622/627. Check the selling price / RM."
+],
+[
+"Lô {*}: giá thành {*} > giá bán quy đổi {*} VND/đv (GP {*}).",
+"Lot {*}: cost {*} > converted selling price {*} VND/unit (GP {*})."
+],
+[
+"Lô {*}: Stock Out phân bổ {*} VND = {*} RM của lô.",
+"Lot {*}: allocated Stock Out {*} VND = {*} of the lot's RM."
+],
+[
+"Lô {*}: nhận điều chỉnh WIP trực tiếp (3B) {*} VND.",
+"Lot {*}: receives a direct WIP adjustment (3B) of {*} VND."
+],
+[
+"Lô {*}: nhận giá trị rework hoàn thành {*} VND.",
+"Lot {*}: receives completed rework value of {*} VND."
+],
+[
+"Kỳ này chưa có dữ liệu PC-M-{*} (chưa import hoặc đã bị xoá) – không xem được chi tiết vật tư và không đối chiếu được PC-P ↔ PC-M cho các lô {*}. Import lại PC-M-{*} ở STEP 1.",
+"No PC-M-{*} data this period (not imported or deleted) – material detail cannot be shown and PC-P ↔ PC-M cannot be reconciled for lots {*}. Re-import PC-M-{*} in STEP 1."
+],
+[
+"{*} lô: dòng PC-M ghi Product Code / Sub-MO khác PC-P – đã ghép theo PC No. (cùng cách đối chiếu ở STEP 3).",
+"{*} lots: PC-M lines show a Product Code / Sub-MO different from PC-P – matched by PC No. (same as the STEP 3 reconciliation)."
+],
+[
+"Lô {*}: đơn giá RM {*} = {*}× trung vị ({*}). {*}. Ảnh hưởng {*} VND.",
+"Lot {*}: RM unit cost {*} = {*}× median ({*}). {*}. Impact {*} VND."
+],
+[
+"Giá bán dùng để phân bổ lấy từ: {*}.",
+"The selling price used for allocation comes from: {*}."
+],
+[
+"Đơn giá {*}",
+"Unit cost {*}"
+],
+[
+"Định mức {*}",
+"Usage norm {*}"
+],
+[
+"{*} {*}: đơn giá giữa các lô dao động {*} → {*} (bình quân {*}); {*}/{*} lô lệch > {*}%: {*}.",
+"{*} {*}: unit cost across lots ranges {*} → {*} (average {*}); {*}/{*} lots deviate > {*}%: {*}."
+],
+[
+"{*} {*}: số lượng/sp lệch > {*}% so với trung vị {*} {*}/sp ở {*} lô: {*}.",
+"{*} {*}: qty per unit deviates > {*}% from the median {*} {*}/unit in {*} lots: {*}."
+],
+[
+"{*} {*}: {*} dòng PC-M có số lượng hoặc giá trị âm.",
+"{*} {*}: {*} PC-M lines with negative quantity or value."
+],
+[
+"{*} {*}: tiêu hao {*} {*} nhưng giá trị 0 ở {*} lô (vật tư không tính giá / hàng miễn phí?).",
+"{*} {*}: consumed {*} {*} but zero value in {*} lots (unpriced material / free goods?)."
+],
+[
+"{*} {*}: đã xuất kho {*} {*} ({*} VND) cho sản phẩm nhưng chưa tiêu hao vào lô nào trong kỳ – nằm lại WIP.",
+"{*} {*}: issued {*} {*} ({*} VND) for the product but not consumed in any lot this period – stays in WIP."
+],
+[
+"{*} lô bất thường",
+"{*} abnormal lots"
+],
+[
+"Giá thành đơn vị {*} {*} {*} so với {*} ({*} – {*}). Thay đổi chủ yếu do {*} ({*}{*}/đv).",
+"Unit cost {*} {*} {*} vs {*} ({*} – {*}). Mainly driven by {*} ({*}{*}/unit)."
+],
+[
+"Giá vốn {*} > doanh thu {*} VND – lỗ gộp {*} ({*}).",
+"COGS {*} > revenue {*} VND – gross loss {*} ({*})."
+],
+[
+"{*} ({*}): giá vốn {*} > doanh thu {*} VND (lỗ {*}).",
+"{*} ({*}): COGS {*} > revenue {*} VND (loss {*})."
+],
+[
+"{*}: không đủ tồn kho FG để xuất bán ({*}).",
+"{*}: not enough FG stock to sell ({*})."
+],
+[
+"Giá vốn đơn vị {*} khác giá thành SX kỳ này {*} ({*}) do xuất bán từ lớp cũ theo FIFO.",
+"Unit COGS {*} differs from this period's production cost {*} ({*}) because sales came from older FIFO layers."
+],
+[
+"Các lớp đã xuất bán có đơn giá chênh lớn: {*} → {*} ({*}×). Kiểm tra lô có giá thành bất thường.",
+"Sold layers have widely different unit costs: {*} → {*} ({*}×). Check lots with an abnormal cost."
+],
+[
+"Lớp {*}: {*}",
+"Layer {*}: {*}"
+],
+[
+"Lớp {*} (lô {*}, ngày {*}): còn {*} sp sau {*} ngày.",
+"Layer {*} (lot {*}, date {*}): {*} units left after {*} days."
+],
+[
+"{*} sp xuất đi rework theo FIFO, giá trị {*} VND.",
+"{*} units issued to rework by FIFO, value {*} VND."
+],
+[
+"So sánh giá thành đơn vị với {*}",
+"Unit cost compared with {*}"
+],
+[
+"Kỳ trước lấy từ {*} ({*} sp).",
+"Previous period taken from {*} ({*} units)."
+],
+[
+"Giá thành/đv {*}",
+"Cost/unit {*}"
+],
+[
+"Dòng bán {*}",
+"Sales line {*}"
+],
+[
+"Ghi chú FIFO: {*}",
+"FIFO note: {*}"
+],
+[
+"Lớp FIFO {*}",
+"FIFO layer {*}"
+],
+[
+"PC-P và PC-M lệch {*} VND: mở PC {*} trên ERP, cộng Total Cost các dòng vật tư và so với Total Cost thành phẩm.",
+"PC-P and PC-M differ by {*} VND: open PC {*} in ERP, add up the Total Cost of the material lines and compare with the finished-goods Total Cost."
+],
+[
+"{*} vật tư mà phần lớn các lô khác đều dùng nhưng lô này không có (giá trị theo định mức ≈ {*} VND): kiểm tra phiếu xuất kho MI của MO {*} đã được ghi vào PC chưa, hoặc PC hoàn thành trước khi xuất vật tư.",
+"{*} materials used by most other lots are missing in this lot (value at norm ≈ {*} VND): check whether the MI issue slips of MO {*} were posted to the PC, or the PC was completed before the materials were issued."
+],
+[
+"{*} vật tư tiêu hao thấp hơn định mức > {*}%: kiểm tra số lượng xuất kho, ĐVT, xuất bổ sung ở kỳ sau.",
+"{*} materials consumed below the norm by > {*}%: check issued quantities, units, and top-up issues in the next period."
+],
+[
+"{*} vật tư tiêu hao cao hơn định mức > {*}%: kiểm tra hao hụt, xuất dư, hoặc vật tư của lô/MO khác bị ghi nhầm vào lô này.",
+"{*} materials consumed above the norm by > {*}%: check losses, over-issues, or materials of another lot/MO posted to this lot by mistake."
+],
+[
+"Lô {*}",
+"Lot {*}"
+],
+[
+"Phiếu xuất kho MI-M theo MO {*}",
+"MI-M issue slips for MO {*}"
+],
+[
+"Đơn giá trên PC-M là giá xuất kho ERP tính cho từng lô. So sánh với đơn giá trên phiếu MI (bình quân {*}) và giá mua trong kỳ; lô lệch nhiều thường do xuất từ lô hàng nhập giá khác hoặc giá tạm tính.",
+"The PC-M unit cost is the ERP issue cost for each lot. Compare with the MI slip unit cost (average {*}) and purchase prices in the period; large deviations usually come from issues out of receipts at a different price or provisional prices."
+],
+[
+"Định mức trung vị {*} {*}/sp. Lô lệch: kiểm tra BOM, ĐVT trên phiếu, xuất bổ sung / trả lại, hoặc vật tư của lô khác ghi nhầm vào lô này.",
+"Median norm {*} {*}/unit. Deviating lots: check the BOM, the unit on the slip, top-up issues / returns, or materials of another lot posted here by mistake."
+],
+[
+"Vật tư của {*} trong kỳ – {*}/{*} lô có dùng.",
+"Materials of {*} in the period – used by {*}/{*} lots."
+],
+[
+"'{*}' không phải số hợp lệ",
+"'{*}' is not a valid number"
+],
+[
+"'{*}' không rõ là {*}{*} hay {*}{*} – nhập {*}{*} (không dấu phân cách) hoặc {*}{*}",
+"'{*}' is ambiguous: {*}{*} or {*}{*} – enter {*}{*} (no separators) or {*}{*}"
+],
+[
+"Tài khoản {*} không có quyền truy cập.",
+"Account {*} has no access."
+],
+[
+"Tài khoản {*} chưa được cấp quyền dùng dữ liệu giá thành. Nhờ quản trị viên thêm email này trong Cài đặt → Người dùng & phân quyền.",
+"Account {*} is not yet authorised for costing data. Ask an administrator to add this email in Settings → Users & permissions."
+],
+[
+"Không kiểm tra được quyền ({*}) – đang chỉ xem dữ liệu trên máy. Kết nối lại rồi tải lại trang để chỉnh sửa.",
+"Cannot check permissions ({*}) – viewing data on this device only. Reconnect and reload the page to edit."
+],
+[
+"Kỳ này trên cloud đã được {*} cập nhật lúc {*} (bản {*}). Không ghi đè – hãy tải bản cloud về rồi làm lại thay đổi.",
+"This period was updated in the cloud by {*} at {*} (version {*}). Not overwritten – load the cloud version and redo the change."
+],
+[
+"Chunk {*} đã tồn tại nhưng nội dung không khớp content hash – dừng commit để bảo vệ revision history.",
+"Chunk {*} already exists but its content does not match the content hash – commit stopped to protect the revision history."
+],
+[
+"Đang tải {*}…",
+"Loading {*}…"
+],
+[
+"Thiếu dữ liệu {*} (phần {*}/{*}) trên cloud.",
+"Missing data {*} (part {*}/{*}) in the cloud."
+],
+[
+"Dữ liệu {*} trên cloud không khớp mã kiểm tra.",
+"Data {*} in the cloud does not match its checksum."
+],
+[
+"Không kết nối được thông báo: {*}",
+"Cannot connect to notifications: {*}"
+],
+[
+"Kỳ {*} · Rev #{*} · {*} · {*}",
+"Period {*} · Rev #{*} · {*} · {*}"
+],
+[
+"Không có thông báo{*}.",
+"No notifications{*}."
+],
+[
+"{*} chưa đọc · {*} gần nhất",
+"{*} unread · latest {*}"
+],
+[
+"Kỳ đang xem{*}",
+"Current period{*}"
+],
+[
+"{*} / {*} dòng",
+"{*} / {*} lines"
+],
+[
+"{*}: {*} lô · SL {*} · {*} VND · FIFO {*} dòng phân bổ",
+"{*}: {*} lots · qty {*} · {*} VND · FIFO {*} allocation lines"
+],
+[
+"Kỳ {*} đã đóng – chỉ xem.",
+"Period {*} is closed – view only."
+],
+[
+"Chưa chạy FIFO kỳ này – chưa có dòng Cost month {*}.",
+"FIFO not run this period – no Cost month {*} lines yet."
+],
+[
+"STEP 4.3 đang {*} – số kỳ này có thể còn đổi. Chạy lại STEP 4.3.",
+"STEP 4.3 is {*} – this period's figures may still change. Re-run STEP 4.3."
+],
+[
+"File đầu kỳ có {*} dòng lỗi",
+"The opening file has {*} error lines"
+],
+[
+"(trong đó lô năm trước {*} dòng · {*} VND)",
+"(of which prior-year lots {*} lines · {*} VND)"
+],
+[
+"{*} dòng REVIEW",
+"{*} REVIEW lines"
+],
+[
+"Số đầu kỳ: {*} · {*} dòng · {*} lô ·",
+"Opening figures: {*} · {*} lines · {*} lots ·"
+],
+[
+"còn tồn {*} dòng · SL {*} · {*} VND",
+"in stock {*} lines · qty {*} · {*} VND"
+],
+[
+"Số đầu kỳ (mẫu cũ theo lô): {*} · {*} dòng · tháng {*} · {*} VND{*}. Bảng chi tiết được dựng từ số theo lô; để có đủ lô năm trước còn tồn, upload file chi tiết theo dòng.",
+"Opening figures (old lot layout): {*} · {*} lines · month {*} · {*} VND{*}. The detail table is built from the lot figures; to include all prior-year lots still in stock, upload the line-level detail file."
+],
+[
+"({*}; {*} lô) – chỉ cảnh báo, không chặn. Xem tab",
+"({*}; {*} lots) – warning only, not blocking. See tab"
+],
+[
+"Chi tiết theo dòng ({*})",
+"Line-level detail ({*})"
+],
+[
+"({*} dòng chưa có Cost month).",
+"({*} lines without a Cost month)."
+],
+[
+": \"CÒN TỒN\" = dòng chưa ghi nhận giá vốn. Dòng Cost month {*} được app tách từ FIFO kỳ này (cột Chứng từ xuất = hoá đơn / phiếu rework).",
+": \"IN STOCK\" = lines with no COGS recognised. Cost month {*} lines are split by the app from this period's FIFO (Issue document column = invoice / rework slip)."
+],
+[
+"Mỗi dòng là một tháng ghi nhận giá vốn (Cost month); \"CÒN TỒN\" = tồn FG cuối kỳ {*} theo 4.4.",
+"Each line is one COGS recognition month (Cost month); \"IN STOCK\" = closing FG stock {*} per 4.4."
+],
+[
+"các bước khác. Quy tắc: tổng dòng chưa có Cost month của 4.4 = FG đầu kỳ (STEP 5.1) và = FG cuối kỳ sau FIFO (STEP 5.2). Kết quả: {*}",
+"other steps. Rule: total of 4.4 lines without a Cost month = opening FG (STEP 5.1) and = closing FG after FIFO (STEP 5.2). Result: {*}"
+],
+[
+"Lô {*} · {*} · nhập kho {*} · SL {*}",
+"Lot {*} · {*} · received {*} · qty {*}"
+],
+[
+"Mỗi dòng = một phần lô thành phẩm đã xuất cho một dòng hoá đơn (hoặc xuất rework) theo FIFO.{*}",
+"Each line = part of a finished lot issued to an invoice line (or to rework) by FIFO.{*}"
+],
+[
+"{*} · {*} · nạp {*} · {*} · BLOCK {*} · REVIEW {*}",
+"{*} · {*} · loaded {*} · {*} · BLOCK {*} · REVIEW {*}"
+],
+[
+"· còn tồn {*} dòng / SL {*} / {*} VND",
+"· in stock {*} lines / qty {*} / {*} VND"
+],
+[
+"{*} · {*} · {*} · {*} dòng · {*} VND{*} · BLOCK {*} · REVIEW {*}",
+"{*} · {*} · {*} · {*} lines · {*} VND{*} · BLOCK {*} · REVIEW {*}"
+],
+[
+"File đầu kỳ có {*} dòng lỗi – xem tab Số đầu kỳ.",
+"The opening file has {*} error lines – see the Opening figures tab."
+],
+[
+"Đã nạp {*} dòng chi tiết · còn tồn (chưa có Cost month) SL {*} · {*} VND.",
+"Loaded {*} detail lines · in stock (no Cost month) qty {*} · {*} VND."
+],
+[
+"Đã nạp {*} dòng số đầu kỳ ({*}) · {*} VND.",
+"Loaded {*} opening lines ({*}) · {*} VND."
+],
+[
+"{*} · {*} dòng · {*} VND",
+"{*} · {*} lines · {*} VND"
+],
+[
+"Đã {*}: {*} dòng · còn tồn SL {*} · {*} VND từ {*}.",
+"{*}: {*} lines · in stock qty {*} · {*} VND from {*}."
+],
+[
+"Bắt đầu năm {*} – không có số đầu kỳ.",
+"Start of year {*} – no opening figures."
+],
+[
+"Đã roll forward {*} dòng ({*}) · {*} VND từ {*}.",
+"Rolled forward {*} lines ({*}) · {*} VND from {*}."
+],
+[
+"Đến hết {*}{*}",
+"Through {*}{*}"
+],
+[
+"ĐỐI CHIẾU 4.4 ↔ STEP 5.1 / 5.2 – kỳ {*} (chỉ cảnh báo, không chặn)",
+"RECONCILIATION 4.4 ↔ STEP 5.1 / 5.2 – period {*} (warning only, not blocking)"
+],
+[
+"Bảng 4.4 kỳ {*} (gồm Cost month {*})",
+"Table 4.4 period {*} (incl. Cost month {*})"
+],
+[
+"· Đóng không điều chỉnh: {*}",
+"· Closed without adjustment: {*}"
+],
+[
+"INPUT chưa khớp WIP âm hiện tại: thiếu {*}, thừa {*}, basis khác {*}. Bấm “Đồng bộ INPUT với WIP âm” (giữ lựa chọn / lý do đã nhập).",
+"INPUT does not match the current negative WIP: {*} missing, {*} extra, {*} with a different basis. Click “Sync INPUT with negative WIP” (choices / reasons entered are kept)."
+],
+[
+"Đồng bộ INPUT với WIP âm{*}",
+"Sync INPUT with negative WIP{*}"
+],
+[
+"+{*} / −{*} / basis khác {*} → {*} vật tư",
+"+{*} / −{*} / different basis {*} → {*} materials"
+],
+[
+"[{*} quyết định cũ đã đặt lại – phân bổ theo PC đã đổi]",
+"[{*} earlier decisions reset – the PC allocation changed]"
+],
+[
+"· {*} vật tư giá trị 0 (PC-M & WIP = 0 VND) chia theo SL, ghi sổ 0 VND: {*}.",
+"· {*} zero-value materials (PC-M & WIP = 0 VND) split by qty, posted 0 VND: {*}."
+],
+[
+"{*}BUILD xong: {*} dòng detail,{*}/{*} vật tư PASS. {*}{*}",
+"{*}BUILD done: {*} detail lines,{*}/{*} materials PASS. {*}{*}"
+],
+[
+"HOLD={*}; REVIEW={*}; lý do: {*}",
+"HOLD={*}; REVIEW={*}; reason: {*}"
+],
+[
+"APPLY xong: {*} vật tư, điều chỉnh vào PC {*} VND.",
+"APPLY done: {*} materials, {*} VND adjusted into PCs."
+],
+[
+"{*} dòng = {*}",
+"{*} lines = {*}"
+],
+[
+"Giảm trừ doanh thu kỳ này (xem 5R): 5212 = {*} VND ({*} dòng) · 5213 = {*} VND ({*} dòng).",
+"Revenue deductions this period (see 5R): 5212 = {*} VND ({*} lines) · 5213 = {*} VND ({*} lines)."
+],
+[
+"Đã xác nhận hết (loại {*} dòng).",
+"All confirmed ({*} lines excluded)."
+],
+[
+"nhóm dòng doanh thu giống hệt nhau (cùng ngày, hoá đơn, sản phẩm, số lượng, tiền – file không có Invoice Line No.). {*}",
+"groups of identical revenue lines (same date, invoice, product, quantity, amount – the file has no Invoice Line No.). {*}"
+],
+[
+"Nghi trùng{*}",
+"Suspected duplicates{*}"
+],
+[
+"Kiểm tra giá PC{*}",
+"PC price check{*}"
+],
+[
+"Tất cả dòng lặp = {*}",
+"All repeated lines = {*}"
+],
+[
+"Lưu lần cuối {*} · {*} dòng doanh thu bán hàng. Sales Database được mang sang kỳ sau. Hàng trả lại / giảm giá:",
+"Last saved {*} · {*} sales revenue lines. The Sales Database carries forward. Returns / discounts:"
+],
+[
+"Cập nhật {*} · nguồn đến {*}",
+"Updated {*} · source through {*}"
+],
+[
+"{*} lô PC chưa có giá.",
+"{*} PC lots without a price."
+],
+[
+"{*} dòng PC-P có PC No. không bắt đầu bằng \"PC-\" – STEP 4 không tính giá thành cho các dòng này (giống workbook), nên không cần giá.",
+"{*} PC-P lines have a PC No. not starting with \"PC-\" – STEP 4 does not cost these lines (as in the workbook), so no price is needed."
+],
+[
+"{*} giá thủ công chưa được duyệt.",
+"{*} manual prices not yet approved."
+],
+[
+"{*} dòng; {*}",
+"{*} lines; {*}"
+],
+[
+"{*} · {*} dòng",
+"{*} · {*} lines"
+],
+[
+"Chuyển {*} dòng SALES RETURN / CREDIT NOTE từ Sales Database sang Returns Database (5R)",
+"Move {*} SALES RETURN / CREDIT NOTE lines from the Sales Database to the Returns Database (5R)"
+],
+[
+"Bỏ qua {*} dòng SALES RETURN / CREDIT NOTE (import ở màn hình 5R)",
+"Skip {*} SALES RETURN / CREDIT NOTE lines (import them on screen 5R)"
+],
+[
+"; bỏ {*} dòng thiếu ngày của lần lưu trước",
+"; drop {*} undated lines from the previous save"
+],
+[
+"{*} {*}→{*}: lưu {*} dòng; bỏ qua (trả lại / giảm giá) {*}; PASS {*}; REVIEW {*}; BLOCK {*}; lặp {*}; thay thế {*}{*}",
+"{*} {*}→{*}: saved {*} lines; skipped (returns / discounts) {*}; PASS {*}; REVIEW {*}; BLOCK {*}; repeated {*}; replaced {*}{*}"
+],
+[
+"; bỏ qua {*} dòng trả lại / giảm giá → import ở màn hình 5R",
+"; skipped {*} return / discount lines → import on screen 5R"
+],
+[
+"; {*} dòng trả lại cũ đã chuyển sang 5R",
+"; {*} old return lines moved to 5R"
+],
+[
+"{*} sản phẩm; thiếu giá {*}; manual overlap {*}; manual chưa duyệt {*}; manual date lỗi {*}; SO sau kỳ {*}; SO date lỗi {*}; cũ {*}",
+"{*} products; missing price {*}; manual overlap {*}; manual not approved {*}; manual date error {*}; SO after period {*}; SO date error {*}; old {*}"
+],
+[
+"thiếu giá {*}",
+"missing price {*}"
+],
+[
+"manual chưa duyệt {*}",
+"manual not approved {*}"
+],
+[
+"manual date lỗi {*}",
+"manual date error {*}"
+],
+[
+"SO sau kỳ {*}",
+"SO after period {*}"
+],
+[
+"SO date lỗi {*}",
+"SO date error {*}"
+],
+[
+"Price Master CURRENT – {*} sản phẩm có giá.",
+"Price Master CURRENT – {*} products priced."
+],
+[
+"{*}{*} % so với kỳ trước",
+"{*}{*} % vs previous period"
+],
+[
+"Lưu lúc {*}",
+"Saved at {*}"
+],
+[
+"bởi {*} lúc {*} · {*}",
+"by {*} at {*} · {*}"
+],
+[
+"{*} dòng Direct 622/627 chưa được duyệt.",
+"{*} Direct 622/627 lines not yet approved."
+],
+[
+"· đồng bộ 3B {*}",
+"· 3B sync {*}"
+],
+[
+"Thiếu giá: {*} · Phân bổ trực tiếp lỗi: {*} · FX/GL đủ: {*}",
+"Missing price: {*} · Direct allocation errors: {*} · FX/GL complete: {*}"
+],
+[
+"{*} · Ảnh hưởng tuyệt đối {*} VND · còn trong FG cuối kỳ {*} VND · {*}",
+"{*} · Absolute impact {*} VND · still in closing FG {*} VND · {*}"
+],
+[
+"{*} vật tư WIP âm chưa đưa vào STEP 3B – SYNC → BUILD → duyệt (APPROVE / HOLD) → APPLY.",
+"{*} negative-WIP materials not yet in STEP 3B – SYNC → BUILD → review (APPROVE / HOLD) → APPLY."
+],
+[
+"Direct 622/627 có {*} dòng Active chưa được duyệt (màn hình 4.2 → Duyệt Direct 622/627).",
+"Direct 622/627 has {*} active lines not yet approved (screen 4.2 → Approve Direct 622/627)."
+],
+[
+"BLOCKED · thiếu giá {*}; direct lỗi {*}",
+"BLOCKED · missing price {*}; direct errors {*}"
+],
+[
+"STEP 4 xong: {*} lô, giá thành {*} VND.",
+"STEP 4 done: {*} lots, cost {*} VND."
+],
+[
+"STEP 5 OUTDATED: {*}. Chạy lại theo thứ tự STEP 4 → RUN FIFO → BUILD FG HISTORY.",
+"STEP 5 OUTDATED: {*}. Re-run in order STEP 4 → RUN FIFO → BUILD FG HISTORY."
+],
+[
+"Số dư đầu kỳ đã lệch so với kỳ trước: {*}",
+"Opening balances differ from the previous period: {*}"
+],
+[
+"Sales Database có {*} dòng thiếu / sai ngày hoá đơn (vd. {*}) – không xác định được kỳ nên chưa tính giá vốn. Sửa ngày rồi import & lưu lại.",
+"The Sales Database has {*} lines with a missing / invalid invoice date (e.g. {*}) – the period cannot be determined, so no COGS yet. Fix the date, then import & save again."
+],
+[
+"Còn {*} dòng doanh thu nghi trùng trong kỳ chưa xác nhận (màn hình 4.1 → Nghi trùng).",
+"{*} suspected duplicate revenue lines in the period are not yet confirmed (screen 4.1 → Suspected duplicates)."
+],
+[
+"STEP 5R (hàng bán bị trả lại) chưa hoàn tất: {*}. Mở màn hình 5R → RUN STEP 5R.",
+"STEP 5R (sales returns) not complete: {*}. Open screen 5R → RUN STEP 5R."
+],
+[
+"STEP 5R Sales Return còn {*} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).",
+"STEP 5R Sales Return still has {*} transactions not fully processed (original invoice / quantity / COGS reversal)."
+],
+[
+"NRV đề xuất dự phòng {*} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).",
+"The proposed NRV provision of {*} VND has no current accounting decision (RECORDED or NO ADJUSTMENT APPROVED)."
+],
+[
+"Sales completeness BLOCK: web không có doanh thu 511 trong kỳ nhưng FAST = {*} VND. Không được override bằng approval – kiểm tra file doanh thu / Bill Date / phạm vi import.",
+"Sales completeness BLOCK: the web has no 511 revenue in the period but FAST = {*} VND. Cannot be overridden by approval – check the revenue file / Bill Date / import range."
+],
+[
+"Số liệu lệch FAST ở {*} tài khoản chưa được xác nhận (STEP 5.3 → Đối chiếu FAST → Xác nhận chênh lệch).",
+"FAST differences on {*} accounts not yet confirmed (STEP 5.3 → FAST reconciliation → Confirm differences)."
+],
+[
+"Hiển thị 500 / {*} dòng đầu, sắp theo chênh lệch.",
+"Showing the first 500 / {*} lines, sorted by difference."
+],
+[
+"{*} sp · {*} VND giảm giá vốn (theo giá vốn hoá đơn gốc)",
+"{*} units · {*} VND COGS reduction (at the original invoice cost)"
+],
+[
+"{*} VND – xử lý ở màn hình 5B (hoàn thành / trả về kho / ra chi phí)",
+"{*} VND – handled on screen 5B (completed / returned to stock / expensed)"
+],
+[
+"Chênh lệch đã xác nhận bởi {*}",
+"Difference confirmed by {*}"
+],
+[
+"Kỳ đã đóng – tạo kỳ {*}",
+"Period closed – create period {*}"
+],
+[
+"Chạy {*} · {*}s · {*}",
+"Run {*} · {*}s · {*}"
+],
+[
+"{*}. Chạy lại theo thứ tự (STEP 4 nếu cần) → RUN FIFO COGS → BUILD FG HISTORY.",
+"{*}. Re-run in order (STEP 4 if needed) → RUN FIFO COGS → BUILD FG HISTORY."
+],
+[
+"Giá vốn thuần 632: {*}",
+"Net COGS 632: {*}"
+],
+[
+"Kết quả 5.2 chỉ gồm bán hàng. Kỳ có {*} dòng hàng bán bị trả lại – chạy riêng ở",
+"The 5.2 result covers sales only. The period has {*} sales return lines – run them separately on"
+],
+[
+"Run snapshot: chế độ {*} · {*} lớp đầu kỳ · override dùng {*} · kết quả {*}",
+"Run snapshot: {*} mode · {*} opening layers · overrides used {*} · result {*}"
+],
+[
+"Lưu lần cuối {*}{*}",
+"Last saved {*}{*}"
+],
+[
+"{*} · {*} dòng (mọi kỳ). Dữ liệu được mang sang kỳ sau. Dòng SALES RETURN chỉ có tiền (không SL) vẫn vào TK 5212; nếu FAST hạch toán là giảm giá thì sửa Transaction Type thành CREDIT NOTE ở file nguồn.",
+"{*} · {*} lines (all periods). The data carries forward. Amount-only SALES RETURN lines (no qty) still go to account 5212; if FAST books them as discounts, change the Transaction Type to CREDIT NOTE in the source file."
+],
+[
+"Chạy {*}",
+"Run {*}"
+],
+[
+"Giảm trừ chỉ có tiền: 5212 = {*} · 5213 = {*} VND, đối chiếu FAST ở STEP 5.3.",
+"Amount-only deductions: 5212 = {*} · 5213 = {*} VND, reconciled with FAST in STEP 5.3."
+],
+[
+"Kỳ này không có hàng bán bị trả lại có số lượng – không có giá vốn cần xử lý.{*}",
+"No sales returns with quantity this period – no COGS to process.{*}"
+],
+[
+"{*}. Chạy lại RUN FIFO COGS rồi RUN STEP 5R.",
+"{*}. Re-run RUN FIFO COGS, then RUN STEP 5R."
+],
+[
+"sau lần RUN FIFO gần nhất ({*}). Bấm",
+"after the latest RUN FIFO ({*}). Click"
+],
+[
+"Còn {*} dòng trả lại chưa xử lý.",
+"{*} return lines not yet processed."
+],
+[
+"{*} dòng trả lại cần xác nhận",
+"{*} return lines need confirmation"
+],
+[
+"{*} Thứ tự: STEP 5.2 RUN FIFO (bán hàng) →",
+"{*} Order: STEP 5.2 RUN FIFO (sales) →"
+],
+[
+"{*} · {*} · {*} dòng (trả lại / giảm giá {*})",
+"{*} · {*} · {*} lines (returns / discounts {*})"
+],
+[
+"(bỏ qua {*} dòng bán hàng)",
+"(skipped {*} sales lines)"
+],
+[
+"Đã import {*} dòng trả lại / giảm giá{*}. Bước tiếp: Validate & Save.",
+"Imported {*} return / discount lines{*}. Next: Validate & Save."
+],
+[
+"Bỏ qua {*} dòng bán hàng (thuộc 4.1)",
+"Skip {*} sales lines (belong to 4.1)"
+],
+[
+"{*} {*}→{*}: lưu {*} dòng; bỏ qua (bán hàng) {*}; PASS {*}; REVIEW {*}; thay thế {*}",
+"{*} {*}→{*}: saved {*} lines; skipped (sales) {*}; PASS {*}; REVIEW {*}; replaced {*}"
+],
+[
+"Kỳ có {*} dòng trả lại có SL → RUN STEP 5R.",
+"The period has {*} return lines with qty → RUN STEP 5R."
+],
+[
+"Đã duyệt: {*}",
+"Approved: {*}"
+],
+[
+"{*}: đơn giá {*} (gửi bởi {*}) – {*}",
+"{*}: unit cost {*} (sent by {*}) – {*}"
+],
+[
+"{*}: xoá",
+"{*}: delete"
+],
+[
+"· còn {*} dòng chưa xử lý",
+"· {*} lines not yet processed"
+],
+[
+"· {*} dòng cần xác nhận",
+"· {*} lines need confirmation"
+],
+[
+"· yêu cầu {*} VND{*} · {*} · {*}{*}",
+"· requested {*} VND{*} · {*} · {*}{*}"
+],
+[
+"Đóng {*}",
+"Close {*}"
+],
+[
+"Cổng đóng kỳ: {*}",
+"Month-close gate: {*}"
+],
+[
+"Kỳ {*} đã đóng",
+"Period {*} closed"
+],
+[
+"lúc {*} bởi {*} · trạng thái {*}. Tạo kỳ {*} rồi Roll forward FG đầu kỳ.",
+"at {*} by {*} · status {*}. Create period {*}, then roll forward the opening FG."
+],
+[
+"History đến {*} · tạo {*}",
+"History through {*} · built {*}"
+],
+[
+"Đối chiếu FAST{*}",
+"FAST reconciliation{*}"
+],
+[
+"Nhập bởi {*} lúc {*}.",
+"Entered by {*} at {*}."
+],
+[
+"bởi {*} lúc {*}: {*}",
+"by {*} at {*}: {*}"
+],
+[
+"{*} tài khoản lệch FAST.",
+"{*} accounts differ from FAST."
+],
+[
+"Kiểm tra nguyên nhân (bút toán chưa ghi, điều chỉnh tay trên FAST, chênh làm tròn…) rồi xác nhận.{*}",
+"Check the cause (entries not posted, manual adjustments in FAST, rounding…) and then confirm.{*}"
+],
+[
+"Khớp FAST ở cả {*} tài khoản.",
+"Matches FAST on all {*} accounts."
+],
+[
+"FG History không khớp (gate {*}).",
+"FG History does not match (gate {*})."
+],
+[
+"{*}: Firestore từ chối quyền ghi. Kiểm tra (1) tài khoản đang đăng nhập là Quản trị (email chủ sở hữu trong firestore.rules trên Firebase console hoặc role admin ở Cài đặt → Người dùng); (2) đã Publish firestore.rules mới nhất. Kỳ vẫn giữ nguyên trạng thái trên cloud.",
+"{*}: Firestore denied write permission. Check (1) the signed-in account is an Admin (owner email in firestore.rules in the Firebase console, or the admin role in Settings → Users); (2) the latest firestore.rules has been published. The period keeps its state in the cloud."
+],
+[
+"Đóng kỳ kế toán {*}? Final Production Status: {*} Month Close Gate: {*} FG History: PASS Batch 7: PASS",
+"Close accounting period {*}? Final Production Status: {*} Month Close Gate: {*} FG History: PASS Batch 7: PASS"
+],
+[
+"Cloud chưa xác nhận: {*}",
+"Not confirmed by the cloud: {*}"
+],
+[
+"{*} (đóng lúc {*} bởi {*})",
+"{*} (closed at {*} by {*})"
+],
+[
+"· {*} quá {*} tháng",
+"· {*} over {*} months"
+],
+[
+"{*} dòng treo{*}",
+"{*} pending lines{*}"
+],
+[
+". Web dùng giá FIFO của chính lô thành phẩm (gồm NVL + 622 + 627) cho 154 / 155.{*}",
+". The web uses the FIFO cost of the finished lot itself (RM + 622 + 627) for 154 / 155.{*}"
+],
+[
+"Cảnh báo treo quá {*} tháng",
+"Warn when pending over {*} months"
+],
+[
+"TK chi phí mặc định {*}",
+"Default expense account {*}"
+],
+[
+"{*} Dòng treo từ {*} tháng trở lên được đánh dấu.",
+"{*} Lines pending {*} months or more are flagged."
+],
+[
+"Treo ≥ {*} tháng",
+"Pending ≥ {*} months"
+],
+[
+"Xử lý: {*}",
+"Handling: {*}"
+],
+[
+"{*} · {*} · SL {*} · giá trị FIFO {*} VND · xuất {*} ({*} tháng)",
+"{*} · {*} · qty {*} · FIFO value {*} VND · issued {*} ({*} months)"
+],
+[
+"→ {*} (hỏng {*} → {*})",
+"→ {*} (scrap {*} → {*})"
+],
+[
+"Xem tất cả {*}",
+"Show all {*}"
+],
+[
+"({*} lô)",
+"({*} lots)"
+],
+[
+"Giá thành sản xuất{*}",
+"Production cost{*}"
+],
+[
+"Kỳ {*} không có lô sản xuất nào của {*} (sản phẩm chỉ có xuất bán từ tồn kho).",
+"Period {*} has no production lots of {*} (the product was only sold from stock)."
+],
+[
+"{*} lô · {*}",
+"{*} lots · {*}"
+],
+[
+"{*}/đv · {*}",
+"{*}/unit · {*}"
+],
+[
+"Lô PC ({*})",
+"PC lots ({*})"
+],
+[
+"Vật tư ({*})",
+"Materials ({*})"
+],
+[
+"So với {*}",
+"Vs {*}"
+],
+[
+"Giá {*} USD · {*}",
+"Price {*} USD · {*}"
+],
+[
+"NVL {*} · 622 {*} (trực tiếp {*}) · 627 {*} (trực tiếp {*}). 622/627 chung phân bổ theo đóng góp dương = doanh thu theo giá bán − NVL.",
+"RM {*} · 622 {*} (direct {*}) · 627 {*} (direct {*}). Common 622/627 is allocated by positive contribution = revenue at selling price − RM."
+],
+[
+"Dòng bán ({*})",
+"Sales lines ({*})"
+],
+[
+"Lớp FIFO ({*})",
+"FIFO layers ({*})"
+],
+[
+"Lớp đã xuất bán ({*})",
+"Layers sold ({*})"
+],
+[
+"Tồn cuối ({*})",
+"Closing stock ({*})"
+],
+[
+"– đang tải {*} kỳ…",
+"– loading {*} periods…"
+],
+[
+"Giá thành đơn vị (lô sản xuất), giá vốn và giá bán bình quân / sp của {*} trong {*} kỳ gần nhất, lấy từ kết quả STEP 5 từng kỳ{*}.",
+"Unit production cost (production lots), COGS and average selling price / unit of {*} over the last {*} periods, from each period's STEP 5 results{*}."
+],
+[
+"{*} · kỳ {*}{*}",
+"{*} · period {*}{*}"
+]
 ];
