@@ -5,6 +5,7 @@
 //   top products · top customers · revenue mix · lowest GP % · detail tables · checks.
 import { customerPL, productPL, filterRes, monthlyRevenue, prevMonth, growth, NO_PROD } from '../engine/custpl.js';
 import { journalCheck } from '../engine/journal.js';
+import { dashboardQuality, comparableAverageUnit } from '../engine/dashboard-quality.js';
 
 let A = null;
 export function install(api) { A = api; }
@@ -218,8 +219,11 @@ export function view(el) {
     ytd += m === mm ? t.net : (db.get(k) || { net: 0 }).net;
     if (db.has(kl)) { hasLy = true; ytdLy += db.get(kl).net; }
   }
-  const price = Math.abs(t.qty) > 1e-9 ? t.net / t.qty : null;
-  const pPrice = prevNet !== null && prevQty && Math.abs(prevQty) > 1e-9 ? prevNet / prevQty : null;
+  // Company-wide VND / quantity is misleading when the mix has different products or UOM.
+  const unit = comparableAverageUnit(res);
+  const price = unit.value;
+  const pUnit = comparableAverageUnit(prevRes);
+  const pPrice = pUnit.value;
   const [py, pm] = prev.split('-').map(Number);
   const vsPrev = py === yy ? `so với T${pm}` : `so với T${pm}/${py}`;
   const fmtG = (g) => (g === null ? 'chưa có số kỳ trước' : pct(g));
@@ -229,7 +233,7 @@ export function view(el) {
     card({ ic: 'pct', tone: 'rerun', label: 'GP %', value: pct(t.gpPct), full: 'Lãi gộp / doanh thu thuần', delta: pT && t.gpPct !== null && pT.gpPct !== null ? t.gpPct - pT.gpPct : null, deltaTxt: pT && t.gpPct !== null && pT.gpPct !== null ? `${nf((t.gpPct - pT.gpPct) * 100, 1)} điểm %` : 'chưa có STEP 5 kỳ trước', vs: vsPrev }),
     card({ ic: 'up', tone: 'review', label: 'Tăng trưởng DT cùng kỳ', value: lyDb ? pct(growth(t.net, lyDb.net)) : '—', full: lyDb ? `T${mm}/${yy - 1}: ${short(lyDb.net)}` : `Chưa có doanh thu T${mm}/${yy - 1}`, delta: hasLy ? growth(ytd, ytdLy) : null, deltaTxt: hasLy ? pct(growth(ytd, ytdLy)) : '—', vs: 'lũy kế năm' }),
     card({ ic: 'box', tone: 'accent', label: 'SL bán (FIFO)', value: nf(t.qty, 0), full: 'Đơn vị · sau hàng trả lại', delta: growth(t.qty, prevQty), deltaTxt: fmtG(growth(t.qty, prevQty)), vs: vsPrev }),
-    card({ ic: 'tag', tone: 'block', label: 'Giá bán BQ / đơn vị', value: price === null ? '—' : nf(price, 0), full: 'VND · doanh thu thuần / SL', delta: growth(price, pPrice), deltaTxt: fmtG(growth(price, pPrice)), vs: vsPrev }),
+    card({ ic: 'tag', tone: 'block', label: 'Giá bán BQ / đơn vị', value: price === null ? '—' : nf(price, 0), full: unit.label, delta: growth(price, pPrice), deltaTxt: fmtG(growth(price, pPrice)), vs: vsPrev }),
   ].join('');
 
   // ---- monthly trend of the year
@@ -279,9 +283,19 @@ export function view(el) {
   const lowGp = pp.rows.filter((r) => r.net > TOL && r.gpPct !== null).sort((a, b) => a.gpPct - b.gpPct).slice(0, 6);
 
   // ---- checks
+  const quality = dashboardQuality(res0, D5 && D5.fresh || 'CURRENT');
   const jc = journalCheck({ r5: res0 });
   const allChecks = [...full.checks, { id: 'je07', label: 'JE07 theo khách hàng = JE07 (giá vốn bán hàng)', expected: jc.expected, actual: jc.actual, status: jc.status }];
   const worst = allChecks.some((c) => c.status === 'CHECK') ? 'CHECK' : allChecks.some((c) => c.status === 'REVIEW') ? 'REVIEW' : 'PASS';
+  const qualityBox = `<section class="dx-quality" aria-label="Data Quality">
+    <div class="dx-quality-top"><div><span class="dx-eyebrow">DATA QUALITY & INSIGHTS</span>
+      <h2>Chất lượng dữ liệu và cảnh báo</h2><p>Đọc trực tiếp từ STEP 5 · Không thay đổi kết quả giá thành hoặc hạch toán</p></div>
+      <span class="dx-quality-status ${quality.status.toLowerCase()}">${quality.status === 'PASS' ? 'Đã kiểm tra' : quality.status === 'BLOCK' ? 'Cần xử lý' : 'Cần rà soát'} · ${quality.issues.length}</span></div>
+    ${quality.issues.length ? `<div class="dx-insight-grid">${quality.issues.slice(0, 6).map((i) =>
+      `<div class="dx-insight ${i.severity}"><span class="dx-insight-icon" aria-hidden="true">${i.severity === 'critical' ? '!' : 'i'}</span><div><b>${esc(i.title)}</b><p>${esc(i.detail)}</p></div></div>`).join('')}</div>`
+      : '<div class="dx-quality-ok">Không phát hiện bất thường trong các kiểm tra tự động hiện có.</div>'}
+    <p class="dx-quality-note">${esc(quality.note)}</p>
+   </section>`;
   const stale = D5 && D5.fresh && D5.fresh !== 'CURRENT' ? `<div class="alert review"><b>Số liệu STEP 5.2 có thể đã cũ</b> <span>${esc(D5.stale || D5.fresh)}</span>. Chạy lại STEP 5.2 để dashboard khớp với dữ liệu hiện tại.</div>` : '';
 
   const filters = `<div class="dx-filters" role="group" aria-label="${esc('Bộ lọc')}">
@@ -296,8 +310,11 @@ export function view(el) {
     ${head(filters)}
     ${stale}
     ${filtered ? `<div class="alert info dx-filtered">Đang lọc: ${F.cust ? `khách hàng <b>${esc(F.cust)}</b>` : ''}${F.cust && F.prod ? ' · ' : ''}${F.prod ? `sản phẩm <b>${esc(F.prod)}</b>` : ''}. Tiêu dùng nội bộ không thuộc khách hàng / bán hàng nên không nằm trong số liệu lọc.</div>` : ''}
+    <div class="dx-section-label"><div><span class="dx-eyebrow">FINANCIAL SNAPSHOT</span><h2>Tổng quan hiệu quả kinh doanh</h2></div><span class="dx-unit-label">VND · kỳ ${esc(S.period)}</span></div>
     <div class="dx-kpis">${kpis}</div>
+    ${qualityBox}
 
+    <div class="dx-section-label"><div><span class="dx-eyebrow">PERFORMANCE</span><h2>Xu hướng và kế hoạch</h2></div></div>
     <div class="dx-row r-trend">
       <section class="card dx-card"><div class="dx-ch"><h2>Xu hướng doanh thu theo tháng · ${yy}</h2></div>
         <p class="muted dash-legend"><span><i class="dx-k-cur"></i>Doanh thu thuần ${yy}</span><span><i class="dx-k-last"></i>Năm ${yy - 1}</span><span><i class="dash-gp"></i>Lãi gộp (kỳ đã có STEP 5)</span></p>
@@ -307,6 +324,7 @@ export function view(el) {
       <section class="card dx-card dx-plan-card"><div class="dx-ch"><h2>Mức đạt kế hoạch</h2></div>${planBox}</section>
     </div>
 
+    <div class="dx-section-label"><div><span class="dx-eyebrow">PROFITABILITY</span><h2>Hiệu quả khách hàng và sản phẩm</h2></div></div>
     <div class="dx-row r-2">
       <section class="card dx-card"><div class="dx-ch"><h2>GP % theo khách hàng · Top ${Math.min(10, pl.rows.length)}</h2></div>
         <p class="muted dash-legend"><span><i class="dash-gp"></i>GP % dương</span><span><i class="dash-loss"></i>GP % âm</span><span><i class="dash-avg-k"></i>GP % tổng hợp</span></p>
@@ -333,6 +351,7 @@ export function view(el) {
       </section>
     </div>
 
+    <div class="dx-section-label"><div><span class="dx-eyebrow">FINANCIAL DETAIL</span><h2>Dữ liệu chi tiết</h2></div></div>
     <section class="card dash-table"><h2>Chi tiết theo khách hàng</h2>
       <p class="muted">Sắp xếp theo doanh thu thuần. Dòng tiêu dùng nội bộ không thuộc khách hàng nào; giá vốn của nó nằm trong tổng 632.</p>
       <div id="dash-tbl"></div>
