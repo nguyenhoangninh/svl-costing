@@ -420,7 +420,7 @@ export function view(el) {
   on('#dx-toggle-detail', 'click', () => { F.detail = !F.detail; view(el); });
   // Event delegation survives dashboard re-render. Each click selects the entity and opens
   // the existing STEP 5 invoice detail, without changing original costing/revenue lines.
-  el.querySelectorAll('[data-dx-cust], [data-dx-prod]').forEach((btn) => btn.addEventListener('click', () => {
+  el.querySelectorAll?.('[data-dx-cust], [data-dx-prod]')?.forEach((btn) => btn.addEventListener('click', () => {
     if (btn.hasAttribute('data-dx-cust')) { F.cust = btn.getAttribute('data-dx-cust'); F.prod = ''; }
     else { F.prod = btn.getAttribute('data-dx-prod'); F.cust = ''; }
     F.detail = true;
