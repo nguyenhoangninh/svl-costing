@@ -10,6 +10,7 @@
 import { ttxt, headerCol, headerColAny, fpRows } from './util.js';
 import { pcBasisScan, PCB_TOL } from './pcbasis.js';
 import { materialIssueCosts } from './matcost.js';
+import { pcUnitCosts } from './pccost.js';
 
 // The material reports checked at STEP 1: every system (T, S, O) – PC-M and MI-M of system S included (v1.14.61),
 // MR-M uses Quantity (T, O) / Bad Quantity (S). The WIP movements of step3.js MOVES are the subset that feeds costing.
@@ -72,8 +73,9 @@ export function pcpPcmRecon(datasets) {
  *  v1.14.48: the MI-M unit-cost lines (đơn giá xuất NVL bất thường trong kỳ) are part of C, confirmed with the same button.
  *  Their threshold is the DEFAULT one (30 % / 1.000.000 VND), not the screen option, so the list is the same on every device.
  *  Each part is confirmed separately. */
-export const DQ_PARTS = { A: 'Chênh lệch PC-P và PC-M', B: 'Vật tư SL ≠ 0 nhưng Total Cost = 0', C: 'Vật tư số âm hoặc sai kiểu dữ liệu' };
+export const DQ_PARTS = { A: 'Chênh lệch PC-P và PC-M', B: 'Vật tư SL ≠ 0 nhưng Total Cost = 0', C: 'Vật tư số âm hoặc sai kiểu dữ liệu', D: 'Đơn giá thành phẩm theo lô PC bất thường (PC-P)' };
 const lineFp = (l) => [l.report, l.type, l.row, l.mat, l.qty, l.amt].join('|');
+const pcFp = (l) => [l.erp, l.pc, l.prod, l.qty, l.cost, l.kind].join('|');
 
 /** All abnormal lines of the period's material reports + summary per report / type and a fingerprint of the list. */
 export function erpAnomalies(datasets, period = '') {
@@ -93,13 +95,16 @@ export function erpAnomalies(datasets, period = '') {
   // price is not reliable enough to block STEP 2, so they are NOT part of the confirmation.
   const mc = period ? materialIssueCosts(datasets || {}, period) : { lines: [], allLines: [] };
   const mcLines = mc.lines, mcAll = mc.allLines;
+  // D: finished-goods unit cost per PC lot (PC-P) outside the reference – v1.14.63, confirmed like C
+  const pc = period ? pcUnitCosts(datasets || {}, period) : { lots: [], flagged: [] };
   const parts = {
     A: { count: recon.issues.length, fp: recon.fp },
     B: { count: zero.length, fp: zero.length ? fpRows(zero, lineFp) : '' },
     C: { count: neg.length, fp: neg.length ? fpRows(neg, lineFp) : '' },
+    D: { count: pc.flagged.length, fp: pc.flagged.length ? fpRows(pc.flagged, pcFp) : '' },
   };
   return { lines, summary, materials: new Set(lines.map((l) => `${l.report.slice(-1)}|${l.mat}`)).size, recon, issues: lines.length + recon.issues.length,
-    mcLines, mcAll, fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
+    mcLines, mcAll, pcLots: pc.lots, pcFlagged: pc.flagged, fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
 }
 
 /**
@@ -128,6 +133,6 @@ export function partStatus(an, ack, key) {
 
 /** PASS (no abnormal line and PC-P = PC-M) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since). */
 export function anomalyStatus(an, ack) {
-  if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length))) return 'PASS';
+  if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length) && !(an.pcFlagged && an.pcFlagged.length))) return 'PASS';
   return Object.keys(DQ_PARTS).every((k) => ['NONE', 'CONFIRMED'].includes(partStatus(an, ack, k))) ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
 }

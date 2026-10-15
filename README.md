@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.64 (15/10/2026):** Thẻ **D · Đơn giá thành phẩm theo lô PC (PC-P)** ở STEP 1: lô có đơn giá lệch khỏi trung vị cùng mã sản phẩm, SL ≤ 0 có cost, hoặc SL > 0 nhưng Total Cost = 0 phải được **xác nhận trước khi chạy STEP 2** (như thẻ C). Bảng có bộ lọc Hệ / Trạng thái và xuất Excel theo dữ liệu đang lọc. Đơn giá MI-M vẫn chỉ tham khảo.
+>
 > **v1.14.63 (15/10/2026):** STEP 1: (1) thêm mục **Đơn giá thành phẩm theo lô PC (PC-P)** – đơn giá lô = Total Cost ÷ SL hoàn thành so với trung vị cùng mã sản phẩm; (2) đơn giá xuất NVL (MI-M) chỉ **tham khảo, không chặn STEP 2** vì chưa đủ giá chuẩn tin cậy; (3) bảng MI-M có bộ lọc **Hệ** và **Trạng thái** (Review - Abnormal / OK - Normal), xuất Excel theo đúng dữ liệu đang lọc.
 >
 > **v1.14.62 (15/10/2026):** Xuất Excel: cột **Lệch so với chuẩn** / **Lệch lớn nhất** (MI-M) được ghi đúng định dạng phần trăm. Trước đây file xuất hiện 153.00 thay vì 15.299,86 % (giá trị đúng, chỉ sai định dạng).
