@@ -108,6 +108,23 @@ const M = run('MONTHLY'), St = run('STRICT_DATE');
 
 // ---------- invariants
 let fails = 0; const ok = (label, cond, info = '') => { if (!cond) { fails++; console.log(`✗ ${label} ${info}`); } };
+
+// ---------- v1.14.75: Stock Out marked "tiêu hao" (632 / 152) stays out of Material WIP (154)
+{
+  const { soLineKeys } = await import('../src/engine/step2.js');
+  const keyT1 = soLineKeys(ds['STOCK OUT-T'], 'T')[0]; // SO-T-1, material 2 of T, 175,000
+  const s2c = runStep2(ds, P, { consumeLines: [keyT1] });
+  const s3c = runStep3(ds, opening, s2c, P, '');
+  const near = (x, y) => Math.abs(x - y) < 0.01;
+  ok('consumption: STEP 2 posts 175,000 to 632 / 152, the rest is allocated', near(s2c.total.cons, 175000) && s2c.status === 'PASS');
+  ok('consumption: STEP 3 leaves the line out of WIP (in and out both lower by 175,000)', near(s3.summary.inAmt - s3c.summary.inAmt, 175000) && near(s3.summary.outAmt - s3c.summary.outAmt, 175000) && near(s3.summary.soAmt - s3c.summary.soAmt, 175000), `${s3.summary.inAmt - s3c.summary.inAmt}`);
+  ok('consumption: closing WIP unchanged', near(s3.summary.closingAmt, s3c.summary.closingAmt));
+  ok('consumption: STEP 3 ties to STEP 2 (Stock Out = allocated; consumption 1 line = 175,000)', s3c.checks.soVsStep2.status === 'PASS' && s3c.checks.consVsStep2.status === 'PASS' && s3c.consumptionLinesExcluded === 1 && near(s3c.consumptionAmt, 175000));
+  let s4c = null, err = '';
+  try { s4c = runStep4({ period: P, step2: s2c, step3: s3c, pm, gl, directAdj: [] }); } catch (e) { err = e.message; }
+  ok('consumption: STEP 4 RM bridge holds without adding consumption back', !!s4c && !err, err);
+  ok('consumption: without a marked line STEP 3 has nothing left out', s3.consExcluded === true && s3.consumptionLinesExcluded === 0 && s3.checks.consVsStep2.status === 'PASS');
+}
 // v1.14.50: checkpoint 08 detail — every counted shortage is listed (none without a count, none with zero quantity)
 ok('shortList empty exactly when checkpoint 08 is 0 (MONTHLY and STRICT_DATE)', [M, St].every(({ res }) => (res.shortList.length === 0) === (res.stats.shortProducts === 0)), `M=${M.res.shortList.length}/${M.res.stats.shortProducts} St=${St.res.shortList.length}/${St.res.stats.shortProducts}`);
 ok('shortList rows all carry a positive shortage', [M, St].every(({ res }) => res.shortList.every((x) => x.short > 0 && x.prod)));

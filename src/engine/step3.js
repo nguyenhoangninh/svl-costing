@@ -2,7 +2,7 @@
 // Port of WIPValidateOpeningCore, WIPEnrichOpeningMaster, WIPDetectOpeningSource, STEP3_Import_Opening_WIP,
 // WIPSaveClosingAsOpening, WIPLoadMovement, WIPPrepareOutput, WIPPCMTieDifference, STEP3_Build_Material_WIP.
 import { txt, ttxt, num, isNumeric, headerCol, headerColAny, lastDataEnd, nextPeriod, nowISO } from './util.js';
-import { fgMask, soCell } from './step2.js';
+import { fgMask, soCell, soLineKeys } from './step2.js';
 
 // ---------------- Opening WIP ----------------
 function masterMaps(datasets) {
@@ -206,6 +206,10 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     m.opQty += num(r.qty); m.opAmt += num(r.amt);
   }
   let mrZeroLines = 0, mrZeroCost = 0, fgSkipped = 0;
+  // v1.14.75: Stock Out lines marked "tiêu hao" in STEP 2 post straight to Nợ 632 / Có 152 and never pass through WIP (154):
+  // they are left out of Material WIP (in and out), like FG Stock Out.
+  const consSet = new Set(((step2 && step2.consumeLines) || []).map(String).filter(Boolean));
+  let consSkipped = 0, consAmt = 0;
   for (const [key, type, codeN, nameN, unitN, qtyN, amtN] of MOVES) {
     const ds = datasets[key];
     if (!ds) throw new Error(`Thiếu dữ liệu ${key}.`);
@@ -214,12 +218,14 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     if (cC < 0 || cQ < 0 || cA < 0) throw new Error(`Required WIP headers not found in ${key}. Qty source is explicit; no first-non-zero fallback is allowed.`);
     const erp = key.slice(-1);
     const end = lastDataEnd(ds.rows, cC);
+    const lineKeys = type === 'SO' && consSet.size ? soLineKeys(ds, erp) : null;
     for (let i = 0; i < end; i++) {
       const r = ds.rows[i];
       const code = txt(r[cC]).trim(); if (!code) continue;
       // FG Stock Out (finished goods issued to rework, handled in 2B / 5B) is not a material movement: its quantity and
       // amount are already excluded, and the FG code itself must not be listed as a WIP material (Excel listed it as a 0 row).
       if (type === 'SO' && mask[erp] && mask[erp].set.has(i)) { fgSkipped++; continue; }
+      if (lineKeys && consSet.has(lineKeys[i])) { consSkipped++; consAmt += -num(isNumeric(r[cA]) ? r[cA] : 0); continue; }
       const m = getM(code, cN >= 0 ? txt(r[cN]) : '', cU >= 0 ? txt(r[cU]) : '');
       let qv = r[cQ], av = r[cA];
       if (type === 'SO') { qv = soCell(mask, erp, i, cQ, qv); av = soCell(mask, erp, i, cA, av); }
@@ -257,15 +263,18 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
     if (r.status === 'MASTER DATA MISSING') S.masterMissing++;
   }
   const recon = S.opening + S.inAmt - S.outAmt - S.closingAmt;
-  // v1.14.28: Stock Out = allocated to PC lots + consumption (posted to 632 directly); both come from STEP 2
-  const soTie = totalSO - step2.total.alloc - (step2.total.cons || 0);
+  // Stock Out in WIP = allocated to PC lots (STEP 2). v1.14.75: consumption (632 / 152) is no longer in WIP, so it is
+  // tied on its own: the lines left out here must add up to STEP 2's consumption total.
+  const soTie = totalSO - step2.total.alloc;
+  const consTie = consAmt - (step2.total.cons || 0);
   const pcTie = pcmTieDifference(datasets);
   const checks = {
     wipRecon: { value: recon, status: Math.abs(recon) < 0.01 ? 'PASS' : 'CHECK' },
-    soVsStep2: { value: soTie, status: Math.abs(soTie) < 0.01 ? 'PASS' : 'CHECK' },
+    soVsStep2: { value: soTie, status: Math.abs(soTie) < 0.01 && Math.abs(consTie) < 0.01 ? 'PASS' : 'CHECK' },
+    consVsStep2: { value: consTie, lines: consSkipped, amount: consAmt, status: Math.abs(consTie) < 0.01 ? 'PASS' : 'CHECK' },
     pcmVsPcp: { value: pcTie, status: Math.abs(pcTie) < 0.01 ? 'PASS' : 'CHECK' },
     exceptions: { value: S.exceptions, status: S.exceptions === 0 ? 'PASS' : 'CHECK' },
     mrQty: { lines: mrZeroLines, cost: mrZeroCost, status: mrZeroLines === 0 ? 'PASS' : 'REVIEW' },
   };
-  return { period, runAt: nowISO(), fgStockOutLinesExcluded: fgSkipped, openingSource: opening.source || '', openingStatus: opening.status, openingAmt: opening.stats ? opening.stats.totalAmt : 0, rows, summary: S, checks, step2RunAt: step2.runAt };
+  return { period, runAt: nowISO(), consExcluded: true, consumptionLinesExcluded: consSkipped, consumptionAmt: consAmt, fgStockOutLinesExcluded: fgSkipped, openingSource: opening.source || '', openingStatus: opening.status, openingAmt: opening.stats ? opening.stats.totalAmt : 0, rows, summary: S, checks, step2RunAt: step2.runAt };
 }

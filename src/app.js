@@ -1350,7 +1350,7 @@ function pcBasisPanel() {
 VIEWS.step3 = (el) => {
   const st = statusAll(); const s3 = S.d.step3;
   el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 3A · Material WIP</h1><p class="lead">Opening WIP + MI + Stock Out − PC − MR = Closing WIP ERP theo từng vật tư. FG Stock Out không đi vào WIP.</p></div>
+    <header class="ph"><div><h1>STEP 3A · Material WIP</h1><p class="lead">Opening WIP + MI + Stock Out − PC − MR = Closing WIP ERP theo từng vật tư. FG Stock Out và Stock Out tiêu hao (Nợ 632 / Có 152) không đi vào WIP.</p></div>
       <div class="result"><span>Kết quả</span>${pill(st.s3c.status)}<small>${esc(st.s3c.okText)}</small></div></header>
     <div class="row"><button class="btn" data-act="run-step3" type="button">Chạy STEP 3</button>${s3 ? `<span class="muted">Lần chạy gần nhất ${fmtTs(s3.runAt)} · Nguồn opening: ${esc(s3.openingSource)}</span>` : ''}</div>
     ${pcBasisPanel()}
@@ -1358,6 +1358,8 @@ VIEWS.step3 = (el) => {
       ${flowBox('Opening WIP', s3.summary.opening)}<i>+</i>${flowBox('MI', s3.summary.miAmt)}<i>+</i>${flowBox('Stock Out', s3.summary.soAmt)}<i>−</i>${flowBox('PC', s3.summary.pcAmt)}<i>−</i>${flowBox('MR', s3.summary.mrAmt)}<i>−</i>${flowBox('Stock Out', s3.summary.soOutAmt)}<i>=</i>${flowBox('Closing WIP', s3.summary.closingAmt, true)}
     </div>
     <div class="kpis">${kpiN('Vật tư', s3.rows.length)}${kpiN('Vật tư mới', s3.summary.newMat)}${kpiN('Ngoại lệ', s3.summary.exceptions)}${kpiN('WIP âm', s3.summary.negative)}${kpiN('Dòng MR SL = 0 có giá trị', s3.checks.mrQty.lines)}</div>
+    ${s3.consExcluded && s3.consumptionLinesExcluded ? `<div class="alert info">Tiêu hao NVL không qua WIP: ${s3.consumptionLinesExcluded} dòng Stock Out đánh dấu tiêu hao ở STEP 2 (${fmtNum(s3.consumptionAmt)} VND) ghi thẳng Nợ 632 / Có 152, không tính vào Stock Out của WIP.</div>` : ''}
+    ${!s3.consExcluded && S.d.step2 && Math.abs(num(S.d.step2.total.cons)) > 0.5 ? `<div class="alert review"><b>Kết quả STEP 3 cũ còn tính tiêu hao NVL vào WIP.</b> Chạy lại STEP 3 để tiêu hao (632 / 152) không đi qua TK 154.</div>` : ''}
     ${s3.checks.mrQty.lines ? `<div class="alert review">MR-M: ${s3.checks.mrQty.lines} dòng có Quantity = 0 nhưng Total Cost = ${fmtNum(s3.checks.mrQty.cost)} VND. Kiểm tra file MR-M xuất từ ERP. (Nguồn SL: T, O = Quantity; S = Bad Quantity; không dùng Req. Qty.)</div>` : ''}
     <h2>Checkpoint</h2>${cpTable(st.s3c.rows)}
     <h2>WIP theo vật tư</h2><div id="t-wip"></div>` : `<h2>Checkpoint</h2>${cpTable(st.s3c.rows)}${emptyNote('Chưa chạy STEP 3. Cần STEP 2 = PASS và Opening WIP đã validate.')}`}
