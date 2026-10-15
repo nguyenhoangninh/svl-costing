@@ -9,6 +9,7 @@ import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
 import * as store from './store.js';
 import { APP_VERSION } from './config.js';
+import * as I18N from './i18n.js';
 import * as NT from './engine/notifications.js';
 import { createNotificationUI } from './ui/notifications.js';
 import * as P2 from './views/phase2.js';
@@ -870,7 +871,10 @@ async function importERP(files) {
   if (plan.dups.length) msg.push('Trùng: ' + plan.dups.join('; '));
   if (plan.skipped.length) msg.push('Bỏ qua: ' + plan.skipped.join('; '));
   if (warns.length) msg.push('Cảnh báo (đã import):', ...warns);
-  $('#plan').innerHTML = `<div class="alert ${errs.length ? 'block' : 'pass'}">${msg.map(esc).join('<br>')}${errs.length ? '<br><b>Lỗi — file bị chặn, chưa import:</b><br>' + errs.map(esc).join('<br>') : ''}${ok ? '<br>Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.' : ''}</div>`;
+  // v1.14.59: the user may have left STEP 1 while the files were read – then show the result as a toast instead of failing
+  const planBox = $('#plan');
+  if (!planBox) { toast(msg.join(' ') + (errs.length ? ' Lỗi: ' + errs.join('; ') : ''), errs.length ? 'block' : 'pass'); return; }
+  planBox.innerHTML = `<div class="alert ${errs.length ? 'block' : 'pass'}">${msg.map(esc).join('<br>')}${errs.length ? '<br><b>Lỗi — file bị chặn, chưa import:</b><br>' + errs.map(esc).join('<br>') : ''}${ok ? '<br>Dữ liệu ERP đã thay đổi — cần chạy lại STEP 2 và STEP 3.' : ''}</div>`;
 }
 
 // ---------- STEP 2 ----------
@@ -1970,6 +1974,7 @@ P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approv
 
 // ======================= boot =======================
 (async function boot() {
+  I18N.initI18n(() => render()); // v1.14.59: VI / EN switch in the header
   routeFromHash();
   await refreshPeriods();
   const last = localStorage.getItem('svl.period');
