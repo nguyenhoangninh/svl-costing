@@ -36,18 +36,18 @@ import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 import { costAllocationSheet, fgLayerSheet, provisionTrackSheet, provisionJournalSheet } from './engine/exportform.js';
 import { provisionTrack, provisionJournal } from './engine/provision.js';
-import { customerPL, plSheetRows, PL_HEADERS } from './engine/custpl.js';
+import { customerPL, plSheetRows, PL_HEADERS, productPL, prodSheetRows, PROD_HEADERS } from './engine/custpl.js';
 import { journalWithCustomers, journalCheck } from './engine/journal.js';
 import * as DBV from './views/dashboard.js';
 
 // ======================= state =======================
-const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
+const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS, ...DBV.DASH_BLOBS];
 const S = {
   period: '', periods: [], view: 'cc', busy: '',
   d: emptyData(), dirty: new Set(), sync: 'local', syncMsg: '',
   dsView: 'PC-P-T',
 };
-function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, consumeCfg: null, consFg: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null }; }
+function emptyData() { return { datasets: {}, importLog: {}, importAck: null, step2: null, consumeCfg: null, consFg: null, register: null, opening: null, step3: null, audit: [], erpMap: null, wipadj: null, salesImport: null, salesDB: null, returnsImport: null, returnsDB: null, fgProd: null, rwCfg: null, soPrice: [], manualPrice: [], pm: null, gl: null, directAdj: [], step4: null, lotCheck: null, lotParams: null, fgRef: null, fgOpen: null, step5: null, fgHistory: null, fifoOverrides: null, s5cfg: null, fgItems: null, closed: null, closedEver: null, rwArchive: null, pcAdj: null, dashPlan: null }; }
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const app = () => $('#main');
@@ -1670,7 +1670,8 @@ async function exportHachToan() {
   await exportBook(`SVL_Bang_Tong_Hop_Hach_Toan_${S.period}.xlsx`, [
     { name: '1_TongHop_KhachHang', aoa: [PL_HEADERS, ...plSheetRows(pl)] },
     { name: '2_ButToan_KhachHang', aoa: [['JE', 'Nợ', 'Có', 'Khách hàng', 'Diễn giải', 'Số tiền (VND)'], ...lines.map((j) => [j.je, j.dr, j.cr, j.cust || '—', j.desc, j.amount])] },
-    { name: '3_KiemTra', aoa: [['Kiểm tra', 'Kỳ vọng', 'Thực tế', 'Chênh', 'Trạng thái'], ...checks.map((c) => [c.label, c.expected, c.actual, num(c.actual) - num(c.expected), c.status])] },
+    { name: '3_TongHop_SanPham', aoa: [PROD_HEADERS, ...prodSheetRows(productPL(r5))] },
+    { name: '4_KiemTra', aoa: [['Kiểm tra', 'Kỳ vọng', 'Thực tế', 'Chênh', 'Trạng thái'], ...checks.map((c) => [c.label, c.expected, c.actual, num(c.actual) - num(c.expected), c.status])] },
   ]);
 }
 async function newPeriod() {
@@ -2059,7 +2060,7 @@ RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exp
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 PV.install({ loadPeriodData, S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow });
-DBV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, toast, render, derived: derivedNow, exportHachToan: () => exportHachToan() });
+DBV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, toast, render, derived: derivedNow, exportHachToan: () => exportHachToan(), loadStep5: (p) => store.localGet(lk(p, 'step5')), loadPeriodData, periods: () => S.allPeriods || S.periods || [], markDirty, audit, parseNum, guardEdit: guardMutate, closedGuard: () => P3.closedGuard(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này') });
 
 // ======================= boot =======================
 (async function boot() {
