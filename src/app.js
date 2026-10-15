@@ -3,7 +3,7 @@ import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt,
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
 import * as SP from './engine/syncpolicy.js';
 import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS, confirmConsFg, undoConsFg, consFgEligible, consFgConfirmed, consFgPendingCount } from './engine/step2.js';
-import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS, step3Stale, wipJournalAmounts } from './engine/step3.js';
+import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS, step3Stale } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
@@ -36,6 +36,9 @@ import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
 import { costAllocationSheet, fgLayerSheet, provisionTrackSheet, provisionJournalSheet } from './engine/exportform.js';
 import { provisionTrack, provisionJournal } from './engine/provision.js';
+import { customerPL, plSheetRows, PL_HEADERS } from './engine/custpl.js';
+import { journalWithCustomers, journalCheck } from './engine/journal.js';
+import * as DBV from './views/dashboard.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
@@ -467,6 +470,7 @@ const exportTable = (name, columns) => (rows) => exportBook(`${name}_${S.period}
 // ======================= layout =======================
 const NAV = [
   { id: 'cc', no: '', label: 'Tổng quan kỳ', sub: 'Control Center' },
+  { id: 'dashboard', no: '', label: 'Dashboard doanh thu & GP', sub: 'Theo khách hàng · GP %' },
   { id: 'step1', no: '1', label: 'Import dữ liệu ERP', sub: '21 báo cáo T · S · O', key: 's1' },
   { id: 'step2', no: '2', label: 'Phân bổ Stock Out', sub: 'Stock Out → lô PC', key: 's2' },
   { id: 'rework', no: '2B', label: 'Sổ FG Rework', sub: 'FG xuất đi rework', key: 'rw' },
@@ -589,6 +593,7 @@ VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.salesreturn = (el) => P3.viewReturns(el);
 VIEWS.provision = (el) => PV.view(el);
+VIEWS.dashboard = (el) => DBV.view(el);
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
@@ -681,24 +686,15 @@ function overviewKpis(st, s3) {
 function emptyNote(msg, href, cta) { return `<div class="empty"><p>${esc(msg)}</p>${href ? `<a class="btn" href="#${href}">${esc(cta)}</a>` : ''}</div>`; }
 function journal(st) {
   const s3 = S.d.step3; if (!s3) return '';
-  const S3 = s3.summary;
-  // v1.14.28: RM consumption (tiêu hao) is posted straight to 632, not through the WIP / PC lots.
-  // v1.14.77: the amounts follow what STEP 3 put in WIP (consumption already out of its Stock Out), see wipJournalAmounts
-  const J = wipJournalAmounts(s3, S.d.step2);
-  const je = [['JE01', '154', '152', 'Xuất NVL vào WIP – MI', J.mi], ['JE02', '154', '152', 'Xuất NVL vào WIP – Stock Out (không gồm tiêu hao)', J.so]];
-  if (J.cons) je.push(['JE02B', '632', '152', 'Tiêu hao NVL – xuất thẳng vào 632', J.cons]);
-  je.push(['JE05', '152', '154', 'Nhập lại NVL từ WIP – MR', S3.mrAmt]);
-  const s4 = S.d.step4, fl = st && st.p2.d4 && st.p2.d4.fl;
-  if (s4 && !s4.blocked) je.push(['JE03', '154', '622', 'Kết chuyển nhân công trực tiếp', s4.alloc622], ['JE04', '154', '627', 'Kết chuyển chi phí SX chung', s4.alloc627]);
-  if (fl) je.push(['JE06', '155', '154', 'Nhập kho thành phẩm theo giá thành STEP 4', fl.totals.totalCost]);
   const r5 = st && st.d5 && st.d5.res;
-  // v1.14.28: JE07 = sales COGS; FG consumption (tiêu dùng nội bộ) is a separate line, booked before sales in STEP 5.2
-  if (r5) je.push(['JE07', '632', '155', 'Giá vốn hàng bán theo FIFO', r5.totals.cogsA - (r5.totals.consA || 0)]);
-  if (r5 && r5.totals.consA) je.push(['JE07B', '632', '155', 'Tiêu dùng nội bộ FG theo FIFO (tiêu hao)', r5.totals.consA]);
-  if (r5 && r5.rework) je.push(['JE08', '154', '155', 'FG xuất đi rework (giá trị FIFO)', r5.rework.fifoCost]);
-  return `<h2>Bút toán đề xuất</h2><table class="cp"><thead><tr><th>JE</th><th>Nợ</th><th>Có</th><th>Diễn giải</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>
-    ${je.map((j) => `<tr><td>${j[0]}</td><td>${j[1]}</td><td>${j[2]}</td><td>${esc(j[3])}</td><td class="r">${fmtNum(j[4])}</td></tr>`).join('')}</tbody></table>
-    <p class="muted">Bút toán đề xuất để hạch toán trên FAST; doanh thu (131/511) đã ghi nhận trên FAST nên không lặp lại ở đây.</p>`;
+  const ctx = { s3, s2: S.d.step2, s4: S.d.step4, fl: st && st.p2.d4 && st.p2.d4.fl, r5 };
+  // v1.14.79: JE07 is split by customer (its lines add up to JE07); the same lines go to the bảng tổng hợp hạch toán
+  const lines = journalWithCustomers(ctx);
+  const chk = journalCheck(ctx);
+  const tag = chk.status === 'PASS' ? 'khớp JE07' : 'lệch JE07 – xem Dashboard';
+  return `<h2>Bút toán đề xuất</h2><table class="cp"><thead><tr><th>JE</th><th>Nợ</th><th>Có</th><th>Khách hàng</th><th>Diễn giải</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>
+    ${lines.map((j) => `<tr><td>${esc(j.je)}</td><td>${esc(j.dr)}</td><td>${esc(j.cr)}</td><td>${esc(j.cust || '—')}</td><td>${esc(j.desc)}</td><td class="r">${fmtNum(j.amount)}</td></tr>`).join('')}</tbody></table>
+    <p class="muted">Bút toán đề xuất để hạch toán trên FAST. Giá vốn (JE07) chia theo khách hàng: <span>${esc(tag)}</span>. Doanh thu (DT / TL / GG) đã ghi nhận trên FAST, chỉ để đối chiếu. Xem thêm <a href="#dashboard">Dashboard</a>.</p>`;
 }
 
 // ---------- STEP 1 ----------
@@ -1661,6 +1657,22 @@ async function exportAll() {
 }
 
 // ======================= actions =======================
+/** v1.14.79: Bảng tổng hợp hạch toán – doanh thu, giá vốn, lãi gộp theo khách hàng; bút toán theo khách hàng; kiểm tra. */
+async function exportHachToan() {
+  const r5 = S.d.step5 && S.d.step5.period === S.period ? S.d.step5 : null;
+  if (!r5) { toast('Chưa có kết quả FIFO COGS (STEP 5.2) để xuất bảng tổng hợp hạch toán.', 'review'); return; }
+  const D = P2.derive(S);
+  const ctx = { s3: S.d.step3, s2: S.d.step2, s4: S.d.step4, fl: D.d4 && D.d4.fl, r5 };
+  const pl = customerPL(r5);
+  const lines = journalWithCustomers(ctx);
+  const jc = journalCheck(ctx);
+  const checks = [...pl.checks, { label: 'JE07 theo khách hàng = JE07 (giá vốn bán hàng)', expected: jc.expected, actual: jc.actual, status: jc.status }];
+  await exportBook(`SVL_Bang_Tong_Hop_Hach_Toan_${S.period}.xlsx`, [
+    { name: '1_TongHop_KhachHang', aoa: [PL_HEADERS, ...plSheetRows(pl)] },
+    { name: '2_ButToan_KhachHang', aoa: [['JE', 'Nợ', 'Có', 'Khách hàng', 'Diễn giải', 'Số tiền (VND)'], ...lines.map((j) => [j.je, j.dr, j.cr, j.cust || '—', j.desc, j.amount])] },
+    { name: '3_KiemTra', aoa: [['Kiểm tra', 'Kỳ vọng', 'Thực tế', 'Chênh', 'Trạng thái'], ...checks.map((c) => [c.label, c.expected, c.actual, num(c.actual) - num(c.expected), c.status])] },
+  ]);
+}
 async function newPeriod() {
   const sug = S.period ? nextPeriod(S.period) : '';
   const p = (prompt('Kỳ mới (YYYY-MM):', sug) || '').trim();
@@ -2047,6 +2059,7 @@ RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exp
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 PV.install({ loadPeriodData, S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow });
+DBV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, toast, render, derived: derivedNow, exportHachToan: () => exportHachToan() });
 
 // ======================= boot =======================
 (async function boot() {

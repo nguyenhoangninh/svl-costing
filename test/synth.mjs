@@ -179,6 +179,28 @@ const snap = {
   strict: { cogs: r2(St.res.totals.cogsA), close: r2(St.res.totals.closeA), rw: r2(St.res.rework.fifoCost), rwStatus: St.reg.rows.map((r) => r.fifoStatus), lines: St.res.sales.map((s) => [s.inv, s.status, r2(s.tot)]) },
   revenue: r2(F5.periodRevenue(salesDB.rows, P)),
 };
+// ---------- v1.14.79: revenue, COGS and gross profit by customer tie to the STEP 5 totals; the journal splits JE07 by customer
+{
+  const { customerPL, customerJournal } = await import('../src/engine/custpl.js');
+  const { journalWithCustomers, journalCheck } = await import('../src/engine/journal.js');
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+  for (const [label, X] of [['MONTHLY', M], ['STRICT_DATE', St]]) {
+    const pl = customerPL(X.res), T = X.res.totals;
+    ok(`customers ${label}: COGS by customer + consumption = 632 (cogsA)`, near(pl.total.cogs, T.cogsA), `${pl.total.cogs} vs ${T.cogsA}`);
+    ok(`customers ${label}: sales COGS by customer = JE07 (cogsA − consA)`, near(pl.rows.reduce((a, r) => a + r.cogs, 0), T.cogsA - T.consA));
+    ok(`customers ${label}: net revenue by customer = Σ sales-line amounts`, near(pl.total.net, X.res.sales.reduce((a, s) => a + num(s.vnd), 0)));
+    ok(`customers ${label}: gross profit = net revenue − COGS`, near(pl.total.gp, pl.total.net - pl.total.cogs));
+    ok(`customers ${label}: all checks PASS`, pl.checks.every((c) => c.status === 'PASS'), JSON.stringify(pl.checks.map((c) => c.status)));
+    const lines = journalWithCustomers({ s3, s2, s4, fl, r5: X.res });
+    const je07 = lines.filter((l) => l.je === 'JE07').reduce((a, l) => a + l.amount, 0);
+    ok(`journal ${label}: JE07 lines by customer add up to JE07`, near(je07, T.cogsA - T.consA), `${je07}`);
+    ok(`journal ${label}: JE07 check PASS`, journalCheck({ r5: X.res }).status === 'PASS');
+    ok(`journal ${label}: customer COGS lines are posted Nợ 632 / Có 155`, lines.filter((l) => l.je === 'JE07').every((l) => l.dr === '632' && l.cr === '155'));
+  }
+  const plS = customerPL(St.res);
+  ok('customers STRICT_DATE: the sales return reduces the revenue of its customer C1', near(plS.rows.find((r) => r.cust === 'C1').ret, St.res.sales.filter((s) => s.acc === '5212').reduce((a, s) => a + num(s.vnd), 0)) && plS.total.ret < 0);
+}
+
 const file = new URL('./synth.snapshot.json', import.meta.url);
 if (process.argv.includes('--update') || !fs.existsSync(file)) { fs.writeFileSync(file, JSON.stringify(snap, null, 1) + '\n'); console.log('snapshot written'); }
 else {
