@@ -61,7 +61,7 @@ export function materialIssueCosts(datasets, period, opts = {}) {
     g.lines.push(l);
     if (l.qty > 0 && l.cost > 0) g.costed.push(l);
   }
-  const materials = [], flaggedLines = [];
+  const materials = [], flaggedLines = [], allLines = [];
   for (const g of groups.values()) {
     const qtyAll = g.lines.reduce((a, l) => a + l.qty, 0), costAll = g.lines.reduce((a, l) => a + l.cost, 0);
     const cQty = g.costed.reduce((a, l) => a + l.qty, 0), cCost = g.costed.reduce((a, l) => a + l.cost, 0);
@@ -73,11 +73,15 @@ export function materialIssueCosts(datasets, period, opts = {}) {
     let nDev = 0, maxDev = 0;
     for (const l of g.costed) {
       const u = l.cost / l.qty, dev = ref > 0 ? u / ref - 1 : 0;
-      if (l.cost >= MIN && Math.abs(dev) > DEV) {
+      const bad = l.cost >= MIN && Math.abs(dev) > DEV;
+      if (bad) {
         nDev++;
         if (Math.abs(dev) > Math.abs(maxDev)) maxDev = dev;
-        flaggedLines.push({ ...l, unitCost: u, bq, ref, dev, flag: 'REVIEW - BẤT THƯỜNG' });
       }
+      // v1.14.62: every costed line is listed (for the status filter); only the flagged ones count as abnormal
+      const row = { ...l, unitCost: u, bq, ref, dev, flag: bad ? 'REVIEW - BẤT THƯỜNG' : 'OK - BÌNH THƯỜNG' };
+      allLines.push(row);
+      if (bad) flaggedLines.push(row);
     }
     const flag = nDev > 0 ? 'REVIEW - BẤT THƯỜNG' : nZero > 0 ? 'REVIEW - THIẾU COST' : 'PASS';
     materials.push({
@@ -96,5 +100,5 @@ export function materialIssueCosts(datasets, period, opts = {}) {
     flaggedLines: flaggedLines.length, zeroCostLines: materials.reduce((a, m) => a + m.nZero, 0),
     lines: all.length, dev: DEV, minCost: MIN,
   };
-  return { materials, lines: flaggedLines, summary, missing };
+  return { materials, lines: flaggedLines, allLines, summary, missing };
 }

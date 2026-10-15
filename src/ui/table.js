@@ -4,22 +4,27 @@ import { fmtCell, statusClass } from './format.js';
 const ROW_H = 30;
 
 /**
- * mountTable(el, {columns, rows, getRow?, editable?, onEdit?, totals?, height?, searchKeys?, filterKey?})
+ * mountTable(el, {columns, rows, getRow?, editable?, onEdit?, totals?, height?, searchKeys?, filterKey?, filters?})
  * columns: [{key, label, type, width, editable, options}]
  */
 export function mountTable(el, cfg) {
   const cols = cfg.columns;
   const val = (r, c) => (Array.isArray(r) ? r[c.key] : r[c.key]);
   let view = cfg.rows.slice();
-  let sortCol = null, sortDir = 1, query = cfg.query || '', statusFilter = '';
-  const filterKey = cfg.filterKey;
-  const statuses = filterKey ? [...new Set(cfg.rows.map((r) => String(val(r, cols.find((c) => c.key === filterKey)) ?? '')))].filter(Boolean).sort() : [];
+  let sortCol = null, sortDir = 1, query = cfg.query || '';
+  // column filters: [{key, label, aria, options?: [[value, text]]}]; without options the distinct values of the column are used
+  // (filterKey / filterLabel / filterAria are the one-filter shorthand)
+  const colOf = (k) => cols.find((c) => c.key === k);
+  const filters = (cfg.filters || (cfg.filterKey !== undefined ? [{ key: cfg.filterKey, label: cfg.filterLabel, aria: cfg.filterAria }] : [])).map((f) => ({
+    ...f, sel: '',
+    opts: f.options || [...new Set(cfg.rows.map((r) => String(val(r, colOf(f.key)) ?? '')))].filter(Boolean).sort().map((v) => [v, v]),
+  }));
 
   el.classList.add('vt');
   el.innerHTML = `
     <div class="vt-tools">
       <input type="search" class="vt-search" placeholder="Tìm trong ${cfg.rows.length.toLocaleString('vi-VN')} dòng…" aria-label="Tìm kiếm">
-      ${statuses.length ? `<select class="vt-filter" aria-label="${esc(cfg.filterAria || 'Lọc trạng thái')}"><option value="">${esc(cfg.filterLabel || 'Tất cả trạng thái')}</option>${statuses.map((s) => `<option>${esc(s)}</option>`).join('')}</select>` : ''}
+      ${filters.map((f, i) => (f.opts.length ? `<select class="vt-filter" data-fi="${i}" aria-label="${esc(f.aria || 'Lọc trạng thái')}"><option value="">${esc(f.label || 'Tất cả trạng thái')}</option>${f.opts.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')}</select>` : '')).join('')}
       <span class="vt-count"></span>
       <span class="vt-spacer"></span>
       ${cfg.onExport ? '<button class="btn ghost vt-export" type="button">Xuất Excel</button>' : ''}
@@ -39,7 +44,7 @@ export function mountTable(el, cfg) {
   function apply() {
     const q = query.trim().toLowerCase();
     view = cfg.rows.filter((r) => {
-      if (statusFilter && String(val(r, cols.find((c) => c.key === filterKey)) ?? '') !== statusFilter) return false;
+      for (const f of filters) if (f.sel && String(val(r, colOf(f.key)) ?? '') !== f.sel) return false;
       if (!q) return true;
       for (const c of cols) { const v = val(r, c); if (v !== null && v !== undefined && String(v).toLowerCase().includes(q)) return true; }
       return false;
@@ -103,8 +108,7 @@ export function mountTable(el, cfg) {
   if (cfg.onRowClick) el.classList.add('vt-click');
   if (cfg.onRowClick) tbody.addEventListener('click', (e) => { if (e.target.closest('a,input,select,button')) return; const tr = e.target.closest('tr[data-v]'); if (tr) cfg.onRowClick(view[+tr.dataset.v]); });
   el.querySelector('.vt-search').addEventListener('input', (e) => { query = e.target.value; apply(); });
-  const fsel = el.querySelector('.vt-filter');
-  if (fsel) fsel.addEventListener('change', (e) => { statusFilter = e.target.value; apply(); });
+  el.querySelectorAll('.vt-filter').forEach((fsel) => fsel.addEventListener('change', (e) => { filters[+e.target.dataset.fi].sel = e.target.value; apply(); }));
   el.querySelector('thead').addEventListener('click', (e) => {
     const th = e.target.closest('th'); if (!th) return;
     const c = cols[+th.dataset.i];
