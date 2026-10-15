@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.69 (15/10/2026):** Xuất Excel theo đúng template: **04_COST_ALLOCATION**, **05_FG_OPENING**, **05_FG_CLOSING** có đúng cột, thứ tự và tiêu đề của file template. Cost Allocation: dòng 1 là tổng cộng (SUM), dòng 2 là tiêu đề, dữ liệu từ dòng 3; dòng T có Location FG hiển thị Doona (ghi chú của template); cột Unit RM (USD) và allocation after RM (USD) là công thức theo template. FG: dòng 1 là tiêu đề, net inventory và UNIT COST RM là công thức. Định dạng: tiêu đề màu, dòng xen màu, số có dấu phân cách, khung cố định cột và bộ lọc. Chỉ đổi cách xuất, không đổi cách tính. Mã nằm ở `src/engine/exportform.js`, có `test/export-form.mjs`.
+>
 > **v1.14.68 (15/10/2026):** STEP 5.3 · Quyết định NRV: thêm nút **Hoàn tác quyết định NRV** (chỉ khi chưa đóng kỳ); lưu đè quyết định phải xác nhận và nhật ký ghi đầy đủ quyết định cũ; nhật ký ghi cả khi hoàn tác. Logic nằm ở `src/engine/nrvdecision.js`, có `test/nrv-decision.mjs`.
 >
 > **v1.14.67 (15/10/2026):** Khi bước 3A **Điều chỉnh PC-P theo PC-M** làm đơn giá lô PC-P đổi, thẻ D có thể đổi và cần xác nhận lại ở STEP 1: thông báo nay nêu rõ nguyên nhân, liệt kê đủ các phần A/B/C/D còn chặn (STEP 2 và mục kiểm soát STEP 1), và cảnh báo ngay trong màn điều chỉnh.

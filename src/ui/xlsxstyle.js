@@ -18,7 +18,10 @@ const TONE_RULES = [[/^(PASS|ALLOCATED)/, 'good'], [/^(BLOCK|CHECK|CHƯA|NO |UNK
 const toneOf = (text) => { for (const [re, t] of TONE_RULES) if (re.test(text)) return t; return null; };
 const thin = { style: 'thin', color: { argb: C.line } };
 const BORDER = { top: thin, left: thin, bottom: thin, right: thin };
-const norm = (x) => (x && typeof x === 'object' && 'v' in x ? { value: x.v, z: x.z } : { value: x, z: null });
+// { v, z }: a value with its number format. { f, r, z }: a formula (f without '='), its cached result r and its number format.
+const norm = (x) => (x && typeof x === 'object' && 'v' in x ? { value: x.v, z: x.z }
+  : x && typeof x === 'object' && typeof x.f === 'string' ? { value: { formula: x.f, result: x.r }, z: x.z ?? null }
+    : { value: x, z: null });
 const colLetter = (n) => { let s = ''; for (let k = n; k > 0; k = Math.floor((k - 1) / 26)) s = String.fromCharCode(65 + ((k - 1) % 26)) + s; return s; };
 const linesOf = (text, width) => String(text ?? '').split('\n').reduce((a, part) => a + Math.max(1, Math.ceil(part.length / Math.max(4, width * 1.25))), 0);
 const blank = (x) => x === null || x === undefined || x === '';
@@ -181,7 +184,7 @@ function renderAoaSheet(wb, s, meta) {
     let w = 10;
     for (const t of tables) {
       w = Math.max(w, t.head(c).length * 0.9 + 3);
-      for (let i = t.h + 1; i <= Math.min(t.e, t.h + 400); i++) { const v = val(i, c); w = Math.max(w, (typeof v === 'number' ? 14 : String(v ?? '').length) + 2); }
+      for (let i = t.h + 1; i <= Math.min(t.e, t.h + 400); i++) { const v = val(i, c); w = Math.max(w, (typeof v === 'number' || (v && typeof v === 'object') ? 14 : String(v ?? '').length) + 2); }
     }
     return Math.min(Math.max(w, 10), 46);
   });
@@ -201,6 +204,23 @@ function renderAoaSheet(wb, s, meta) {
     const isHdr = t && t.h === i;
     const isBody = t && t.h < i;
     const nb = nbCount(row);
+    // totals row (s.totals = its 1-based row number): bold, tinted, ruled above; every column is styled, empty ones too
+    if (s.totals === r) {
+      for (let c = 0; c < ncols; c++) {
+        const cell = ws.getCell(r, c + 1);
+        const { value, z } = norm(row[c]);
+        if (blank(value)) cell.value = null;
+        else if (typeof value === 'number') { cell.value = Number.isFinite(value) ? value : null; cell.numFmt = z || NF_DEC; }
+        else if (typeof value === 'object') { cell.value = { formula: value.formula, result: value.result }; cell.numFmt = z || NF_INT; }
+        else cell.value = String(value);
+        cell.font = { name: FONT, size: 10, bold: true, color: { argb: C.brand } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.total } };
+        cell.alignment = { vertical: 'middle', horizontal: typeof value === 'string' ? 'left' : 'right', indent: c === 0 ? 1 : 0 };
+        cell.border = { ...BORDER, top: { style: 'medium', color: { argb: C.brand } } };
+      }
+      ws.getRow(r).height = 20;
+      return;
+    }
     // title and subtitle (only when the sheet has a title)
     if (s.title && i < 2) {
       ws.mergeCells(r, 1, r, ncols);
@@ -261,13 +281,15 @@ function renderAoaSheet(wb, s, meta) {
       }
       if (blank(value)) cell.value = null;
       else if (typeof value === 'number') { cell.value = Number.isFinite(value) ? value : null; cell.numFmt = z || NF_DEC; }
+      else if (typeof value === 'object') { cell.value = { formula: value.formula, result: value.result }; cell.numFmt = z || NF_INT; }
       else cell.value = String(value);
       if (tone) { cell.font = { name: FONT, size: 10, bold: true, color: { argb: C[tone][0] } }; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C[tone][1] } }; }
       else cell.font = { name: FONT, size: 10, bold: !isBody && typeof value === 'string' && nb > 1 && c === row.findIndex((x) => !blank(norm(x).value)), color: { argb: C.ink } };
-      const isNum = typeof value === 'number';
+      const isNum = typeof value === 'number' || (value !== null && typeof value === 'object');
       const short = isBody && c > 0 && typeof value === 'string' && value.length <= 3 && !/\s/.test(value);
       cell.alignment = { vertical: 'middle', horizontal: isNum ? 'right' : short ? 'center' : 'left', indent: !isNum && !short ? 1 : 0, wrapText: typeof value === 'string' && isBody };
       if (isBody) cell.border = BORDER;
+      if (isBody && s.zebra && !tone && (i - t.h) % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.zebra } };
       if (typeof value === 'string' && isBody) hgt = Math.max(hgt, 13.5 * linesOf(value, widths[c]) + 4);
     }
     if (isBody) ws.getRow(r).height = hgt;
@@ -302,8 +324,9 @@ function renderAoaSheet(wb, s, meta) {
   }
   // freeze, filter and print titles for a single table sheet
   const single = tables.length === 1 ? tables[0] : null;
-  if (single && single.e - single.h >= 10 && single.h < 14) {
-    ws.views = [{ showGridLines: false, state: 'frozen', xSplit: 0, ySplit: single.h + 1, topLeftCell: `A${single.h + 2}` }];
+  if (single && (s.freezeCols || (single.e - single.h >= 10 && single.h < 14))) {
+    const fc = s.freezeCols || 0; // v1.14.69: sheets with freezeCols always freeze (header row + key columns), whatever the length
+    ws.views = [{ showGridLines: false, state: 'frozen', xSplit: fc, ySplit: single.h + 1, topLeftCell: `${colLetter(fc + 1)}${single.h + 2}` }];
   }
   if (single && single.e > single.h) ws.autoFilter = `A${single.h + 1}:${colLetter(ncols)}${single.e + 1}`;
   if (single) ws.pageSetup.printTitlesRow = `${single.h + 1}:${single.h + 1}`;
