@@ -1363,7 +1363,7 @@ async function readPeriodVerified(p, names = null) {
     const d = emptyData();
     for (const [k, v] of Object.entries((r && r.blobs) || {})) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
     d.audit = d.audit || [];
-    return { d, source: 'CLOUD', verified: true, rev: meta.rev, localRev: localRev ?? null };
+    return { d, source: 'CLOUD', verified: true, rev: r.meta.rev, localRev: localRev ?? null };
   } catch (e) { return { d: local, source: 'LOCAL', verified: false, error: (e && e.message) || String(e), rev: meta.rev }; }
 }
 
@@ -1373,10 +1373,12 @@ async function checkPrevDrift() {
   const fgRoll = S.d.fgOpen && S.d.fgOpen.srcKind === 'ROLL FORWARD' && S.period ? prevPeriod(S.period) : '';
   const p = (op && op.period) || (bs && bs.period) || fgRoll;
   let verifyErr = '';
+  S.prevVerifiedPeriod = ''; S.prevVerifiedRev = null;
   if (p) {
     // v1.14.86 (AUD-02): read the previous period as the cloud holds it now; never fall back silently to a stale copy
     const rv = await readPeriodVerified(p, ['step3', 'register', 'closed', 'step5', 'nrvDecision']).catch((e) => ({ verified: false, error: (e && e.message) || String(e) }));
     if (!rv.verified && !rv.offline) verifyErr = `Không xác minh được kỳ ${p} trên cloud (${rv.error || 'không đọc được'}). Số dư đầu kỳ ${S.period} chưa được đối chiếu với số mới nhất của kỳ ${p}; kiểm tra kết nối rồi mở lại màn hình trước khi CLOSE.`;
+    if (rv.verified && !rv.offline) { S.prevVerifiedPeriod = p; S.prevVerifiedRev = rv.rev ?? null; }
     const prevD = rv.d;
     if (prevD) {
       if (op && wipFp(prevD.step3) !== op.wipFp) out.push(`Closing WIP kỳ ${p} đã thay đổi sau khi chuyển sang Opening WIP kỳ ${S.period} – roll forward lại.`);
