@@ -47,6 +47,9 @@ await page.goto(base + '#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-hist]'); await page.waitForTimeout(1200);
 // FAST tie: before entry the close is blocked; enter the web figures but 632 off by 1.000 → approve with a note
 console.log('close before NRV:', ((await txt('main')).match(/Chưa đóng được:.{0,120}/) || [''])[0]);
+// v1.14.73: the NRV decision sits in 5P (Dự phòng FG), not in 5.3
+console.log('5.3 has no NRV form:', (await page.locator('#f-nrv-decision').count()) === 0);
+await page.goto(base + '#provision'); await page.waitForTimeout(600);
 if (await page.locator('#f-nrv-decision').count()) {
   await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
   await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: chưa trích lập kỳ này'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(500);
@@ -62,6 +65,7 @@ if (await page.locator('#nrv-undo').count()) {
   await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: thay thế quyết định'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(400);
   console.log('NRV after replace:', (await txt('main')).match(/NRV: [A-Z ]+/)?.[0]);
 }
+await page.goto(base + '#close'); await page.waitForSelector('.result');
 console.log('close before FAST:', ((await txt('main')).match(/Chưa đóng được:.{0,120}/) || [''])[0]);
 await page.click('[data-tabh="fast"]'); await page.waitForSelector('#f-fast');
 const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => [tr.querySelector('input').name, tr.children[2].textContent.replace(/\./g, '').replace(',', '.').replace(/[–-]$/, '0')]));

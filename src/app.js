@@ -14,6 +14,7 @@ import * as NT from './engine/notifications.js';
 import { createNotificationUI } from './ui/notifications.js';
 import * as P2 from './views/phase2.js';
 import * as P3 from './views/phase3.js';
+import * as PV from './views/provision.js';
 import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
@@ -33,7 +34,8 @@ import * as TPL from './engine/templates.js';
 import * as DQ from './engine/dataquality.js';
 import { exportStyledBook } from './ui/xlsxstyle.js';
 import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/pcbasis.js';
-import { costAllocationSheet, fgLayerSheet } from './engine/exportform.js';
+import { costAllocationSheet, fgLayerSheet, provisionTrackSheet, provisionJournalSheet } from './engine/exportform.js';
+import { provisionTrack, provisionJournal } from './engine/provision.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS];
@@ -479,6 +481,7 @@ const NAV = [
   { id: 'step5', no: '5.2', label: 'FIFO giá vốn', sub: 'COGS · rework 5B', key: 's5' },
   { id: 'rwflow', no: '5B', label: 'Xử lý Rework', sub: 'Treo · hoàn thành · chi phí', key: 'rwf' },
   { id: 'salesreturn', no: '5R', label: 'Hàng trả lại & giảm giá', sub: 'Sales Return 5212 · 5213', key: 's5r' },
+  { id: 'provision', no: '5P', label: 'Dự phòng FG', sub: 'TK 2294 · nạp đầu kỳ · FAST', key: 'prov' },
   { id: 'close', no: '5.3', label: 'FG History & đóng kỳ', sub: 'Đóng kỳ', key: 's5c' },
 ];
 const TOOLS = [
@@ -494,7 +497,7 @@ function railStatus(st) {
   return {
     s1: st.s1c.result, s2: st.s2c.status, rw: !S.d.register ? 'NOT RUN' : blocks ? 'BLOCK' : 'PASS',
     op: op === 'READY' ? 'PASS' : op === 'READY WITH WARNINGS' ? 'PASS WITH REVIEW' : op === 'NO DATA' ? 'NOT RUN' : 'BLOCK', s3: st.s3c.status,
-    s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5r: 'NOT RUN', s5c: 'NOT RUN' }),
+    s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5r: 'NOT RUN', s5c: 'NOT RUN' }), prov: PV.railStatus(S, st.d5),
     pm: !S.d.pm ? 'NOT RUN' : S.d.pm.status !== 'CURRENT' ? S.d.pm.status : S.d.pm.rows.some((r) => r.status === 'MISSING PRICE') ? 'BLOCK' : 'PASS',
     gl: S.d.gl && S.d.gl.period === S.period && num(S.d.gl.fx) > 0 ? 'PASS' : 'NOT RUN',
     fgp: FGP.status(S, st.p2.d4),
@@ -530,7 +533,7 @@ function renderShell() {
 }
 
 // v1.14.55: each process stage has its own table-header hue (body[data-stage]); overview and tools stay slate
-const STAGE_OF = { step1: 's1', step2: 's2', rework: 's2', opening: 's3', step3: 's3', p3b: 's3', sales: 's4', gl: 's4', step4: 's4', fgprod: 's4', fgopen: 's5', step5: 's5', rwflow: 's5', salesreturn: 's5', close: 's5' };
+const STAGE_OF = { step1: 's1', step2: 's2', rework: 's2', opening: 's3', step3: 's3', p3b: 's3', sales: 's4', gl: 's4', step4: 's4', fgprod: 's4', fgopen: 's5', step5: 's5', rwflow: 's5', salesreturn: 's5', provision: 's5', close: 's5' };
 function render() {
   document.body.dataset.stage = STAGE_OF[S.view] || 's0';
   // v1.14.35 (audit ENH-05): no local accounting data is shown until a Firebase session is confirmed (no offline bypass)
@@ -585,6 +588,7 @@ VIEWS.rwflow = (el) => RWV.view(el);
 VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.salesreturn = (el) => P3.viewReturns(el);
+VIEWS.provision = (el) => PV.view(el);
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
@@ -1619,6 +1623,12 @@ async function exportAll() {
     sheets.push(fgLayerSheet(r5.closing, 'closing', S.period));
     tbl('05_COGS_SUMMARY', P3.F5.SUM_FIELDS, P3.F5.SUM_HEADERS, r5.summary);
     if (r5.rollforward) tbl('05_FG_ROLLFORWARD', P3.F5.XNT_FIELDS, P3.F5.XNT_HEADERS, r5.rollforward.rows);
+    // provision on FG (v1.14.70): roll-forward per layer and the FAST entries (TK 2294 / 632)
+    // v1.14.73: NRV column = NRV approved in 5P (spread over the layers); the proposal is its own column
+    const nrvOk = P3.nrvApprovedFor(S, r5);
+    const trk = provisionTrack(r5, nrvOk.byLayer);
+    sheets.push(provisionTrackSheet(trk, S.period));
+    sheets.push(provisionJournalSheet(provisionJournal(trk, nrvOk.total), S.period));
   }
   if (S.d.fgHistory) tbl('05_FG_HISTORY', P3.F5.HIST_FIELDS, P3.F5.HIST_HEADERS, S.d.fgHistory.rows.map((r) => ({ ...r, date: typeof r.date === 'number' ? serialToISO(r.date) : r.date })));
   if (!sheets.length) { toast('Chưa có kết quả để xuất.', 'review'); return; }
@@ -1976,7 +1986,7 @@ function installCard() {
   const img = '<img src="icons/icon-192.png" alt="">';
   if (isStandalone()) return `<div class="card install-card">${img}<div><b>Đang chạy như ứng dụng</b><div class="muted">Mở từ biểu tượng SVL Costing trên màn hình chính. Ứng dụng tự cập nhật khi có phiên bản mới.</div></div></div>`;
   if (installEvt) return `<div class="card install-card">${img}<div style="flex:1"><b>Cài SVL Costing lên máy</b><div class="muted">Có biểu tượng trên màn hình chính, mở toàn màn hình, xem được khi mất mạng.</div></div><button class="btn" data-act="install-app" type="button">Cài ứng dụng</button></div>`;
-  if (isIOS()) return `<div class="card install-card">${img}<div><b>Cài lên iPhone / iPad</b><div class="muted">Mở trang này bằng <b>Safari</b> → bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → <b>Thêm vào MH chính</b> → <b>Thêm</b>.</div></div></div>`;
+  if (isIOS()) return `<div class="card install-card">${img}<div><b>Cài lên iPhone / iPad</b><div class="muted">Mở trang này bằng <b>Safari</b> → bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → <b>Thêm vào màn hình chính</b> → <b>Thêm</b>.</div></div></div>`;
   return `<div class="card install-card">${img}<div><b>Cài SVL Costing như ứng dụng</b><div class="muted">Android: mở bằng Chrome → menu ⋮ → <b>Cài đặt ứng dụng</b> (hoặc <b>Thêm vào màn hình chính</b>). Máy tính: biểu tượng cài đặt trên thanh địa chỉ Chrome / Edge.</div></div></div>`;
 }
 document.addEventListener('click', async (e) => {
@@ -2011,6 +2021,7 @@ TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exp
 RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render });
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+PV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow });
 
 // ======================= boot =======================
 (async function boot() {

@@ -12,7 +12,7 @@ const noAdj = { status: 'NO ADJUSTMENT APPROVED', note: 'Không trích lập k�
 
 // validation
 ok('no status is refused', validateNrvInput({ status: '', note: 'abcdef' }) === 'Chọn quyết định NRV.');
-ok('RECORDED without a reference is refused', validateNrvInput({ ...rec, ref: 'ab' }).includes('Accounting Reference'));
+ok('RECORDED without a reference is refused', validateNrvInput({ ...rec, ref: 'ab' }).includes('tham chiếu kế toán'));
 ok('RECORDED with a valid reference passes', validateNrvInput(rec) === '');
 ok('NO ADJUSTMENT does not need a reference', validateNrvInput({ ...noAdj, ref: '' }) === '');
 ok('a short explanation is refused', validateNrvInput({ ...noAdj, note: 'abc' }).includes('ít nhất 5 ký tự'));

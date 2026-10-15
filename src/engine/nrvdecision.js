@@ -13,7 +13,7 @@ export function validateNrvInput({ status, ref = '', note = '', recordedAmount =
   if (!NRV_STATUSES.includes(status)) return 'Chọn quyết định NRV.';
   if (status === 'RECORDED') {
     if (!Number.isFinite(Number(recordedAmount))) return 'Số NRV đã ghi FAST không hợp lệ.';
-    if (String(ref).trim().length < 3) return 'NRV RECORDED cần Accounting Reference / Journal No.';
+    if (String(ref).trim().length < 3) return 'NRV RECORDED cần tham chiếu kế toán / số bút toán (Journal No.).';
   }
   if (String(note).trim().length < 5) return 'Nhập giải trình NRV ít nhất 5 ký tự.';
   return '';

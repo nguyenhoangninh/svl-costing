@@ -31,12 +31,12 @@ export function aggregateOrigins(rows) {
     if (!inv || !prod || !(num(x.fq) > RETURN_TOL)) continue;
     const k = originKey(inv, prod), o = m.get(k);
     if (o) {
-      o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot);
+      o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot); o.provRel = num(o.provRel) + num(x.provRel);
       o.returned = Math.max(num(o.returned), num(x.returned));
       o.date = Math.min(num(o.date) || Number.MAX_SAFE_INTEGER, num(x.date) || Number.MAX_SAFE_INTEGER);
       if (!o.cust && x.cust) o.cust = x.cust;
     } else {
-      m.set(k, { inv, cust: ttxt(x.cust), prod, date: num(x.date), fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), period: ttxt(x.period), returned: num(x.returned) });
+      m.set(k, { inv, cust: ttxt(x.cust), prod, date: num(x.date), fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), provRel: num(x.provRel), period: ttxt(x.period), returned: num(x.returned) });
     }
   }
   return [...m.values()];
@@ -47,9 +47,9 @@ export function mergeOrigin(map, x) {
   if (!inv || !prod || !(num(x.fq) > RETURN_TOL)) return;
   const k = originKey(inv, prod), o = map.get(k);
   if (o) {
-    o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot);
+    o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot); o.provRel = num(o.provRel) + num(x.provRel);
     o.date = Math.min(num(o.date), num(x.date));
-  } else map.set(k, { ...x, inv, prod, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), returned: num(x.returned) });
+  } else map.set(k, { ...x, inv, prod, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), provRel: num(x.provRel), returned: num(x.returned) });
 }
 
 const pad = (n, w) => String(Math.round(n)).padStart(w, '0');
@@ -97,15 +97,17 @@ export function processReturnEvent({ sale, candidates, returnedNow, period, sequ
     unit = { rm: manualUnit * r.rm, c622: manualUnit * r.c622, c627: manualUnit * r.c627, tot: manualUnit };
     mode = 'MANUAL'; note = `manual unit cost ${manualUnit}${match && match.note ? ' – ' + match.note : ''}`;
   }
+  // provision of the original sale goes back with the goods (v1.14.70): the share of the origin's released provision
+  const restore = origin && num(origin.fq) > RETURN_TOL ? num(origin.provRel) * q / num(origin.fq) : 0;
   const salePatch = {
-    fq: -q, rm: -unit.rm * q, c622: -unit.c622 * q, c627: -unit.c627 * q, tot: -unit.tot * q,
+    fq: -q, rm: -unit.rm * q, c622: -unit.c622 * q, c627: -unit.c627 * q, tot: -unit.tot * q, provRel: -restore,
     matchedOrigInv: origin ? origin.inv : '', matchMode: mode, status: 'RETURNED',
   };
   const lid = `RT-${String(period).replace('-', '')}-${ttxt(sale.inv) || 'NOINV'}-${pad(sequence, 3)}`;
   const layer = {
     lid, src: 'RETURN', sp: period, pc: origin ? origin.inv : 'MANUAL', dt: num(sale.date), mo: '', prod, name: ttxt(sale.name), loc: '', unit: '',
     qty: q, rm: -salePatch.rm, a622: -salePatch.c622, a627: -salePatch.c627, tot: -salePatch.tot,
-    price: 0, prov: 0, cons: '', flag: `Sales return ${ttxt(sale.inv)}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + sequence,
+    price: 0, prov: -restore, cons: '', flag: `Sales return ${ttxt(sale.inv)}`, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, i: 900000 + sequence,
   };
   const k = origin ? originKey(origin) : '';
   if (origin && returnedNow) returnedNow.set(k, num(returnedNow.get(k)) + q);

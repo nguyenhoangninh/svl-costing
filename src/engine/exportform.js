@@ -119,8 +119,8 @@ export function fgLayerCols(kind) {
     { key: 'loc', head: 'Location', width: 11 },
     { key: 'unit', head: 'Unit', width: 9 },
     { key: 'qty', head: 'Qty', width: 12, z: Z_QTY },
-    { key: null, head: 'RM cost', width: 16, z: Z_VND },
-    { key: null, head: 'RM cost (Stock out)', width: 20, z: Z_VND },
+    { key: 'rmPC', head: 'RM cost', width: 16, z: Z_VND, split: true },
+    { key: 'rmSO', head: 'RM cost (Stock out)', width: 20, z: Z_VND, split: true },
     { key: 'rm', head: 'RM Amount', width: 16, z: Z_VND },
     { key: 'a622', head: '622 Amount', width: 16, z: Z_VND },
     { key: 'a627', head: '627 Amount', width: 16, z: Z_VND },
@@ -148,6 +148,8 @@ export function fgLayerSheet(rows, kind, period) {
       if (c.calc === 'net') return { f: `${L('tot')}${n}+${L('prov')}${n}`, r: num(row.tot) + num(row.prov), z: c.z };
       if (c.calc === 'unitRM') return { f: `IFERROR(${L('rm')}${n}/${L('qty')}${n},0)`, r: num(row.qty) ? num(row.rm) / num(row.qty) : 0, z: c.z };
       if (!c.key) return '';
+      // RM split (v1.14.70): only layers whose RM was split (production layers) show it; others stay blank, not 0
+      if (c.split && !row.splitOK) return '';
       return put(c.key === 'date' ? dateText(row.date) : row[c.key], c.z);
     });
   });
@@ -156,5 +158,74 @@ export function fgLayerSheet(rows, kind, period) {
     aoa: [[`SVL – Starry Vietnam · ${name} · Kỳ ${period}`], cols.map((c) => c.head), ...body],
     header: 2, zebra: true, freezeCols: 3,
     cols: cols.map((c) => c.width), footer: kind === 'closing' ? 'FG Closing' : 'FG Opening',
+  };
+}
+
+// ---------------------------------------------------------------- 06_PROVISION_TRACK / 06_PROVISION_JE (v1.14.70)
+// Provision roll-forward per FG layer (credit balance; releases and put-backs shown as amounts) and the journal lines for FAST.
+const PROV_COLS = [
+  { key: 'lid', head: 'Layer ID', width: 30 },
+  { key: 'source', head: 'Source', width: 14 },
+  { key: 'pc', head: 'PC No.', width: 14 },
+  { key: 'prod', head: 'Product Code', width: 18 },
+  { key: 'loc', head: 'Location', width: 11 },
+  { key: 'date', head: 'Layer Date', width: 13 },
+  { key: 'qtyIn', head: 'Qty In', width: 12, z: Z_QTY },
+  { key: 'qtyRem', head: 'Qty Remaining', width: 14, z: Z_QTY },
+  { key: 'open', head: 'Provision Opening', width: 18, z: Z_VND, sum: true },
+  { key: 'restore', head: 'Put back - sales return', width: 20, z: Z_VND, sum: true },
+  { key: 'relSale', head: 'Released - sales (FIFO)', width: 22, z: Z_VND, sum: true },
+  { key: 'relCons', head: 'Released - FG consumption', width: 22, z: Z_VND, sum: true },
+  { key: 'relRw', head: 'Moved to rework (not posted)', width: 24, z: Z_VND, sum: true },
+  { key: 'closePre', head: 'Provision before NRV test', width: 22, z: Z_VND, sum: true },
+  { key: 'nrvProp', head: 'NRV proposed (+ add / − release)', width: 24, z: Z_VND, sum: true },
+  { key: 'nrvAdj', head: 'NRV approved (+ add / − release)', width: 24, z: Z_VND, sum: true },
+  { key: 'close', head: 'Provision Closing', width: 18, z: Z_VND, sum: true },
+  { key: 'nrvUnit', head: 'NRV / unit', width: 14, z: Z_UNIT },
+  { key: 'check', head: 'Check (should be 0)', width: 16, z: Z_VND, calc: true },
+];
+
+/** 06_PROVISION_TRACK: row 1 title with the check result, row 2 headers, one row per layer that moved, totals last. */
+export function provisionTrackSheet(track, period) {
+  const cols = PROV_COLS;
+  const L = (key) => colLetter(cols.findIndex((c) => c.key === key) + 1);
+  const n0 = FIRST, n = track.rows.length, last = FIRST + n - 1, tot = last + 1;
+  const body = track.rows.map((row, i) => {
+    const r = FIRST + i;
+    return cols.map((c) => {
+      if (c.calc) return { f: `${L('open')}${r}+${L('restore')}${r}-${L('relSale')}${r}-${L('relCons')}${r}-${L('relRw')}${r}-${L('closePre')}${r}`, r: num(row.open) + num(row.restore) - num(row.relSale) - num(row.relCons) - num(row.relRw) - num(row.closePre), z: c.z };
+      if (c.key === 'date') return put(dateText(row.date), c.z);
+      return put(row[c.key], c.z);
+    });
+  });
+  const totals = cols.map((c, i) => {
+    if (i === 0) return 'TỔNG CỘNG';
+    if (!c.sum && !c.calc) return '';
+    const Lc = colLetter(i + 1);
+    if (!n) return '';
+    return { f: `SUM(${Lc}${n0}:${Lc}${last})`, r: track.rows.reduce((a, row) => a + (c.calc ? 0 : num(row[c.key])), 0), z: c.z };
+  });
+  return {
+    name: '06_PROVISION_TRACK',
+    aoa: [[`SVL – Starry Vietnam · 06_PROVISION_TRACK · Kỳ ${period} · Kiểm tra dự phòng: ${track.ok ? 'PASS' : 'CHECK'}`], cols.map((c) => c.head), ...body, totals],
+    header: 2, totals: tot > 0 ? tot : 0, zebra: true, freezeCols: 2,
+    cols: cols.map((c) => c.width), footer: 'Provision Track',
+  };
+}
+
+/** 06_PROVISION_JE: the entries to post in FAST (TK 2294 / 632), the rework item not posted, and the 2294 movement for the tie. */
+export function provisionJournalSheet(journal, period) {
+  const cols = [
+    { head: 'Mã', width: 14 }, { head: 'Diễn giải', width: 60 }, { head: 'Nợ (TK)', width: 12 }, { head: 'Có (TK)', width: 12 },
+    { head: 'Số tiền (VND)', width: 18, z: Z_VND }, { head: 'Ghi chú', width: 40 },
+  ];
+  const rows = journal.lines.map((l) => [l.code, l.desc, l.dr, l.cr, put(l.amount, Z_VND), l.amount ? 'Ghi sổ trên FAST' : 'Không phát sinh']);
+  rows.push([journal.pending.code, journal.pending.desc, '', '', put(journal.pending.amount, Z_VND), 'Không ghi sổ – chờ quyết định kế toán']);
+  rows.push(['TK 2294', 'Phát sinh Có − Nợ TK 2294 trong kỳ (đối chiếu FAST)', '', '', put(journal.acc2294, Z_VND), 'Khớp dòng 2294 của tab Đối chiếu FAST']);
+  return {
+    name: '06_PROVISION_JE',
+    aoa: [[`SVL – Starry Vietnam · 06_PROVISION_JE · Kỳ ${period} · Bút toán dự phòng giảm giá thành phẩm`], cols.map((c) => c.head), ...rows],
+    header: 2, zebra: true, freezeCols: 0,
+    cols: cols.map((c) => c.width), footer: 'Provision Journal',
   };
 }

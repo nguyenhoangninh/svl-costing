@@ -4,6 +4,7 @@ import * as SP from '../engine/syncpolicy.js';
 import { ACTION_MANUAL_COST, approvalDocId, canonicalManualCost, isApprovedFor } from '../engine/approvals.js';
 import * as TPL from '../engine/templates.js';
 import * as F4 from '../engine/step4.js';
+import * as PROV from '../engine/provision.js';
 import * as P2 from './phase2.js';
 import * as FGP from './fgprod.js';
 import { splitBooks, bookOf } from '../engine/revenue.js';
@@ -46,19 +47,43 @@ export function returnStepStatus(S, D5) {
   const rc = D5.res.returnControl;
   return rc && rc.status === 'BLOCK' ? 'BLOCK' : rc && rc.status === 'REVIEW' ? 'PASS WITH REVIEW' : 'PASS';
 }
+/** NRV amount recorded in FAST for this STEP 5 result (signed; 0 when no current RECORDED decision). */
+/** The NRV decision that still belongs to this STEP 5 result, or null. */
+export const currentNrv = (S, res) => (res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
+/** NRV approved for this STEP 5 result, spread over the closing layers (v1.14.73; see PROV.nrvApproved). */
+export function nrvApprovedFor(S, res) {
+  return PROV.nrvApproved((res && res.closing) || [], res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
+}
+/** Layer provision to add when a period's closing becomes the next opening (negative = more provision). */
+const nrvCarryAdd = (step5, decision) => {
+  const cur = step5 && decision && decision.key === nrvKey(step5) ? decision : null;
+  const by = PROV.nrvApproved((step5 && step5.closing) || [], cur).byLayer;
+  return Object.fromEntries(Object.entries(by).map(([lid, v]) => [lid, -v]));
+};
+/** Opening provision taken over from the previous period's closing (v1.14.73). */
+const carriedSource = (step5, decision, prev, by) => {
+  const c = PROV.closingProvision(step5, step5 && decision && decision.key === nrvKey(step5) ? decision : null);
+  return { kind: 'CARRY', from: prev, expected: c.total, sum: c.total, count: c.layers.filter((l) => Math.abs(l.prov) > 0.005).length, by, at: nowISO() };
+};
+export function nrvRecordedAmount(S, res) {
+  const nd = S.d.nrvDecision;
+  return nd && res && nd.key === nrvKey(res) && utxt(nd.status) === 'RECORDED' ? num(nd.recordedAmount ?? nd.amount) : 0;
+}
 /** Engine side of the FAST tie. */
 export function engineBalances(S, p2, res) {
   const d = S.d; const reg = d.register ? d.register.rows : [];
   const wf = p2 && p2.d3b ? p2.d3b.wf : null;
   const w632 = ((d.wipadj && d.wipadj.reg632) || []).filter((r) => r.record === 'RECORDED').reduce((a, r) => a + num(r.impact), 0);
   const nd = d.nrvDecision, nrvAdj = nd && res && nd.key === nrvKey(res) && utxt(nd.status) === 'RECORDED' ? num(nd.recordedAmount ?? nd.amount) : 0;
+  // provision released (Dr 2294 / Cr 632) by FIFO sales and FG consumption; a sales return puts it back (negative here) – v1.14.70
+  const relProv = res ? num(res.totals.provRelSales) + num(res.totals.provRelCons) : 0;
   return {
-    // DIRECT_632 impact > 0 = Dr 632 / Cr 154. NRV recorded adjustment > 0 = Dr 632 / Cr 2294.
+    // DIRECT_632 impact > 0 = Dr 632 / Cr 154. NRV recorded adjustment > 0 = Dr 632 / Cr 2294 (< 0 = release).
     a154: (wf ? wf.finalClosing : d.step3 ? d.step3.summary.closingAmt : 0) + reg.reduce((a, r) => a + num(r.closingWIP), 0) - w632,
     a155: res ? res.totals.closeA : 0,
-    a2294: nrvAdj,
+    a2294: nrvAdj - relProv,
     // rework written off to 632 (unrepairable / scrap expensed, owner request 06/10/2026) is part of the 632 movement
-    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj + ((d.step2 && d.step2.total.cons) || 0) + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
+    a632: (res ? res.totals.cogsA : 0) + w632 + nrvAdj - relProv + ((d.step2 && d.step2.total.cons) || 0) + reg.filter((r) => (ttxt(r.woAccount) || '632') === '632').reduce((a, r) => a + num(r.writeOff), 0),
     ...(() => { const bk = books(S); const rb = F5.revenueBooks(bk.sales, bk.returns, S.period, d.dupDecisions); return { a511: rb.a511, a5212: rb.a5212, a5213: rb.a5213 }; })(),
   };
 }
@@ -150,9 +175,9 @@ export function derive(S, p2) {
   const rStale = res && !(d.closed && d.closed.period === S.period) ? returnStale(S, r5) : '';
   if (!closeReason && rStale) closeReason = `STEP 5R (hàng bán bị trả lại) chưa hoàn tất: ${rStale}. Mở màn hình 5R → RUN STEP 5R.`;
   if (!closeReason && res && res.withReturns && res.returnControl && res.returnControl.status === 'BLOCK') closeReason = `STEP 5R Sales Return còn ${res.returnControl.blocked} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).`;
-  if (!closeReason && res && num(res.totals && res.totals.nrvProv) > 1 && !(d.closed && d.closed.period === S.period)) {
+  if (!closeReason && res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 && !(d.closed && d.closed.period === S.period)) {
     const nd = d.nrvDecision, key = nrvKey(res);
-    if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
+    if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành ở 5P (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
   }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
     if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213 (STEP 5.3 → tab Đối chiếu FAST).';
@@ -326,6 +351,7 @@ export function viewOpen(el) {
       <button class="btn" data-act="s5-validate" type="button" ${op ? '' : 'disabled'}>Validate FG đầu kỳ</button>
     </div>
     ${op ? `<p class="muted">Nguồn: ${esc(op.source || '')} · nạp ${A.fmtTs(op.loadedAt)}</p>` : ''}
+    <p class="muted">Dự phòng đầu kỳ (TK 2294) nạp ở tab <a href="#provision">5P · Dự phòng FG</a>.</p>
     <div class="kpis">${A.kpiN('Số lớp', st.layers)}${A.kpiN('Số lượng', st.qty)}${A.kpi('Giá trị FG đầu kỳ', st.amt ?? null, true)}${A.kpiN('BLOCK', st.block)}${A.kpiN('REVIEW', st.review)}</div>
     <div id="t-op"></div></section>`;
   el.querySelector('#f-fgopen').addEventListener('change', (e) => importOpenFile(e.target.files[0]));
@@ -349,7 +375,7 @@ async function importOpenFile(file) {
   });
   A.render();
 }
-function closedGuard() {
+export function closedGuard() {
   const S = A.S;
   if (S.d.closed && S.d.closed.period === S.period) { A.toast(`Kỳ ${S.period} đã đóng. Mở lại kỳ (quản trị viên) nếu cần sửa.`, 'review'); return true; }
   return false;
@@ -366,13 +392,9 @@ export async function doRollOpen() {
   }
   if (S.d.fgOpen && S.d.fgOpen.rows.length && !confirm(`FG đầu kỳ đã có dữ liệu. Thay bằng FG cuối kỳ ${prev}?`)) return;
   try {
-    // NRV provision recorded at the previous close is carried into the layers, so it is not proposed again this month.
-    const nd = pd.nrvDecision; let provAdd = null;
-    if (nd && utxt(nd.status) === 'RECORDED' && nd.key === nrvKey(pd.step5)) {
-      const need = num(nd.amount), rec = num(nd.recordedAmount ?? nd.amount), f = need ? rec / need : 0;
-      provAdd = Object.fromEntries((pd.step5.closing || []).filter((c) => num(c.provNeed) > 0).map((c) => [c.lid, -num(c.provNeed) * f]));
-    }
-    S.d.fgOpen = F5.openingFromClosing(pd.step5, S.period, reason, provAdd);
+    // the provision balance at the previous close (layers + NRV approved there) becomes this period's opening provision
+    S.d.fgOpen = F5.openingFromClosing(pd.step5, S.period, reason, nrvCarryAdd(pd.step5, pd.nrvDecision));
+    S.d.fgOpen.provSource = carriedSource(pd.step5, pd.nrvDecision, prev, A.who());
     refreshFgRef(S);
     A.audit('STEP 5 - ROLL FORWARD OPENING FG', `Layers=${S.d.fgOpen.stats.layers}; Amount=${A.fmtNum(S.d.fgOpen.stats.amt)}`);
     A.markDirty('fgOpen', 'fgRef', 'audit');
@@ -402,7 +424,7 @@ export async function doTemplate() {
 // ======================= 5.2 FIFO COGS =======================
 export function viewFIFO(el) {
   const S = A.S; const d = S.d; const D = A.derived(); const D5 = D.d5; const res = D5.res; const c = D5.controls;
-  const conf = cfg(S); const tab = S.tab5 || 'sales'; const edit = A.canEdit();
+  const conf = cfg(S); const tab = S.tab5 && S.tab5 !== 'prov' ? S.tab5 : 'sales'; const edit = A.canEdit(); // 'prov' moved to 5P (v1.14.71)
   const T = res ? res.totals : null;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 5.2 · FIFO giá vốn &amp; FIFO rework</h1><p class="lead">FG đầu kỳ + nhập kho từ STEP 4 → xuất bán theo FIFO từng sản phẩm (lớp cũ nhất trước: ngày lô, đầu kỳ trước sản xuất). Sau đó FG xuất đi rework lấy tiếp theo FIFO từ lớp còn lại (5B).</p></div>
@@ -449,7 +471,7 @@ export function viewFIFO(el) {
   } else if (tab === 'closing') {
     const cols = [...colsOf(F5.LAYER_FIELDS, F5.LAYER_HEADERS, LAYER_T, LAYER_W), { key: 'nrvUnit', label: 'NRV / đv (VND)', type: 'num', width: 120 }, { key: 'provNeed', label: 'Dự phòng đề xuất (VND)', type: 'num', width: 150 }];
     A.mountTable(box, { columns: cols, rows: res.closing, filterKey: 'status', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot', 'provNeed'], onExport: A.exportTable('05_FG_CLOSING', cols) });
-    box.insertAdjacentHTML('afterbegin', `<p class="muted">NRV = giá bán (Price Master × tỷ giá) × (1 − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% chi phí bán hàng ước tính). Dự phòng đề xuất = (giá thành sau dự phòng cũ − NRV) × SL tồn, chỉ khi dương. Tổng: <b>${A.fmtNum(res.totals.nrvProv || 0)}</b> VND.</p>`);
+    box.insertAdjacentHTML('afterbegin', `<p class="muted">NRV = giá bán (Price Master × tỷ giá) × (1 − ${(sellRate(S) * 100).toLocaleString('vi-VN')}% chi phí bán hàng ước tính). Dự phòng đề xuất theo lớp = dự phòng đã ghi + max(0, giá vốn còn − NRV); dương = trích thêm, âm = hoàn nhập. Tổng: <b>${A.fmtNum(res.totals.nrvProv || 0)}</b> VND.</p>`);
   } else if (tab === 'sum') {
     const t = { openQ: 'qty', openA: 'num', prodQ: 'qty', prodA: 'num', cogsQ: 'qty', cogsRM: 'num', cogs622: 'num', cogs627: 'num', cogsA: 'num', closeQ: 'qty', closeA: 'num', eligQ: 'qty', layers: 'int', status: 'status', rwQ: 'qty', rwRM: 'num', rw622: 'num', rw627: 'num', rwTot: 'num', rollStatus: 'status' };
     const cols = colsOf(F5.SUM_FIELDS, F5.SUM_HEADERS, t, { name: 220, msg: 220 });
@@ -667,9 +689,9 @@ async function priorSalesFor(S) {
       if (x.fin === 'FIFO COGS' && num(x.fq) > 0 && ttxt(x.inv) && ttxt(x.prod)) {
         const key = keyOf(x.inv, x.prod), o = origins.get(key);
         if (o) {
-          o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot);
+          o.fq += num(x.fq); o.rm += num(x.rm); o.c622 += num(x.c622); o.c627 += num(x.c627); o.tot += num(x.tot); o.provRel = num(o.provRel) + num(x.provRel);
           o.date = Math.min(num(o.date), num(x.date));
-        } else origins.set(key, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), period: p });
+        } else origins.set(key, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: num(x.fq), rm: num(x.rm), c622: num(x.c622), c627: num(x.c627), tot: num(x.tot), provRel: num(x.provRel), period: p });
       }
       if (x.fin === 'RETURN' && x.status === 'RETURNED' && ttxt(x.origInv || x.matchedOrigInv) && num(x.fq) < 0) {
         const key = keyOf(x.origInv || x.matchedOrigInv, x.prod);
@@ -752,33 +774,16 @@ function refreshFgRef(S) {
 }
 
 // ======================= 5.3 FG History & close =======================
-function nrvDecisionHTML(S, res, closed) {
+export function nrvDecisionHTML(S, res, closed) {
   const amt = num(res.totals && res.totals.nrvProv), key = nrvKey(res);
   const d = currentNrvDecision(S.d.nrvDecision, key), current = !!d;
   const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · yêu cầu ${A.fmtNum(d.amount)} VND${utxt(d.status) === 'RECORDED' ? ' · đã ghi ' + A.fmtNum(num(d.recordedAmount ?? d.amount)) + ' VND' : ''} · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
   if (closed || !A.canEdit()) return summary;
   const undo = current ? '<div class="row"><button class="btn danger ghost" type="button" id="nrv-undo">Hoàn tác quyết định NRV</button></div>' : '';
-  return summary + undo + `<form id="f-nrv-decision" class="inline"><label>NRV decision <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Accounting Ref<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
+  return summary + undo + `<form id="f-nrv-decision" class="inline"><label>Quyết định NRV <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Tham chiếu kế toán<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
 }
-export function viewClose(el) {
-  const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
-  const closed = d.closed && d.closed.period === S.period;
-  const H = d.fgHistory; const tab = S.tabH || 'gate';
-  el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 5.3 · FG History &amp; đóng kỳ</h1><p class="lead">FG History lưu toàn bộ lịch sử lô đã bán (cộng dồn qua các kỳ) và ảnh chụp FG cuối kỳ. Đóng kỳ chỉ được khi STEP 5 CURRENT, Batch 7 PASS, FG History khớp và Final Production Status = READY.</p></div>
-      <div class="result"><span>Final status</span>${A.pill(closed ? 'CLOSED' : recon.finalStatus)}<small>${closed ? `Đóng ${A.fmtTs(d.closed.closedAt)}` : `Cổng đóng kỳ: ${esc(recon.closeGate)}`}</small></div></header>
-    ${closed ? `<div class="alert pass"><b>Kỳ ${esc(S.period)} đã đóng</b> lúc ${A.fmtTs(d.closed.closedAt)} bởi ${esc(d.closed.closedBy)} · trạng thái ${esc(d.closed.status)}. Tạo kỳ ${esc(nextP(S.period))} rồi Roll forward FG đầu kỳ.</div>` : ''}
-    <div class="row">
-      <button class="btn" data-act="s5-hist" type="button" ${res ? '' : 'disabled'}>BUILD FG HISTORY</button>
-      <button class="btn" data-act="s5-close" type="button" ${closed || !A.isAdmin() ? 'disabled' : ''} title="${A.isAdmin() ? '' : 'Chỉ quản trị viên được đóng kỳ'}">CLOSE MONTH${A.isAdmin() ? '' : ' (quản trị viên)'}</button>
-      ${closed && A.isAdmin() ? '<button class="btn danger ghost" data-act="s5-reopen" type="button">Mở lại kỳ…</button>' : ''}
-      <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
-    </div>
-    ${!closed && D5.closeReason && res ? `<div class="alert review"><b>Chưa đóng được:</b> ${esc(D5.closeReason)}</div>` : ''}
-    ${res && num(res.totals && res.totals.nrvProv) > 1 ? nrvDecisionHTML(S, res, closed) : ''}
-    <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
-    ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
-    <div id="th"></div></section>`;
+/** NRV decision block (v1.14.73: shown in 5P). Call after the HTML from nrvDecisionHTML is in el. */
+export function mountNrvDecision(el, S, res) {
   const nrvNow = nrvKey(res), fmtN = (v) => A.fmtNum(num(v));
   const nf = el.querySelector('#f-nrv-decision');
   if (nf) nf.addEventListener('submit', (e) => {
@@ -811,6 +816,26 @@ export function viewClose(el) {
     A.toast('Đã hoàn tác quyết định NRV. Cần quyết định NRV mới trước khi đóng kỳ.', 'review');
     A.render();
   });
+}
+export function viewClose(el) {
+  const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
+  const closed = d.closed && d.closed.period === S.period;
+  const H = d.fgHistory; const tab = S.tabH || 'gate';
+  el.innerHTML = `<section class="page">
+    <header class="ph"><div><h1>STEP 5.3 · FG History &amp; đóng kỳ</h1><p class="lead">FG History lưu toàn bộ lịch sử lô đã bán (cộng dồn qua các kỳ) và ảnh chụp FG cuối kỳ. Đóng kỳ chỉ được khi STEP 5 CURRENT, Batch 7 PASS, FG History khớp và Final Production Status = READY.</p></div>
+      <div class="result"><span>Final status</span>${A.pill(closed ? 'CLOSED' : recon.finalStatus)}<small>${closed ? `Đóng ${A.fmtTs(d.closed.closedAt)}` : `Cổng đóng kỳ: ${esc(recon.closeGate)}`}</small></div></header>
+    ${closed ? `<div class="alert pass"><b>Kỳ ${esc(S.period)} đã đóng</b> lúc ${A.fmtTs(d.closed.closedAt)} bởi ${esc(d.closed.closedBy)} · trạng thái ${esc(d.closed.status)}. Tạo kỳ ${esc(nextP(S.period))} rồi Roll forward FG đầu kỳ.</div>` : ''}
+    <div class="row">
+      <button class="btn" data-act="s5-hist" type="button" ${res ? '' : 'disabled'}>BUILD FG HISTORY</button>
+      <button class="btn" data-act="s5-close" type="button" ${closed || !A.isAdmin() ? 'disabled' : ''} title="${A.isAdmin() ? '' : 'Chỉ quản trị viên được đóng kỳ'}">CLOSE MONTH${A.isAdmin() ? '' : ' (quản trị viên)'}</button>
+      ${closed && A.isAdmin() ? '<button class="btn danger ghost" data-act="s5-reopen" type="button">Mở lại kỳ…</button>' : ''}
+      <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
+    </div>
+    ${!closed && D5.closeReason && res ? `<div class="alert review"><b>Chưa đóng được:</b> ${esc(D5.closeReason)}</div>` : ''}
+    ${res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 && !currentNrvDecision(d.nrvDecision, nrvKey(res)) ? `<div class="alert review"><b>NRV đề xuất ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định.</b> Quyết định NRV nằm ở <a href="#provision">5P · Dự phòng FG</a>.</div>` : ''}
+    <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
+    ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
+    <div id="th"></div></section>`;
     el.querySelectorAll('[data-tabh]').forEach((b) => b.addEventListener('click', () => { S.tabH = b.dataset.tabh; A.render(); }));
   const box = el.querySelector('#th');
   if (tab === 'gate') {
@@ -1041,7 +1066,11 @@ export function carryForward(prev, newPeriod) {
   if (prev.fgItems) out.fgItems = prev.fgItems;
   if (prev.s5cfg) out.s5cfg = prev.s5cfg;
   if (prev.step5 && prev.closed && prev.closed.period === prev.step5.period && prevPeriod(newPeriod) === prev.step5.period) {
-    try { out.fgOpen = F5.openingFromClosing(prev.step5, newPeriod, ''); } catch { /* not reconciled */ }
+    try {
+      // v1.14.73: the NRV approved at the previous close goes with the layers, and 5P sees the opening provision as carried
+      out.fgOpen = F5.openingFromClosing(prev.step5, newPeriod, '', nrvCarryAdd(prev.step5, prev.nrvDecision));
+      out.fgOpen.provSource = carriedSource(prev.step5, prev.nrvDecision, prev.step5.period, 'carry');
+    } catch { /* not reconciled */ }
   }
   return out;
 }

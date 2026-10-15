@@ -1,9 +1,11 @@
 // v1.14.59: Vietnamese / English switch.
-// The views render Vietnamese; in English mode every Vietnamese text node and placeholder / title / aria-label
+// The views are written in Vietnamese. In English mode every Vietnamese text node and placeholder / title / aria-label
 // is looked up in EN (src/i18n-en.js) after it reaches the page (render + MutationObserver), so tables, tabs and
 // re-renders are covered without touching each view. Numbers are matched as {#} and put back in order.
-// Text that is not in the dictionary (data, rare messages) stays as it is.
+// v1.14.72: in Vietnamese mode the English text the app writes itself (checks, notes, labels) is looked up in
+// VI_FROM_EN (src/i18n-vi.js) the same way. Text that is not in a dictionary (data, rare messages) stays as it is.
 import { EN, MSG_EXACT, MSG_PREFIX, MSG_WILD, SRC_EXACT, SRC_WILD } from './i18n-en.js';
+import { VI_FROM_EN } from './i18n-vi.js';
 
 const KEY = 'svl.lang';
 const VI = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸ]/;
@@ -111,29 +113,77 @@ function split(core) {
   }
   return null;
 }
-/** Text for code that builds strings itself (toasts, confirm dialogs): English when available. */
-export const t = (s) => (lang === 'en' ? (tr(s) ?? s) : s);
+// v1.14.72: English text the app writes itself, shown in Vietnamese (VI_FROM_EN). Same key rules as EN above.
+const VI_CACHE = new Map();
+export function trVi(s) {
+  if (s === null || s === undefined) return null;
+  const core = String(s).replace(/\s+/g, ' ').trim();
+  if (!core) return null;
+  if (VI_CACHE.has(core)) return VI_CACHE.get(core);
+  const r = trViCore(core);
+  if (VI_CACHE.size > 20000) VI_CACHE.clear();
+  VI_CACHE.set(core, r);
+  return r;
+}
+function trViCore(core) {
+  if (has(VI_FROM_EN, core)) return VI_FROM_EN[core];
+  const nums = core.match(NUM);
+  if (nums) {
+    const k = core.replace(NUM, '{#}');
+    if (has(VI_FROM_EN, k)) { let i = 0; return VI_FROM_EN[k].replace(/\{#\}/g, () => (i < nums.length ? nums[i++] : '')); }
+  }
+  // a unit-cost message with the review flag appended after a space
+  const flag = core.match(/^(Unit cost after provision .*? provision needed [\d.,]+) (STEP 4 REVIEW: .+)$/);
+  if (flag) { const a = trVi(flag[1]), b = trVi(flag[2]); if (a !== null || b !== null) return `${a ?? flag[1]} ${b ?? flag[2]}`; }
+  // composite text ("a; b"): translate the known pieces and keep the rest
+  const parts = core.split('; ');
+  if (parts.length > 1) {
+    let hit = false;
+    const out = parts.map((p) => { const r = trVi(p); if (r !== null) { hit = true; return r; } return p; });
+    if (hit) return out.join('; ');
+  }
+  return null;
+}
+/** Text for code that builds strings itself (toasts, confirm dialogs): the current language when available. */
+export const t = (s) => (lang === 'en' ? (tr(s) ?? s) : (trVi(s) ?? s));
 
 const ATTRS = ['placeholder', 'title', 'aria-label'];
 const PLAIN_RE = /Doanh thu|WIP ra/;
-// originals, so switching back to Vietnamese restores nodes that are not re-rendered (header, open panels)
+// the app's own text before it was translated (src) and what was put in its place (out), so switching language
+// restores nodes that are not re-rendered (header, open panels) and a change made by the app is not mistaken for ours
 const origText = new WeakMap(), origAttr = new WeakMap();
+/** Translation of one text in the current language (EN mode: Vietnamese source; VI mode: English source). */
+function translateTextIn(v) {
+  return lang === 'en' ? (VI.test(v) || PLAIN_RE.test(v) ? tr(v) : null) : trVi(v);
+}
 function translateText(n) {
-  const v = n.nodeValue; if (!v || (!VI.test(v) && !PLAIN_RE.test(v))) return;
-  const r = tr(v); if (r === null) return;
-  origText.set(n, v);
+  const v = n.nodeValue; if (!v) return;
+  const seen = origText.get(n);
+  if (seen && seen.out === v) return;
+  const r = translateTextIn(v);
+  if (r === null) { origText.delete(n); return; }
   const lead = v.match(/^\s*/)[0], trail = v.match(/\s*$/)[0];
-  n.nodeValue = lead + r + trail;
+  const out = lead + r + trail;
+  origText.set(n, { src: v, out });
+  n.nodeValue = out;
 }
 function translateEl(el) {
+  if (!el.getAttribute) return;
   for (const a of ATTRS) {
-    const v = el.getAttribute && el.getAttribute(a);
-    if (v && VI.test(v)) { const r = tr(v); if (r !== null) { const o = origAttr.get(el) || {}; o[a] = v; origAttr.set(el, o); el.setAttribute(a, r); } }
+    const v = el.getAttribute(a); if (!v) continue;
+    const seen = origAttr.get(el)?.[a];
+    if (seen && seen.out === v) continue;
+    const r = translateTextIn(v);
+    if (r === null) { if (seen) delete origAttr.get(el)[a]; continue; }
+    const o = origAttr.get(el) || {};
+    o[a] = { src: v, out: r };
+    origAttr.set(el, o);
+    el.setAttribute(a, r);
   }
 }
-/** Translate a subtree (no-op in Vietnamese mode). */
+/** Translate a subtree into the current language. */
 export function apply(root = document.body) {
-  if (lang !== 'en' || !root) return;
+  if (!root) return;
   if (root.nodeType === 3) { translateText(root); return; }
   if (root.nodeType !== 1) return;
   if (root.closest && root.closest('[data-no-i18n]')) return;
@@ -149,7 +199,6 @@ function flush() { scheduled = false; const list = [...pending]; pending = new S
 function watch() {
   if (observer || typeof MutationObserver === 'undefined') return;
   observer = new MutationObserver((muts) => {
-    if (lang !== 'en') return;
     for (const m of muts) {
       if (m.type === 'characterData') pending.add(m.target);
       else if (m.type === 'attributes') pending.add(m.target);
@@ -162,14 +211,14 @@ function watch() {
 function restore(root = document.body) {
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
   for (let n = w.nextNode(); n; n = w.nextNode()) {
-    if (n.nodeType === 3) { if (origText.has(n)) n.nodeValue = origText.get(n); }
-    else if (origAttr.has(n)) { const o = origAttr.get(n); for (const a of Object.keys(o)) n.setAttribute(a, o[a]); }
+    if (n.nodeType === 3) { const o = origText.get(n); if (o) { n.nodeValue = o.src; origText.delete(n); } }
+    else { const o = origAttr.get(n); if (o) { for (const a of Object.keys(o)) n.setAttribute(a, o[a].src); origAttr.delete(n); } }
   }
 }
-/** Switch language and re-render; Vietnamese text outside the re-rendered parts is restored from the originals. */
+/** Switch language and re-render. The app's own text is put back first, then the new language is applied to it. */
 export function setLang(l, rerender) {
   lang = l === 'en' ? 'en' : 'vi';
-  if (lang === 'vi') restore(document.body);
+  restore(document.body);
   try { localStorage.setItem(KEY, lang); } catch {}
   document.documentElement.lang = lang;
   syncButton();
@@ -179,20 +228,23 @@ export function setLang(l, rerender) {
 function syncButton() {
   const b = document.getElementById('lang'); if (!b) return;
   b.textContent = lang === 'en' ? 'VI' : 'EN';
-  b.setAttribute('aria-label', lang === 'en' ? 'Chuyển sang tiếng Việt' : 'Switch to English');
-  b.title = lang === 'en' ? 'Tiếng Việt' : 'English';
+  // the label names the action (switch to the other language) and is written in the current language
+  const label = lang === 'en' ? 'Switch to Vietnamese' : 'Chuyển sang tiếng Anh';
+  b.setAttribute('aria-label', label);
+  b.title = label;
   b.dataset.noI18n = '';
 }
-/** Multi-line messages keep their line breaks: whole message first, else line by line. */
+/** Multi-line messages keep their line breaks: each line is translated on its own. */
 function trLines(msg) {
-  if (!msg.includes('\n')) return tr(msg) ?? msg;
-  return msg.split('\n').map((l) => { const r = tr(l); return r === null ? l : l.match(/^\s*/)[0] + r; }).join('\n');
+  const T = lang === 'en' ? tr : trVi;
+  if (!msg.includes('\n')) return T(msg) ?? msg;
+  return msg.split('\n').map((l) => { const r = T(l); return r === null ? l : l.match(/^\s*/)[0] + r; }).join('\n');
 }
-/** Native dialogs (confirm / prompt / alert) show the English message in English mode. */
+/** Native dialogs (confirm / prompt / alert) show the message in the current language. */
 function wrapDialogs() {
   for (const name of ['confirm', 'prompt', 'alert']) {
     const orig = window[name]; if (typeof orig !== 'function' || orig.__i18n) continue;
-    const f = function (msg, ...rest) { return orig.call(window, lang === 'en' && typeof msg === 'string' ? trLines(msg) : msg, ...rest); };
+    const f = function (msg, ...rest) { return orig.call(window, typeof msg === 'string' ? trLines(msg) : msg, ...rest); };
     f.__i18n = true; window[name] = f;
   }
 }

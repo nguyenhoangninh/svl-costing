@@ -5,6 +5,7 @@ import { txt, ttxt, utxt, num, nowISO, prevPeriod, serialToYMD, cellDateSerial, 
 import * as RET from './return.js';
 import { bookOf } from './revenue.js';
 import { rwAllocate } from './step2.js';
+import { nrvNeed } from './provision.js';
 
 export const TOLQ = 0.0001;          // S5_TOLQ
 const TOL_QTY = 0.000001;            // modSTEP5_MonthClose / RW
@@ -166,17 +167,26 @@ export function validateOpeningFG(open, period) {
 }
 
 // ---------------------------------------------------------------- 5.4 RUN FIFO COGS
+/** Layer fields that move with a take: RM (total and the 3-part split), 622, 627, total cost and provision (negative). */
+function initLayer(l) {
+  Object.assign(l, { oq: 0, orm: 0, o622: 0, o627: 0, otot: 0, oprov: 0, oPC: 0, oSO: 0, oAdj: 0 });
+  if (l.rmPC === undefined) Object.assign(l, { rmPC: num(l.rm), rmSO: 0, rmAdj: 0, splitOK: false }); // no split known: all RM in RM cost
+  return l;
+}
 function takeLayer(L, take, D, prod, lineNo) {
-  let vrm, v622, v627, vtot;
+  let vrm, v622, v627, vtot, vprov, vpc, vso, vadj;
   if (Math.abs((L.qty - L.oq) - take) <= TOLQ) {
     vrm = L.rm - L.orm; v622 = L.a622 - L.o622; v627 = L.a627 - L.o627; vtot = L.tot - L.otot;
+    vprov = num(L.prov) - num(L.oprov); vpc = L.rmPC - L.oPC; vso = L.rmSO - L.oSO; vadj = L.rmAdj - L.oAdj;
     take = L.qty - L.oq;
   } else {
     const f = take / L.qty;
     vrm = L.rm * f; v622 = L.a622 * f; v627 = L.a627 * f; vtot = L.tot * f;
+    vprov = num(L.prov) * f; vpc = L.rmPC * f; vso = L.rmSO * f; vadj = L.rmAdj * f;
   }
   L.oq += take; L.orm += vrm; L.o622 += v622; L.o627 += v627; L.otot += vtot;
-  const d = { prod, line: lineNo, L, qty: take, rm: vrm, a622: v622, a627: v627, tot: vtot };
+  L.oprov = num(L.oprov) + vprov; L.oPC += vpc; L.oSO += vso; L.oAdj += vadj;
+  const d = { prod, line: lineNo, L, qty: take, rm: vrm, a622: v622, a627: v627, tot: vtot, prov: vprov };
   D.push(d);
   return d;
 }
@@ -203,7 +213,7 @@ export function runFIFO(ctx) {
   const L = [];
   for (const r of opening.rows) {
     if (!s5t(r.prod) || !(num(r.qty) > 0)) continue;
-    L.push({ lid: s5t(r.lid), src: 'OPENING', sp: s5t(r.srcPeriod), pc: s5t(r.pc), dt: dateVal(r.date) || 0, mo: s5t(r.mo), prod: utxt(r.prod), name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty: num(r.qty), rm: num(r.rm), a622: num(r.a622), a627: num(r.a627), tot: num(r.tot), price: num(r.price), prov: num(r.prov), cons: s5t(r.cons), flag: utxt(r.status) === 'REVIEW' ? 'OPENING REVIEW: ' + s5t(r.msg) : '' });
+    L.push({ lid: s5t(r.lid), src: 'OPENING', sp: s5t(r.srcPeriod), pc: s5t(r.pc), dt: dateVal(r.date) || 0, mo: s5t(r.mo), prod: utxt(r.prod), name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty: num(r.qty), rm: num(r.rm), a622: num(r.a622), a627: num(r.a627), tot: num(r.tot), price: num(r.price), prov: num(r.prov), cons: s5t(r.cons), flag: utxt(r.status) === 'REVIEW' ? 'OPENING REVIEW: ' + s5t(r.msg) : '', rmPC: num(r.rm), rmSO: 0, rmAdj: 0, splitOK: false });
   }
   const nO = L.length;
   const caRows = ctx.caRows || [];
@@ -215,11 +225,13 @@ export function runFIFO(ctx) {
     const n = L.length + 1 - nO;
     const pDate = dateVal(r.date);
     // STRICT_DATE without a completion date: the layer is never consumed (v1.14.19) and checkpoint 09c blocks.
-    const l = { lid: `PR-${period.replace('-', '')}-${s5t(r.pc)}-${pad(n, 3)}`, src: 'PRODUCTION', sp: period, pc: s5t(r.pc), dt: pDate || 0, mo: s5t(r.sub) || s5t(r.mo), prod, name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty, rm: num(r.totalRM), a622: num(r.t622), a627: num(r.t627), tot: num(r.totalCost), price: num(r.price), prov: 0, cons: '', flag: '' };
+    const rmPC = num(r.pcRM), rmSO = num(r.so), rm = num(r.totalRM);
+    // RM split (v1.14.70): PC RM cost + Stock Out allocated + WIP / rework adjustment (direct WIP adj + FG rework carry-in)
+    const l = { lid: `PR-${period.replace('-', '')}-${s5t(r.pc)}-${pad(n, 3)}`, src: 'PRODUCTION', sp: period, pc: s5t(r.pc), dt: pDate || 0, mo: s5t(r.sub) || s5t(r.mo), prod, name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty, rm, a622: num(r.t622), a627: num(r.t627), tot: num(r.totalCost), price: num(r.price), prov: 0, cons: '', flag: '', rmPC, rmSO, rmAdj: rm - rmPC - rmSO, splitOK: true };
     if (/NON-POSITIVE/i.test(txt(r.statusText))) l.flag = 'STEP 4 REVIEW: no 622/627 allocated (non-positive contribution)';
     L.push(l); step4Qty += qty; step4Cost += l.tot;
   }
-  L.forEach((l, i) => { Object.assign(l, { i: i + 1, oq: 0, orm: 0, o622: 0, o627: 0, otot: 0 }); });
+  L.forEach((l, i) => { Object.assign(l, { i: i + 1 }); initLayer(l); });
   // sort: product, layer date, opening first, source order
   const sorted = L.map((l) => ({ k: `${l.prod}\x01${pad(l.dt, 6)}\x01${l.src === 'OPENING' ? '0' : '1'}\x01${pad(l.i, 6)}`, l }))
     .sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0)).map((x) => x.l);
@@ -241,7 +253,7 @@ export function runFIFO(ctx) {
     const d = saleDate(r); // Bill (B/L) date when present, else invoice date (owner decision 02/10/2026)
     if (d === null) { if (utxt(r.product) || num(r.qty) !== 0) undated.push({ book, dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), prod: utxt(r.product), qty: num(r.qty), vnd: num(r.amtVND), rawDate: r.invDate === null || r.invDate === undefined ? '' : String(r.invDate) }); return; }
     if (d < pStart || d > pEnd) return;
-    const s = { seq: S.length + 1, book, acc: bookOf(r), date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), custItem: s5t(r.custItem), edNo: s5t(r.edNo), provRev: r.provRev === null || r.provRev === undefined || r.provRev === '' ? null : num(r.provRev), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, status: '', msg: '' };
+    const s = { seq: S.length + 1, book, acc: bookOf(r), date: d, origInv: s5t(r.origInv), prod: utxt(r.product), qty: num(r.qty), dbRow: idx + 6, inv: s5t(r.invNo), cust: s5t(r.customer), name: s5t(r.prodName), usd: num(r.amtUSD), vnd: num(r.amtVND), type: utxt(r.tranType), remark: s5t(r.remark), custItem: s5t(r.custItem), edNo: s5t(r.edNo), provRev: r.provRev === null || r.provRev === undefined || r.provRev === '' ? null : num(r.provRev), def: '', ovr: '', fin: '', fq: 0, rm: 0, c622: 0, c627: 0, tot: 0, provRel: 0, status: '', msg: '' };
     s.key = lineKey(r, d, keyCount);
     if (excluded.has(s.key.toUpperCase())) { s.def = 'NO COGS'; s.msg = 'Confirmed duplicate – excluded from FIFO; '; }
     else if (!s.prod && s.qty !== 0 && !['CREDIT NOTE', 'ADJUSTMENT', 'NON-PRODUCT REVENUE'].includes(s.type)) { s.def = 'REVIEW'; s.msg = 'Quantity without Product Number; '; }
@@ -311,7 +323,7 @@ export function runFIFO(ctx) {
     for (const { r, i } of consRows) {
       const prod = utxt(r.fg), dt = dateVal(r.issueDate) || 0;
       let nd = num(r.issueQty);
-      const c = { i, prod, qty: 0, rm: 0, a622: 0, a627: 0, tot: 0, takes: [], short: 0 };
+      const c = { i, prod, qty: 0, rm: 0, a622: 0, a627: 0, tot: 0, provRel: 0, takes: [], short: 0 };
       if (first.has(prod)) for (let pos = first.get(prod); pos <= last.get(prod) && nd > TOLQ; pos++) {
         const l = sorted[pos]; const avail = l.qty - l.oq;
         if (avail <= TOLQ) continue;
@@ -319,7 +331,7 @@ export function runFIFO(ctx) {
         if (mode === 'STRICT_DATE' && dt > 0 && l.dt > dt) continue;
         const take = avail <= nd + TOLQ ? avail : nd;
         const d = takeLayer(l, take, D, prod, 0); d.kind = 'CONS';
-        c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.takes.push({ lid: l.lid, qty: d.qty });
+        c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.provRel -= d.prov; c.takes.push({ lid: l.lid, qty: d.qty });
         nd -= take;
       }
       if (nd > TOLQ) { c.short = nd; shortProducts++; shortList.push({ kind: 'CONS', prod, ref: String(r.rid || r.doc || ''), date: dt, need: num(r.issueQty), fifo: num(r.issueQty) - nd, short: nd, note: 'Tiêu dùng nội bộ FG: không đủ lớp FG' }); }
@@ -337,7 +349,7 @@ export function runFIFO(ctx) {
           if (avail <= TOLQ) { pos++; continue; }
           const take = avail <= nd + TOLQ ? avail : nd;
           const d = takeLayer(l, take, D, prod, s.seq);
-          s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
+          s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot; s.provRel -= d.prov;
           nd -= take;
         }
         if (nd > TOLQ) shortList.push({ kind: 'SALE', prod, inv: s.inv, cust: s.cust, date: s.date, need: s.qty, fifo: s.fq, short: nd, note: 'Hết lớp FG của tháng (đã dùng cho hoá đơn trước)' });
@@ -345,25 +357,25 @@ export function runFIFO(ctx) {
       }
       if (short > TOLQ) shortProducts++;
     } else if (mode === 'MONTHLY') {
-      let nd = need.get(prod), tq = 0, trm = 0, t622 = 0, t627 = 0, ttot = 0;
+      let nd = need.get(prod), tq = 0, trm = 0, t622 = 0, t627 = 0, ttot = 0, tpv = 0;
       for (let pos = first.get(prod); pos <= last.get(prod); pos++) {
         if (nd <= TOLQ) break;
         const l = sorted[pos]; const avail = l.qty - l.oq;
         if (avail > TOLQ) {
           const take = avail <= nd + TOLQ ? avail : nd;
           const d = takeLayer(l, take, D, prod, 0);
-          tq += d.qty; trm += d.rm; t622 += d.a622; t627 += d.a627; ttot += d.tot;
+          tq += d.qty; trm += d.rm; t622 += d.a622; t627 += d.a627; ttot += d.tot; tpv += d.prov;
           nd -= take;
         }
       }
       if (nd > TOLQ) { shortProducts++; shortList.push({ kind: 'PRODUCT', prod, need: need.get(prod), fifo: need.get(prod) - nd, short: nd, note: 'Thiếu FG cho cả kỳ (chế độ PRORATA)' }); }
-      let cq = 0, crm = 0, c622 = 0, c627 = 0, ct = 0;
+      let cq = 0, crm = 0, c622 = 0, c627 = 0, ct = 0, cpv = 0;
       list.forEach((s, li) => {
         if (li < list.length - 1) {
           const fr = s.qty / need.get(prod);
-          s.fq = tq * fr; s.rm = trm * fr; s.c622 = t622 * fr; s.c627 = t627 * fr; s.tot = ttot * fr;
-        } else { s.fq = tq - cq; s.rm = trm - crm; s.c622 = t622 - c622; s.c627 = t627 - c627; s.tot = ttot - ct; }
-        cq += s.fq; crm += s.rm; c622 += s.c622; c627 += s.c627; ct += s.tot;
+          s.fq = tq * fr; s.rm = trm * fr; s.c622 = t622 * fr; s.c627 = t627 * fr; s.tot = ttot * fr; s.provRel = -tpv * fr;
+        } else { s.fq = tq - cq; s.rm = trm - crm; s.c622 = t622 - c622; s.c627 = t627 - c627; s.tot = ttot - ct; s.provRel = -tpv - cpv; }
+        cq += s.fq; crm += s.rm; c622 += s.c622; c627 += s.c627; ct += s.tot; cpv += s.provRel;
         if (nd > TOLQ) { s.status = 'INSUFFICIENT FG'; s.msg += `Product short by ${vbFmt(nd, 4, true)} units for the period; `; } else s.status = 'OK';
       });
     }
@@ -380,7 +392,7 @@ export function runFIFO(ctx) {
     s.msg += result.mode === 'MANUAL' ? `Return at ${result.note}; ` : `Return at original COGS of ${result.origin.inv} (${result.origin.period || period})${result.note ? ' – ' + result.note : ''}; `;
     if (result.mode !== 'ORIGIN') reviewLines++;
     retN++; retQ += result.qty; retA += result.amount;
-    sorted.push(result.layer);
+    sorted.push(initLayer(result.layer));
     return result.layer;
   }
   function strictProduct(prod, list) {
@@ -407,7 +419,7 @@ export function runFIFO(ctx) {
 
       if (x.k === 'C') {
         // FG consumption (tiêu dùng nội bộ): takes FIFO layers dated on/before the issue, booked to 632 / 155 by the totals
-        const c = { i: x.e.i, prod, qty: 0, rm: 0, a622: 0, a627: 0, tot: 0, takes: [], short: 0 };
+        const c = { i: x.e.i, prod, qty: 0, rm: 0, a622: 0, a627: 0, tot: 0, provRel: 0, takes: [], short: 0 };
         let ndc = x.e.qty;
         for (const l of prodLayers) {
           if (ndc <= TOLQ) break;
@@ -417,7 +429,7 @@ export function runFIFO(ctx) {
           if (!(l.dt <= x.d || l.dt === 0)) continue;
           const take = avail <= ndc + TOLQ ? avail : ndc;
           const d = takeLayer(l, take, D, prod, 0); d.kind = 'CONS';
-          c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.takes.push({ lid: l.lid, qty: d.qty });
+          c.qty += d.qty; c.rm += d.rm; c.a622 += d.a622; c.a627 += d.a627; c.tot += d.tot; c.provRel -= d.prov; c.takes.push({ lid: l.lid, qty: d.qty });
           ndc -= take;
         }
         if (ndc > TOLQ) { c.short = ndc; short = true; shortList.push({ kind: 'CONS', prod, ref: String((ctx.register.rows[x.e.i] || {}).rid || (ctx.register.rows[x.e.i] || {}).doc || ''), date: x.d, need: x.e.qty, fifo: x.e.qty - ndc, short: ndc, note: 'Tiêu dùng nội bộ FG: không đủ lớp FG ngày ≤ ngày xuất' }); }
@@ -441,7 +453,7 @@ export function runFIFO(ctx) {
         const take = avail <= nd + TOLQ ? avail : nd;
         if (x.k === 'S') {
           const s = x.s; const d = takeLayer(l, take, D, prod, s.seq);
-          s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot;
+          s.fq += d.qty; s.rm += d.rm; s.c622 += d.a622; s.c627 += d.a627; s.tot += d.tot; s.provRel -= d.prov;
         } else { l.rq = (l.rq || 0) + take; takes.push({ lid: l.lid, qty: take }); }
         nd -= take;
       }
@@ -450,7 +462,7 @@ export function runFIFO(ctx) {
         if (nd > TOLQ) shortList.push({ kind: 'SALE', prod, inv: s.inv, cust: s.cust, date: s.date, need: s.qty, fifo: s.fq, short: nd, note: 'Không có lớp FG ngày ≤ ngày hoá đơn' });
         if (nd > TOLQ) { short = true; s.status = 'INSUFFICIENT FG'; s.msg += `Short by ${vbFmt(nd, 4, true)} units (no eligible layer dated on/before invoice); `; }
         else s.status = 'OK';
-        if (s.fq > TOLQ && s.inv) RET.mergeOrigin(originNow, { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, period, returned: 0 });
+        if (s.fq > TOLQ && s.inv) RET.mergeOrigin(originNow, { inv: s.inv, cust: s.cust, prod, date: s.date, fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, provRel: s.provRel, period, returned: 0 });
       } else rwPlan[x.e.i] = { takes, short: nd > TOLQ ? nd : 0 };
     }
     if (short) shortProducts++;
@@ -458,7 +470,7 @@ export function runFIFO(ctx) {
   if (mode === 'MONTHLY') {
     // MONTHLY: returns are booked after the month's FIFO at the original invoice cost; the returned layer stays in closing FG.
     const cur = new Map();
-    for (const x of S) if (x.fin === 'FIFO COGS' && x.fq > TOLQ && x.inv) RET.mergeOrigin(cur, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, period, returned: 0 });
+    for (const x of S) if (x.fin === 'FIFO COGS' && x.fq > TOLQ && x.inv) RET.mergeOrigin(cur, { inv: x.inv, cust: x.cust, prod: x.prod, date: x.date, fq: x.fq, rm: x.rm, c622: x.c622, c627: x.c627, tot: x.tot, provRel: x.provRel, period, returned: 0 });
     for (const s of [...returns].sort((a, b) => a.date - b.date || a.dbRow - b.dbRow)) {
       const prior = (ctx.priorSales || []).filter((o) => utxt(o.prod) === s.prod && num(o.fq) > TOLQ && num(o.date) <= s.date);
       bookReturn(s, [...[...cur.values()].filter((o) => o.prod === s.prod && o.date <= s.date), ...prior]);
@@ -484,7 +496,7 @@ export function runFIFO(ctx) {
     if (remQ < 0) negLayers++;
     const remRm = l.rm - l.orm, rem622 = l.a622 - l.o622, rem627 = l.a627 - l.o627, remTot = l.tot - l.otot;
     l.pos = pos + 1; l.remQ = remQ; l.remTot = remTot;
-    ledger.push({ seq: pos + 1, lid: l.lid, source: l.src, srcPeriod: l.sp, pc: l.pc, date: l.dt > 0 ? l.dt : null, mo: l.mo, prod: l.prod, name: l.name, unit: l.unit, qtyIn: l.qty, rm: l.rm, a622: l.a622, a627: l.a627, tot: l.tot, unitCost: l.qty !== 0 ? l.tot / l.qty : null, qtyOut: l.oq, rmOut: l.orm, o622: l.o622, o627: l.o627, totOut: l.otot, remQ, remTot, flag: l.flag, loc: l.loc, price: l.price, prov: l.prov, cons: l.cons });
+    ledger.push({ seq: pos + 1, lid: l.lid, source: l.src, srcPeriod: l.sp, pc: l.pc, date: l.dt > 0 ? l.dt : null, mo: l.mo, prod: l.prod, name: l.name, unit: l.unit, qtyIn: l.qty, rm: l.rm, a622: l.a622, a627: l.a627, tot: l.tot, unitCost: l.qty !== 0 ? l.tot / l.qty : null, qtyOut: l.oq, rmOut: l.orm, o622: l.o622, o627: l.o627, totOut: l.otot, remQ, remTot, flag: l.flag, loc: l.loc, price: l.price, prov: l.prov, cons: l.cons, rmPC: l.rmPC, rmSO: l.rmSO, rmAdj: l.rmAdj, splitOK: !!l.splitOK, provOut: num(l.oprov), pcOut: num(l.oPC), soOut: num(l.oSO), adjOut: num(l.oAdj) });
     if (!prodIx.has(l.prod)) { prodIx.set(l.prod, sum.length); sum.push({ prod: l.prod, name: l.name, openQ: null, openA: null, prodQ: null, prodA: null, cogsQ: 0, cogsRM: 0, cogs622: 0, cogs627: 0, cogsA: 0, closeQ: null, closeA: null, eligQ: null, layers: null, status: '', msg: '' }); }
     const k = sum[prodIx.get(l.prod)];
     if (l.src === 'OPENING') {
@@ -502,14 +514,16 @@ export function runFIFO(ctx) {
     T.cogsQ += l.oq; T.cogsA += l.otot;
     cCogs[0] += l.orm; cCogs[1] += l.o622; cCogs[2] += l.o627; cCogs[3] += l.otot;
     if (remQ > 0) {
-      const c = { period, srcPeriod: l.sp, lid: l.lid, source: l.src, pc: l.pc, date: l.dt > 0 ? l.dt : null, mo: l.mo, prod: l.prod, name: l.name, loc: l.loc, unit: l.unit, qty: remQ, rm: remRm, a622: rem622, a627: rem627, tot: remTot, unitCost: remTot / remQ, price: null, prov: null, cons: l.cons, status: '', msg: '' };
+      const c = { period, srcPeriod: l.sp, lid: l.lid, source: l.src, pc: l.pc, date: l.dt > 0 ? l.dt : null, mo: l.mo, prod: l.prod, name: l.name, loc: l.loc, unit: l.unit, qty: remQ, rm: remRm, a622: rem622, a627: rem627, tot: remTot, unitCost: remTot / remQ, price: null, prov: null, cons: l.cons, status: '', msg: '',
+        rmPC: num(l.rmPC) - num(l.oPC), rmSO: num(l.rmSO) - num(l.oSO), rmAdj: num(l.rmAdj) - num(l.oAdj), splitOK: !!l.splitOK };
       let px = l.price; if (price.has(l.prod)) px = price.get(l.prod);
       c.price = px;
       let provShare = 0;
-      if (l.prov !== 0) { provShare = l.prov * remQ / l.qty; c.prov = provShare; }
+      if (l.prov !== 0 || num(l.oprov) !== 0) { provShare = num(l.prov) - num(l.oprov); c.prov = provShare; } // remaining provision of the layer (before this period's NRV test)
       const netUnit = (remTot + provShare) / remQ;
       const nrvUnit = px > 0 && fx > 0 ? px * fx * (1 - sellRate) : 0; // NRV = selling price − estimated selling cost
-      if (nrvUnit > 0) { c.nrvUnit = nrvUnit; c.provNeed = Math.max(0, netUnit - nrvUnit) * remQ; }
+      // signed (v1.14.70): > 0 add provision, < 0 release provision when NRV recovers
+      if (nrvUnit > 0) { c.nrvUnit = nrvUnit; c.provNeed = nrvNeed(remTot, provShare, remQ, nrvUnit); }
       if (px > 0 && fx > 0 && netUnit > nrvUnit + 1) { c.status = 'REVIEW - COST > PRICE'; c.msg = sellRate ? `Unit cost after provision ${vbFmt(netUnit, 0, true)} > NRV ${vbFmt(nrvUnit, 0, true)} VND (price ${vbFmt(px * fx, 0, true)} − ${(sellRate * 100).toFixed(1)}% selling cost); provision needed ${vbFmt(c.provNeed, 0, true)}` : `Unit cost after provision ${vbFmt(netUnit, 0, true)} > price ${vbFmt(px * fx, 0, true)} VND (NRV review)`; nrv++; }
       else c.status = 'OK';
       if (l.flag) c.msg = `${c.msg} ${l.flag}`.trim();
@@ -534,6 +548,7 @@ export function runFIFO(ctx) {
   let sumLineA = 0;
   const sales = S.map((s) => {
     const o = { seq: s.seq, book: s.book, acc: s.acc, date: s.date, inv: s.inv, cust: s.cust, prod: s.prod, name: s.name, qty: s.qty, usd: s.usd, vnd: s.vnd, type: s.type, remark: s.remark, custItem: s.custItem, edNo: s.edNo, provRev: s.provRev, def: s.def, ovr: s.ovr, fin: s.fin, fq: null, rm: null, c622: null, c627: null, tot: null, unit: null, status: s.status, msg: s.msg, key: s.key, dbRow: s.dbRow, returnLid: s.returnLid || '' };
+    if (s.provRel) o.provRel = s.provRel; // provision released by this sale (+) or put back by a return (−) – v1.14.70
     if (s.fin === 'FIFO COGS') { Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null }); sumLineA += s.tot; }
     else if (s.fin === 'RETURN' && s.status === 'RETURNED') Object.assign(o, { fq: s.fq, rm: s.rm, c622: s.c622, c627: s.c627, tot: s.tot, unit: s.fq !== 0 ? s.tot / s.fq : null, origInv: s.origInv || s.matchedOrigInv, matchedOrigInv: s.matchedOrigInv, matchMode: s.matchMode, returnLid: s.returnLid });
     if (s.vmsg) o.vmsg = s.vmsg; // v1.14.50: validation warning of the sale line (checkpoint 09b detail)
@@ -545,11 +560,13 @@ export function runFIFO(ctx) {
   const detail = D.map((d, k) => {
     sumDetA += d.tot;
     const sl = d.line > 0 ? S[d.line - 1] : null; // sales line of this take (invoice, customer, date) – display only, not a workbook column
-    return { inv: sl ? sl.inv : '', cust: sl ? sl.cust : '', saleDate: sl ? sl.date : null, srcPeriod: d.L.sp, seq: k + 1, prod: d.prod, line: d.line > 0 ? d.line : null, kind: d.kind === 'CONS' ? 'CONS' : 'SALE', lid: d.L.lid, source: d.L.src, pc: d.L.pc, date: d.L.dt > 0 ? d.L.dt : null, layerQty: d.L.qty, qty: d.qty, rm: d.rm, a622: d.a622, a627: d.a627, tot: d.tot, unit: d.qty !== 0 ? d.tot / d.qty : null, take: Math.abs(d.qty - d.L.qty) <= TOLQ ? 'FULL' : 'PARTIAL', left: d.L.qty - d.L.oq };
+    return { inv: sl ? sl.inv : '', cust: sl ? sl.cust : '', saleDate: sl ? sl.date : null, srcPeriod: d.L.sp, seq: k + 1, prod: d.prod, line: d.line > 0 ? d.line : null, kind: d.kind === 'CONS' ? 'CONS' : 'SALE', lid: d.L.lid, source: d.L.src, pc: d.L.pc, date: d.L.dt > 0 ? d.L.dt : null, layerQty: d.L.qty, qty: d.qty, rm: d.rm, a622: d.a622, a627: d.a627, tot: d.tot, prov: d.prov, unit: d.qty !== 0 ? d.tot / d.qty : null, take: Math.abs(d.qty - d.L.qty) <= TOLQ ? 'FULL' : 'PARTIAL', left: d.L.qty - d.L.oq };
   });
   // cogsQ / cogsA include FG consumption (consQ / consA = the part booked to 632 directly, not a sale)
   const totals = { ...T, cogsRM: cCogs[0], cogs622: cCogs[1], cogs627: cCogs[2], eligQ: sumEligQ, layers: closing.length, retQ, retA, nrvProv: closing.reduce((a, c) => a + num(c.provNeed), 0),
-    consQ, consA, consRM, cons622, cons627, consLines: consPlan.length, consShort: consPlan.reduce((a, c) => a + c.short, 0) };
+    consQ, consA, consRM, cons622, cons627, consLines: consPlan.length, consShort: consPlan.reduce((a, c) => a + c.short, 0),
+    // provision released (+) / put back (−) through sales lines (incl. sales returns) and FG consumption (v1.14.70)
+    provRelSales: S.reduce((a, s) => a + num(s.provRel), 0), provRelCons: consPlan.reduce((a, c) => a + num(c.provRel), 0) };
 
   // reconciliation rows 4..16
   let compDiff = 0;
@@ -656,6 +673,8 @@ export function runReworkFIFO(res, register, ctx) {
       if (qIn <= TOL_QTY) throw new Error('Invalid FG layer quantity: ' + l.lid);
       const uRM = num(l.rm) / qIn, u622 = num(l.a622) / qIn, u627 = num(l.a627) / qIn, uT = num(l.tot) / qIn;
       l.qtyOut = num(l.qtyOut) + take; l.rmOut = num(l.rmOut) + take * uRM; l.o622 = num(l.o622) + take * u622; l.o627 = num(l.o627) + take * u627; l.totOut = num(l.totOut) + take * uT;
+      // provision and the RM split follow the units taken (v1.14.70); the provision taken is not released here (see provision.js)
+      l.provOut = num(l.provOut) + take * (num(l.prov) / qIn); l.pcOut = num(l.pcOut) + take * (num(l.rmPC) / qIn); l.soOut = num(l.soOut) + take * (num(l.rmSO) / qIn); l.adjOut = num(l.adjOut) + take * (num(l.rmAdj) / qIn);
       l.remQ = remQty - take; l.remTot = num(l.tot) - num(l.totOut);
       const late = !plan && l.source === 'PRODUCTION' && num(l.date) > 0 && num(r.issueDate) > 0 && num(l.date) > num(r.issueDate);
       if (late) lateLayers++;
@@ -711,7 +730,8 @@ export function runReworkFIFO(res, register, ctx) {
       if (Math.abs(remQty - oldQty) > TOL_QTY) {
         c.qty = remQty; c.rm = num(l.rm) - num(l.rmOut); c.a622 = num(l.a622) - num(l.o622); c.a627 = num(l.a627) - num(l.o627); c.tot = num(l.tot) - num(l.totOut);
         c.unitCost = num(c.tot) / remQty;
-        if (oldQty > TOL_QTY && num(c.prov) !== 0) c.prov = num(c.prov) * remQty / oldQty;
+        c.rmPC = num(l.rmPC) - num(l.pcOut); c.rmSO = num(l.rmSO) - num(l.soOut); c.rmAdj = num(l.rmAdj) - num(l.adjOut);
+        if (num(c.prov) !== 0 || num(l.provOut) !== 0) c.prov = num(l.prov) - num(l.provOut);
       }
     }
     if (utxt(c.status) === 'REVIEW - COST > PRICE') nrv++;
@@ -734,7 +754,7 @@ export function runReworkFIFO(res, register, ctx) {
   }
   for (const r of register.rows) delete r._comp;
   // NRV after rework: layers that changed quantity need their provision proposal recomputed
-  for (const c of closing) if (num(c.nrvUnit) > 0 && num(c.qty) > TOL_QTY) { const net = (num(c.tot) + num(c.prov)) / num(c.qty); c.provNeed = Math.max(0, net - num(c.nrvUnit)) * num(c.qty); }
+  for (const c of closing) if (num(c.nrvUnit) > 0 && num(c.qty) > TOL_QTY) c.provNeed = nrvNeed(num(c.tot), num(c.prov), num(c.qty), num(c.nrvUnit));
   res.totals.nrvProv = closing.reduce((a, c) => a + num(c.provNeed), 0);
   res.closing = closing;
   res.totals.layers = closing.length; res.totals.closeQ = closing.reduce((a, c) => a + num(c.qty), 0); res.totals.closeA = closing.reduce((a, c) => a + num(c.tot), 0);
@@ -1041,8 +1061,8 @@ export const saleDate = (r) => recognitionDate(r);
 export const FAST_ACCOUNTS = [
   ['a154', '154', 'WIP cuối kỳ (vật tư sau 3B + rework WIP)'],
   ['a155', '155', 'Thành phẩm cuối kỳ'],
-  ['a2294', '2294', 'Phát sinh dự phòng giảm giá HTK đã ghi trong kỳ'],
-  ['a632', '632', 'Giá vốn thuần trong kỳ (FIFO bán ra − giá vốn hàng trả lại + DIRECT_632 + NRV đã ghi)'],
+  ['a2294', '2294', 'Phát sinh Có − Nợ TK 2294 trong kỳ (NRV đã ghi − hoàn nhập khi bán / tiêu dùng; hàng trả lại khôi phục)'],
+  ['a632', '632', 'Giá vốn thuần trong kỳ (FIFO bán ra − giá vốn hàng trả lại + DIRECT_632 + NRV đã ghi − hoàn nhập DP khi bán)'],
   ['a511', '511', 'Doanh thu bán hàng – phát sinh Có, trước kết chuyển giảm trừ (file doanh thu)'],
   ['a5212', '5212', 'Hàng bán bị trả lại – phát sinh Nợ (file trả lại: SALES RETURN)'],
   ['a5213', '5213', 'Giảm giá hàng bán – phát sinh Nợ (file trả lại: CREDIT NOTE)'],
