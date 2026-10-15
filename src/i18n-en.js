@@ -1239,6 +1239,14 @@ export const EN = {
 "Dashboard": "Dashboard",
 "Dashboard doanh thu & GP": "Revenue & GP dashboard",
 "Theo khách hàng · GP %": "By customer · GP %",
+// v1.14.88: audit AUD-06
+"Danh sách tiêu hao không còn khớp báo cáo Stock Out đã import lại": "The consumption list no longer matches the re-imported Stock Out reports",
+"Xác nhận lại danh sách tiêu hao": "Confirm the consumption list again",
+"Bỏ các dòng không còn, nhận số liệu mới cho các dòng đổi; cần lý do.": "Drops the lines that are gone and takes the new figures for the changed ones; a reason is required.",
+"Không còn trong báo cáo": "No longer in the report",
+"Đã đổi số liệu": "Figures changed",
+"Đã xác nhận lại danh sách tiêu hao. Bấm Chạy STEP {#} để cập nhật số liệu.": "Consumption list confirmed again. Click Run STEP {#} to update the figures.",
+
 // v1.14.86: audit wave 2
 "Chưa xác minh được kỳ trước": "Previous period not verified",
 "FG / dự phòng cuối kỳ {#} đã thay đổi sau khi chuyển sang FG đầu kỳ {#} – chuyển lại ở {#} (Roll forward), Validate rồi chạy lại STEP {#}.": "FG / provision closing of {#} changed after it was carried into the FG opening of {#} – roll forward again in {#}, Validate, then rerun STEP {#}.",
@@ -3140,6 +3148,8 @@ export const SRC_WILD = [
 ["So sánh với kỳ {*}: dữ liệu trên máy này (kỳ chưa có trên cloud).", "Compared with {*}: data on this device (the period is not on the cloud)."],
 ["Không thể mở lại {*}: không đọc được trạng thái kỳ kế tiếp {*} trên cloud ({*}). Thử lại khi có kết nối.", "Cannot reopen {*}: the status of the next period {*} could not be read on the cloud ({*}). Try again when connected."],
 ["Không thể mở lại {*}: kỳ kế tiếp {*} đã ĐÓNG trên cloud và đang phụ thuộc số dư cuối kỳ này. Mở lại {*} trước, sau đó mới mở lại {*}.", "Cannot reopen {*}: the next period {*} is CLOSED on the cloud and depends on this closing. Reopen {*} first, then {*}."],
+["– {*} dòng không còn (UNMAPPED), {*} dòng đổi số liệu. STEP {*} bị chặn cho tới khi xác nhận lại.", "– {*} lines gone (UNMAPPED), {*} lines with changed figures. STEP {*} is blocked until confirmed again."],
+["STEP 2 bị chặn: danh sách tiêu hao NVL không còn khớp báo cáo Stock Out ({*} dòng không còn, {*} dòng đổi số liệu). Xem khối Tiêu hao NVL → Xác nhận lại danh sách tiêu hao.", "STEP 2 blocked: the material consumption list no longer matches the Stock Out reports ({*} lines gone, {*} lines changed). See the Material consumption block → Confirm the consumption list again."],
 ["{*} · Giá vốn {*}", "{*} · COGS {*}"],
 ["{*} · Lãi gộp {*}", "{*} · Gross profit {*}"],
 ["{*} · Lỗ gộp {*}", "{*} · Gross loss {*}"],

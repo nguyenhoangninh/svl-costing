@@ -71,6 +71,26 @@ try {
   // broad fallback above 5 % of the allocation needs a reviewed approval (the synthetic data has two such lines)
   if (await page.$('[data-act=approve-step2-fallback]')) { await settle(); await page.click('[data-act=approve-step2-fallback]'); await sleep(800); }
   ok('STEP 2 fallback approval clears the STEP 2 block', !(await page.$('[data-act=approve-step2-fallback]')));
+
+  // ---------- audit AUD-06: a Stock Out line marked "tiêu hao" changes with a re-import → STEP 2 blocks until confirmed
+  await page.evaluate(() => { const d = document.querySelector('.cons-pick'); if (d) d.open = true; });
+  await settle(); await page.check('input[data-cons^="T|SO-T-1|"]'); await sleep(600);
+  const t2c = await act('[data-act=run-step2]', /STEP 2 xong|STEP 2 dừng|STEP 2 bị chặn/, 'step2 cons');
+  const posted0 = await page.$eval('#cons-stats tr.tot td:last-child', (td) => td.textContent.trim());
+  ok('consumption: the marked line is posted 632 / 152 (175.000)', /STEP 2 xong/.test(t2c) && amt(posted0) === 175000, `${t2c} · ${posted0}`);
+  const changedFile = writeSynthErp(path.join(dir, 'erp2'), { rework: false, negative: false, patch: (r) => (r.name === 'STOCK OUT-T' ? { ...r, rows: r.rows.map((x) => (x[0] === 'SO-T-1' ? x.map((v, i) => (i === 13 ? -185000 : v)) : x)) } : r) }).filter((f) => /STOCK OUT-T-/.test(f));
+  await go('#step1'); await page.waitForSelector('#f-files', { state: 'attached' });
+  await page.setInputFiles('#f-files', changedFile); await page.waitForSelector('#plan .alert', { timeout: 120000 }); await sleep(800);
+  for (let i = 0; i < 8 && (await page.$('[data-act=dq-confirm]')); i++) { await settle(); await page.click('[data-act=dq-confirm]'); await sleep(900); }
+  await go('#step2'); await page.waitForSelector('[data-act=run-step2]');
+  ok('AUD-06: STEP 2 lists the marked line whose amount changed on re-import', /Đã đổi số liệu/.test((await page.textContent('#cons-rec').catch(() => '')) || ''));
+  const tBlk = await act('[data-act=run-step2]', /bị chặn|STEP 2 xong/, 'step2 blocked');
+  ok('AUD-06: STEP 2 is blocked until the consumption list is confirmed again', /danh sách tiêu hao NVL không còn khớp/.test(tBlk), tBlk);
+  await act('[data-act=cons-reconcile]', /Đã xác nhận lại|lý do/, 'reconcile');
+  const t2d = await act('[data-act=run-step2]', /STEP 2 xong|STEP 2 dừng|STEP 2 bị chặn/, 'step2 after confirm');
+  const posted1 = await page.$eval('#cons-stats tr.tot td:last-child', (td) => td.textContent.trim());
+  ok('AUD-06: after confirmation STEP 2 posts the new amount (185.000)', /STEP 2 xong/.test(t2d) && amt(posted1) === 185000, `${t2d} · ${posted1}`);
+  if (await page.$('[data-act=approve-step2-fallback]')) { await settle(); await page.click('[data-act=approve-step2-fallback]'); await sleep(800); }
   await go('#step3'); await page.waitForSelector('[data-act=run-step3]');
   const t3 = await act('[data-act=run-step3]', /STEP 3 xong|STEP 3 dừng|chặn/, 'step3');
   ok('STEP 3 runs', /STEP 3 xong/.test(t3), t3);

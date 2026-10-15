@@ -274,18 +274,21 @@ export function soLineKeys(ds, erp) {
   const h = ds.header, keys = new Array((ds.rows || []).length).fill(null);
   const cCode = headerCol(h, 'Code'), cLine = headerCol(h, '#'), cItem = headerCol(h, 'Item Code');
   if (cCode < 0) return keys;
+  // v1.14.88 (audit AUD-06): without the ERP line number (#) the key is built from the line's content (date, quantity,
+  // amount), never from its row position, so a re-export in another order does not move a marked line to another row
+  const c = cLine >= 0 ? null : soCols(ds, erp);
   const seen = new Map(); const end = lastDataEnd(ds.rows, cCode);
   for (let i = 0; i < end; i++) {
     const r = ds.rows[i];
     if (txt(r[cCode]).length === 0) continue;
-    const base = [erp, txt(r[cCode]), cLine >= 0 ? txt(r[cLine]) : String(i + 1), cItem >= 0 ? utxt(r[cItem]) : ''].join('|');
+    const id = cLine >= 0 ? txt(r[cLine]) : ['@', txt(r[c.date]), num(r[c.qty]).toFixed(4), num(r[c.amt]).toFixed(0)].join('~');
+    const base = [erp, txt(r[cCode]), id, cItem >= 0 ? utxt(r[cItem]) : ''].join('|');
     const n = (seen.get(base) || 0) + 1; seen.set(base, n);
     keys[i] = n > 1 ? `${base}#${n}` : base;
   }
   return keys;
 }
 
-/** v1.14.29: non-FG Stock Out lines of the period, one per row, for the "tiêu hao" picker. */
 export function stockOutLines(datasets, period) {
   const mask = fgMask(datasets, period); const out = [];
   for (const erp of ['T', 'O', 'S']) {
@@ -293,14 +296,40 @@ export function stockOutLines(datasets, period) {
     const h = ds.header, cCode = headerCol(h, 'Code'), cItem = headerCol(h, 'Item Code'), cCost = headerCol(h, 'Total Cost'), cLine = headerCol(h, '#');
     const cName = headerColAny(h, ['Item Name(English)', 'Item Name (English)', 'Item Name']), cLoc = headerCol(h, 'Location');
     if (cCode < 0 || cItem < 0 || cCost < 0) continue;
-    const keys = soLineKeys(ds, erp); const end = lastDataEnd(ds.rows, cCode);
+    const keys = soLineKeys(ds, erp); const end = lastDataEnd(ds.rows, cCode); const sc = soCols(ds, erp);
     for (let i = 0; i < end; i++) {
       const r = ds.rows[i];
       if (!keys[i] || (mask[erp] && mask[erp].set.has(i))) continue;
-      out.push({ key: keys[i], erp, doc: txt(r[cCode]), line: cLine >= 0 ? txt(r[cLine]) : String(i + 1), item: utxt(r[cItem]), name: cName >= 0 ? txt(r[cName]) : '', loc: cLoc >= 0 ? txt(r[cLoc]) : '', amt: -num(r[cCost]) });
+      out.push({ key: keys[i], erp, doc: txt(r[cCode]), line: cLine >= 0 ? txt(r[cLine]) : String(i + 1), item: utxt(r[cItem]), name: cName >= 0 ? txt(r[cName]) : '', loc: cLoc >= 0 ? txt(r[cLoc]) : '', amt: -num(r[cCost]), qty: -num(r[sc.qty]), date: txt(r[sc.date]) });
     }
   }
   return out.sort((a, b) => a.erp.localeCompare(b.erp) || a.doc.localeCompare(b.doc) || (Number(a.line) || 0) - (Number(b.line) || 0) || a.key.localeCompare(b.key));
+}
+
+/**
+ * v1.14.88 (audit AUD-06): what a Stock Out line marked "tiêu hao" looked like when it was marked. Kept in
+ * consumeCfg.snap so a re-import of the ERP report that drops or changes the line is caught instead of silently moving
+ * an amount between 632 / 152 and the PC lots.
+ */
+export const consSnap = (c) => ({ doc: c.doc, item: c.item, date: c.date || '', qty: Math.round(num(c.qty) * 10000) / 10000, amt: Math.round(num(c.amt)) });
+/**
+ * Marked lines against the current Stock Out reports: missing = the key is no longer in the reports (UNMAPPED);
+ * changed = same key but another date / quantity / amount than when it was marked. Lines marked before v1.14.88 have no
+ * snapshot: only "missing" can be told for them.
+ */
+export function consumeReconcile(lines, cfg) {
+  const keys = (cfg && Array.isArray(cfg.lines)) ? cfg.lines : [];
+  const snap = (cfg && cfg.snap) || {};
+  const by = new Map((lines || []).map((c) => [c.key, c]));
+  const missing = [], changed = [];
+  for (const k of keys) {
+    const now = by.get(k);
+    if (!now) { missing.push({ key: k, was: snap[k] || null }); continue; }
+    const was = snap[k]; if (!was) continue;
+    const cur = consSnap(now);
+    if (was.date !== cur.date || Math.abs(was.qty - cur.qty) > 0.0001 || Math.abs(was.amt - cur.amt) > 1) changed.push({ key: k, was, now: cur });
+  }
+  return { missing, changed, ok: !missing.length && !changed.length };
 }
 
 /** RW_RawStockOutAmounts: raw Stock Out split RM vs FG (rows with consumption qty > 0, dated in period). */

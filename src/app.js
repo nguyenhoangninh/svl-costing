@@ -2,7 +2,7 @@
 import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt, utxt, nowISO, serialToISO, parseUserNumber, fpRows } from './engine/util.js';
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
 import * as SP from './engine/syncpolicy.js';
-import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS, confirmConsFg, undoConsFg, consFgEligible, consFgConfirmed, consFgPendingCount } from './engine/step2.js';
+import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, consSnap, consumeReconcile, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS, confirmConsFg, undoConsFg, consFgEligible, consFgConfirmed, consFgPendingCount } from './engine/step2.js';
 import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS, step3Stale } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
@@ -394,7 +394,7 @@ function guardPeriod() {
 const guardMutate = () => guardEdit() && guardPeriod();
 const who = () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này');
 const canEditPeriod = () => store.canEdit() && !isClosed();
-const WRITE_ACTS = new Set(['new-period', 'dq-confirm', 'dq-unconfirm', 'cfg-fg-save', 'cfg-fg-confirm', 'cfg-fg-undo', 'run-step2', 'pc-basis-apply', 'pc-basis-undo', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
+const WRITE_ACTS = new Set(['new-period', 'dq-confirm', 'dq-unconfirm', 'cfg-fg-save', 'cfg-fg-confirm', 'cfg-fg-undo', 'run-step2', 'cons-reconcile', 'pc-basis-apply', 'pc-basis-undo', 'approve-step2-fallback', 'run-step3', 'roll-wip', 'validate-wip', 'reset-wip', 'reset-erp', 'push-cloud', 'delete-period', '3b-sync', '3b-build', '3b-apply', '3b-all', 'sales-save', 'ret-save', 'pm-update', 'run-step4', 'fgp-post', 'fgp-roll', 's5-roll', 's5-validate', 's5-run', 's5r-run', 's5-hist', 's5-close', 's5-reopen']);
 
 /** Locale-safe number entry (F-16). Returns the number, null for blank, or undefined (after a toast) when ambiguous / invalid. */
 function parseNum(v, label) {
@@ -919,6 +919,21 @@ const consumeLineKeys = () => (S.d.consumeCfg && Array.isArray(S.d.consumeCfg.li
    Tick là lưu ngay và cập nhật tại chỗ (không dựng lại màn hình, nên không mất vị trí cuộn / bộ lọc). */
 let consLines = [];                 // dòng Stock Out NVL của lần render gần nhất
 const CONS_ERPS = ['T', 'S', 'O'];
+/** v1.14.88 (AUD-06): snapshot of the marked lines (kept from the previous save when a line is not in the reports now). */
+function consSnapOf(set) {
+  const by = new Map(stockOutLines(S.d.datasets, S.period).map((c) => [c.key, c]));
+  const old = (S.d.consumeCfg && S.d.consumeCfg.snap) || {};
+  return Object.fromEntries([...set].map((k) => [k, by.has(k) ? consSnap(by.get(k)) : old[k] || null]).filter(([, v]) => v));
+}
+const consRec = () => consumeReconcile(stockOutLines(S.d.datasets, S.period), S.d.consumeCfg);
+function consRecHtml(rec) {
+  if (rec.ok) return '';
+  const f = (x) => (x ? `${esc(x.date || '')} · SL ${fmtNum(x.qty, 4)} · ${fmtNum(x.amt)} VND` : 'không có ảnh chụp');
+  const li = [...rec.missing.slice(0, 8).map((m) => `<li><b>Không còn trong báo cáo</b> ${esc(m.key)} (lúc chọn: ${f(m.was)})</li>`),
+    ...rec.changed.slice(0, 8).map((c) => `<li><b>Đã đổi số liệu</b> ${esc(c.key)}: ${f(c.was)} → ${f(c.now)}</li>`)].join('');
+  return `<div class="alert block" id="cons-rec"><b>Danh sách tiêu hao không còn khớp báo cáo Stock Out đã import lại</b> – ${rec.missing.length} dòng không còn (UNMAPPED), ${rec.changed.length} dòng đổi số liệu. STEP 2 bị chặn cho tới khi xác nhận lại.<ul>${li}</ul>
+    <button class="btn" type="button" data-act="cons-reconcile" ${canEditPeriod() ? '' : 'disabled'}>Xác nhận lại danh sách tiêu hao</button> <span class="muted">Bỏ các dòng không còn, nhận số liệu mới cho các dòng đổi; cần lý do.</span></div>`;
+}
 const consStale = (s2, sel) => !!s2 && JSON.stringify([...(s2.consumeLines || [])].sort()) !== JSON.stringify([...sel].sort());
 const consStaleHtml = (stale) => (stale ? '<div class="alert review">Danh sách tiêu hao đã thay đổi sau lần chạy STEP 2 gần nhất – bấm <b>Chạy STEP 2</b> để cập nhật số liệu.</div>' : '');
 const consSumTxt = (lines, sel) => `Chọn dòng tiêu hao · ${fmtNum(lines.length)} dòng Stock Out NVL kỳ này · đã chọn ${fmtNum(sel.size)} dòng`;
@@ -949,6 +964,7 @@ function consumptionSection(s2) {
   return `<section class="cons-card">
     <h2>Tiêu hao NVL (consumption)</h2>
     <p class="muted">Dòng Stock Out được đánh dấu <b>tiêu hao</b> không phân bổ vào lô PC-P; số tiền ghi thẳng <b>Nợ 632 / Có 152</b>. Tick là lưu ngay, chỉ có hiệu lực trong kỳ này. Sau khi đổi lựa chọn, <b>chạy lại STEP 2</b> để áp dụng.</p>
+    ${consRecHtml(consRec())}
     <div id="cons-stale">${consStaleHtml(consStale(s2, sel))}</div>
     <div class="cons-wrap-stats"><table class="cp cons-stats" id="cons-stats"><thead><tr><th>Phân hệ</th><th class="r">Dòng Stock Out NVL</th><th class="r">Dòng tiêu hao</th><th class="r">Giá trị Stock Out NVL</th><th class="r">Giá trị tiêu hao (đang chọn)</th><th class="r">% tiêu hao</th><th class="r">Đã ghi 632 / 152 (STEP 2 gần nhất)</th></tr></thead><tbody>${consStatBody(lines, sel, s2)}</tbody></table></div>
     <details class="cons-pick" ${sel.size ? 'open' : ''}>
@@ -982,7 +998,7 @@ function bindConsSection(el) {
     root.querySelector('#cons-stale').innerHTML = consStaleHtml(consStale(S.d.step2, sel));
   };
   const save = (set, why) => {
-    S.d.consumeCfg = { lines: [...set].sort(), by: who(), at: nowISO() };
+    S.d.consumeCfg = { lines: [...set].sort(), snap: consSnapOf(set), by: who(), at: nowISO() };
     audit('STEP 2 - TIÊU HAO NVL', `${why} · ${who()}`);
     markDirty('consumeCfg', 'audit');
   };
@@ -1115,6 +1131,9 @@ function doStep2() {
     toast(`STEP 2 bị chặn bởi kiểm soát ngày ERP kỳ ${S.period}. ${sample}${periodIssues.length > 3 ? '…' : ''}. Sửa / xuất lại báo cáo rồi import lại.`, 'block');
     return;
   }
+  // v1.14.88 (audit AUD-06): marked lines that left or changed with a re-import must be confirmed first
+  const rec = consRec();
+  if (!rec.ok) { toast(`STEP 2 bị chặn: danh sách tiêu hao NVL không còn khớp báo cáo Stock Out (${rec.missing.length} dòng không còn, ${rec.changed.length} dòng đổi số liệu). Xem khối Tiêu hao NVL → Xác nhận lại danh sách tiêu hao.`, 'block'); return; }
   try {
     const s2 = runStep2(S.d.datasets, S.period, { consumeLines: consumeLineKeys() });
     S.d.step2 = s2;
@@ -1757,6 +1776,17 @@ document.addEventListener('click', async (e) => {
     }
     case 'new-period': await newPeriod(); break;
     case 'run-step2': await busy('Đang chạy STEP 2…', async () => doStep2()); break;
+    case 'cons-reconcile': {
+      if (!canEditPeriod()) break;
+      const rec = consRec(); if (rec.ok) { render(); break; }
+      const reason = (prompt(`Xác nhận lại danh sách tiêu hao NVL: bỏ ${rec.missing.length} dòng không còn trong báo cáo, nhận số liệu mới cho ${rec.changed.length} dòng. Nhập lý do (bắt buộc):`, '') || '').trim();
+      if (reason.length < 5) { toast('Cần lý do ít nhất 5 ký tự.', 'review'); break; }
+      const gone = new Set(rec.missing.map((m) => m.key));
+      const set = new Set(consumeLineKeys().filter((k) => !gone.has(k)));
+      S.d.consumeCfg = { lines: [...set].sort(), snap: consSnapOf(set), by: who(), at: nowISO() };
+      audit('STEP 2 - TIÊU HAO NVL ĐỐI CHIẾU LẠI', `${reason} · bỏ ${rec.missing.length} dòng (${rec.missing.map((m) => m.key).slice(0, 10).join(', ')}) · nhận số mới ${rec.changed.length} dòng · ${who()}`);
+      markDirty('consumeCfg', 'audit'); toast('Đã xác nhận lại danh sách tiêu hao. Bấm Chạy STEP 2 để cập nhật số liệu.', 'pass'); render(); break;
+    }
     case 'approve-step2-fallback': {
       if (!canEditPeriod()) break; // owner decision #8: anyone with edit rights approves
       const s2 = S.d.step2; if (!s2) break;
