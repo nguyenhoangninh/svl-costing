@@ -1239,6 +1239,11 @@ export const EN = {
 "Dashboard": "Dashboard",
 "Dashboard doanh thu & GP": "Revenue & GP dashboard",
 "Theo khách hàng · GP %": "By customer · GP %",
+// v1.14.86: audit wave 2
+"Chưa xác minh được kỳ trước": "Previous period not verified",
+"FG / dự phòng cuối kỳ {#} đã thay đổi sau khi chuyển sang FG đầu kỳ {#} – chuyển lại ở {#} (Roll forward), Validate rồi chạy lại STEP {#}.": "FG / provision closing of {#} changed after it was carried into the FG opening of {#} – roll forward again in {#}, Validate, then rerun STEP {#}.",
+"FG cuối kỳ {#} đã thay đổi sau khi chuyển sang FG đầu kỳ {#} – chuyển lại ở {#} (Roll forward), Validate rồi chạy lại STEP {#}.": "FG closing of {#} changed after it was carried into the FG opening of {#} – roll forward again in {#}, Validate, then rerun STEP {#}.",
+
 // v1.14.81: 5P CLOSE gate
 "5P Dự phòng FG (TK {#}) chưa khớp: đầu kỳ + tăng − giảm − phần rework − cuối kỳ theo lớp = {#}. Mở màn 5P để kiểm tra trước khi CLOSE.": "5P FG provision (TK {#}) does not reconcile: opening + increase − decrease − rework part − closing on layers = {#}. Open 5P and check before CLOSE.",
 "5P Dự phòng FG (TK {#}) chưa khớp: đầu kỳ + tăng − giảm − phần rework − cuối kỳ theo lớp = {#} · có lớp chưa theo dõi được dự phòng. Mở màn 5P để kiểm tra trước khi CLOSE.": "5P FG provision (TK {#}) does not reconcile: opening + increase − decrease − rework part − closing on layers = {#} · some layers cannot be traced. Open 5P and check before CLOSE.",
@@ -3127,6 +3132,14 @@ export const SRC_EXACT = {
 };
 export const SRC_WILD = [
 // v1.14.79: dashboard bar titles "<khách hàng> · Giá vốn / Lãi gộp / Lỗ gộp <số>"
+["Không xác minh được kỳ {*} trên cloud ({*}). Số dư đầu kỳ {*} chưa được đối chiếu với số mới nhất của kỳ {*}; kiểm tra kết nối rồi mở lại màn hình trước khi CLOSE.", "Period {*} could not be verified on the cloud ({*}). The opening balances of {*} are not yet checked against the latest {*}; check the connection and reopen the screen before CLOSE."],
+["So sánh với kỳ {*}: đã xác minh với cloud revision {*}.", "Compared with {*}: verified against cloud revision {*}."],
+["So sánh với kỳ {*}: đã xác minh với cloud revision {*} (tải từ cloud vì bản trên máy cũ hơn).", "Compared with {*}: verified against cloud revision {*} (loaded from the cloud because this device's copy was older)."],
+["So sánh với kỳ {*}: KHÔNG xác minh được trên cloud ({*}) – số so sánh có thể đã cũ.", "Compared with {*}: NOT verified on the cloud ({*}) – the comparison may be out of date."],
+["So sánh với kỳ {*}: dữ liệu trên máy này (chưa đăng nhập cloud nên không xác minh).", "Compared with {*}: data on this device (not signed in to the cloud, so not verified)."],
+["So sánh với kỳ {*}: dữ liệu trên máy này (kỳ chưa có trên cloud).", "Compared with {*}: data on this device (the period is not on the cloud)."],
+["Không thể mở lại {*}: không đọc được trạng thái kỳ kế tiếp {*} trên cloud ({*}). Thử lại khi có kết nối.", "Cannot reopen {*}: the status of the next period {*} could not be read on the cloud ({*}). Try again when connected."],
+["Không thể mở lại {*}: kỳ kế tiếp {*} đã ĐÓNG trên cloud và đang phụ thuộc số dư cuối kỳ này. Mở lại {*} trước, sau đó mới mở lại {*}.", "Cannot reopen {*}: the next period {*} is CLOSED on the cloud and depends on this closing. Reopen {*} first, then {*}."],
 ["{*} · Giá vốn {*}", "{*} · COGS {*}"],
 ["{*} · Lãi gộp {*}", "{*} · Gross profit {*}"],
 ["{*} · Lỗ gộp {*}", "{*} · Gross loss {*}"],

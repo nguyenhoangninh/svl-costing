@@ -312,7 +312,7 @@ async function openPeriod(p, { preferCloud = false } = {}) {
     } catch (e) { toast('Không đọc được cloud: ' + e.message, 'review'); }
   }
   await refreshPeriods();
-  S.prevDrift = [];
+  S.prevDrift = []; S.prevVerifyErr = '';
   notices.setPeriod(p);
   startPeriodWatch(p);
   render();
@@ -597,7 +597,7 @@ VIEWS.dashboard = (el) => DBV.view(el);
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
-const driftHTML = () => ((S.prevDrift || []).length ? `<div class="alert block"><b>Số dư đầu kỳ cần chuyển lại</b><ul>${S.prevDrift.map((m) => `<li>${esc(m)}</li>`).join('')}</ul><a href="#opening">Mở Opening WIP → Roll forward</a></div>` : '');
+const driftHTML = () => (S.prevVerifyErr ? `<div class="alert block"><b>Chưa xác minh được kỳ trước</b> ${esc(S.prevVerifyErr)}</div>` : '') + ((S.prevDrift || []).length ? `<div class="alert block"><b>Số dư đầu kỳ cần chuyển lại</b><ul>${S.prevDrift.map((m) => `<li>${esc(m)}</li>`).join('')}</ul><a href="#opening">Mở Opening WIP → Roll forward</a></div>` : '');
 VIEWS.cc = (el) => {
   const st = statusAll(); const rs = railStatus(st); const s2 = S.d.step2, s3 = S.d.step3;
   const steps = [
@@ -1313,26 +1313,58 @@ async function rollWIP() {
   const reason = openRollReason(prevD, prev);
   if (!reason) { toast('Không chuyển số dư.', 'review'); return; }
   const done = rollFromPrev(prevD, prev, reason, { replaceBF: true });
-  S.prevDrift = [];
+  S.prevDrift = []; S.prevVerifyErr = '';
   toast(`Đã roll forward từ kỳ ${prev}${reason === 'CLOSED' ? '' : ' (kỳ trước chưa đóng)'}: ${done.includes('opening') ? 'Opening WIP' : ''}${done.includes('register') ? ' + Rework WIP B/F' : ''}.`, reason === 'CLOSED' ? 'pass' : 'review');
   render(); checkPrevDrift();
 }
 /** Has the previous period changed since its balances were rolled into this one? (sets S.prevDrift) */
+/**
+ * v1.14.86 (audit AUD-02 / AUD-03 / NEW-05): another period as the cloud holds it NOW, not this device's cache.
+ * Signed in: the cloud revision is read; when this device's copy is older (or missing) the listed blobs are loaded from
+ * the cloud. Returns { d, source: 'OPEN'|'LOCAL'|'CLOUD', verified, rev, offline, error }.
+ * verified = false with an error means the cloud could not be read – callers must not treat the local copy as current.
+ */
+async function readPeriodVerified(p, names = null) {
+  if (p === S.period) return { d: S.d, source: 'OPEN', verified: true };
+  const local = await loadLocal(p);
+  let meta = null, metaError = null;
+  if (store.cloud.user) { try { meta = await store.cloudMeta(p); } catch (e) { metaError = (e && e.message) || String(e) || 'error'; } }
+  const localRev = store.cloud.user ? await store.localGet(lk(p, 'cloudRev')) : null;
+  const plan = SP.periodReadPlan({ signedIn: !!store.cloud.user, metaError, meta, localRev });
+  if (plan === 'OFFLINE') return { d: local, source: 'LOCAL', verified: false, offline: true };
+  if (plan === 'ERROR') return { d: local, source: 'LOCAL', verified: false, error: metaError };
+  if (plan === 'NO_CLOUD') return { d: local, source: 'LOCAL', verified: true, rev: null };
+  if (plan === 'LOCAL') return { d: local, source: 'LOCAL', verified: true, rev: meta.rev };
+  try {
+    const r = await store.cloudLoad(p, () => {}, names);
+    const d = emptyData();
+    for (const [k, v] of Object.entries((r && r.blobs) || {})) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
+    d.audit = d.audit || [];
+    return { d, source: 'CLOUD', verified: true, rev: meta.rev, localRev: localRev ?? null };
+  } catch (e) { return { d: local, source: 'LOCAL', verified: false, error: (e && e.message) || String(e), rev: meta.rev }; }
+}
+
 async function checkPrevDrift() {
   const out = [];
   const op = S.d.opening && S.d.opening.src, bs = S.d.register && S.d.register.bfSrc;
-  const p = (op && op.period) || (bs && bs.period);
+  const fgRoll = S.d.fgOpen && S.d.fgOpen.srcKind === 'ROLL FORWARD' && S.period ? prevPeriod(S.period) : '';
+  const p = (op && op.period) || (bs && bs.period) || fgRoll;
+  let verifyErr = '';
   if (p) {
-    try {
-      const prevD = await loadPeriodData(p);
+    // v1.14.86 (AUD-02): read the previous period as the cloud holds it now; never fall back silently to a stale copy
+    const rv = await readPeriodVerified(p, ['step3', 'register', 'closed', 'step5', 'nrvDecision']).catch((e) => ({ verified: false, error: (e && e.message) || String(e) }));
+    if (!rv.verified && !rv.offline) verifyErr = `Không xác minh được kỳ ${p} trên cloud (${rv.error || 'không đọc được'}). Số dư đầu kỳ ${S.period} chưa được đối chiếu với số mới nhất của kỳ ${p}; kiểm tra kết nối rồi mở lại màn hình trước khi CLOSE.`;
+    const prevD = rv.d;
+    if (prevD) {
       if (op && wipFp(prevD.step3) !== op.wipFp) out.push(`Closing WIP kỳ ${p} đã thay đổi sau khi chuyển sang Opening WIP kỳ ${S.period} – roll forward lại.`);
       else if (op && !op.closedAt && isClosedIn(prevD, p)) out.push(`Opening WIP được chuyển khi kỳ ${p} chưa đóng; kỳ ${p} nay đã đóng – roll forward lại để dùng số chính thức.`);
-      else if (op && op.closedAt && !isClosedIn(prevD, p)) out.push(`Kỳ ${p} đã MỞ LẠI sau khi số dư được chuyển sang kỳ ${S.period} – đóng lại kỳ ${p}, rồi roll forward lại trước khi đóng kỳ ${S.period}.`);
+      else if (op && op.closedAt && !isClosedIn(prevD, p)) out.push(`Kỳ ${p} đã MỞ LẠI sau khi số dư được chuyển sang kỳ ${S.period} – đóng lại kỳ ${p}, rồi roll forward lại trước khi đóng kỳ này.`);
       if (bs && bfFp(bfRowsOf(prevD, p)) !== bs.bfFp) out.push(`Rework WIP cuối kỳ ${p} khác số đã chuyển sang B/F kỳ ${S.period}${isClosedIn(prevD, p) ? '' : ' (kỳ trước chưa đóng)'}.`);
-    } catch { /* previous period not available on this device */ }
+      if (fgRoll === p) { const fg = P3.fgOpenDrift(S, prevD, p); if (fg) out.push(fg); }
+    }
   }
-  const changed = JSON.stringify(out) !== JSON.stringify(S.prevDrift || []);
-  S.prevDrift = out;
+  const changed = JSON.stringify(out) !== JSON.stringify(S.prevDrift || []) || verifyErr !== (S.prevVerifyErr || '');
+  S.prevDrift = out; S.prevVerifyErr = verifyErr;
   if (changed) render();
 }
 
@@ -2060,7 +2092,7 @@ RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exp
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 PV.install({ loadPeriodData, S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow });
-DBV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, toast, render, derived: derivedNow, exportHachToan: () => exportHachToan(), loadStep5: (p) => store.localGet(lk(p, 'step5')), loadPeriodData, periods: () => S.allPeriods || S.periods || [], markDirty, audit, parseNum, guardEdit: guardMutate, closedGuard: () => P3.closedGuard(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này') });
+DBV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, toast, render, derived: derivedNow, exportHachToan: () => exportHachToan(), loadStep5: (p) => store.localGet(lk(p, 'step5')), loadPeriodData, readPeriod: (p, names) => readPeriodVerified(p, names), periods: () => S.allPeriods || S.periods || [], markDirty, audit, parseNum, guardEdit: guardMutate, closedGuard: () => P3.closedGuard(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này') });
 
 // ======================= boot =======================
 (async function boot() {

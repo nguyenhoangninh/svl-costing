@@ -1213,6 +1213,14 @@ eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP
   eq('customer name case: monthly trend filter matches any spelling', monthlyRevenue(db, null, { cust: 'Tectronic' }).get('2026-08').net, 50);
 }
 
+// ---- v1.14.86 (audit AUD-02 / 03 / NEW-05): which copy of another period may be trusted
+eq('read plan: not signed in → this device only (unverified)', SP.periodReadPlan({ signedIn: false }), 'OFFLINE');
+eq('read plan: cloud unreadable → error, local copy not trusted', SP.periodReadPlan({ signedIn: true, metaError: 'offline' }), 'ERROR');
+eq('read plan: period not on the cloud → local is the only copy', SP.periodReadPlan({ signedIn: true, meta: null }), 'NO_CLOUD');
+eq('read plan: local holds the latest revision → local', SP.periodReadPlan({ signedIn: true, meta: { rev: 7 }, localRev: 7 }), 'LOCAL');
+eq('read plan: local older than the cloud → read the cloud', SP.periodReadPlan({ signedIn: true, meta: { rev: 8 }, localRev: 7 }), 'CLOUD');
+eq('read plan: never synced on this device → read the cloud', SP.periodReadPlan({ signedIn: true, meta: { rev: 3 }, localRev: null }), 'CLOUD');
+
 // ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);

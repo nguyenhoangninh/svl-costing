@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.85', v === '1.14.85');
+ok('package version = 1.14.86', v === '1.14.86');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -45,5 +45,13 @@ ok('dashboard render test runs in npm test', String(pkg.scripts.test).includes('
 ok('CI runs the full npm test suite and the release contracts', /run: npm test\b/.test(ci) && ci.includes('node test/release-contract.mjs'));
 ok('CI lists no test that npm test leaves out (single test manifest)', ['nrv-decision', 'provision-logic', 'i18n-vi', 'export-form', 'xlsxstyle'].every((t) => String(pkg.scripts.test).includes(t)));
 
+// v1.14.86 (audit wave 2)
+const storeSrc = fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8');
+ok('AUD-02: previous period is read verified against the cloud revision', app.includes('async function readPeriodVerified(') && app.includes("readPeriodVerified(p, ['step3', 'register', 'closed', 'step5', 'nrvDecision'])") && storeSrc.includes('export async function cloudLoad(period, onProgress, names = null)'));
+ok('AUD-02: unverified previous period blocks CLOSE', phase3.includes('S.prevVerifyErr && !(d.closed && d.closed.period === S.period)) closeReason = S.prevVerifyErr;'));
+ok('AUD-02: FG / provision opening compared with last closing', phase3.includes('export function fgOpenDrift(') && app.includes('P3.fgOpenDrift(S, prevD, p)'));
+ok('AUD-03: REOPEN reads the next period status from the cloud', phase3.includes('nm = await A.cloudMeta(np)'));
+ok('NEW-05: dashboard comparison uses the verified reader', app.includes('readPeriod: (p, names) => readPeriodVerified(p, names)') && fs.readFileSync(new URL('../src/views/dashboard.js', import.meta.url), 'utf8').includes('A.readPeriod(p, [\'step5\'])'));
+ok('audit report kept with the code', fs.existsSync(new URL('../docs/audit/SVL_Costing_Audit_v1.14.86.docx', import.meta.url)));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
