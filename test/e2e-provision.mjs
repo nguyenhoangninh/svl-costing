@@ -31,7 +31,7 @@ await page.setInputFiles('#f-provopen', provPath);
 await page.waitForTimeout(1500);
 const toasts = await txt('#toasts');
 ok('a provision file that does not match the FG layers is refused with a message', toasts.includes('Chưa nạp dự phòng'));
-ok('a refused provision file leaves the page unchanged (no provision source)', (await txt('main')).includes('Chưa nạp. Nạp sau') === before.includes('Chưa nạp. Nạp sau'));
+ok('a refused provision file leaves the page unchanged (no provision source)', (await txt('main')).includes('Chưa có số dư đầu kỳ') === before.includes('Chưa có số dư đầu kỳ'));
 await page.screenshot({ path: path.join(outDir, 'provision-5p-1.png') });
 
 await page.goto(base + '#step5'); await page.waitForSelector('.kpis');
@@ -42,6 +42,12 @@ await page.goto(base + '#provision'); await page.waitForSelector('#f-provopen', 
 const body = await txt('main');
 ok('5P shows the FAST entries and the layer table', body.includes('Bút toán FAST') && body.includes('Theo dõi theo lớp'));
 ok('5P shows the rework block apart from the layer table', body.includes('Chuyển rework — tách riêng'));
+// v1.14.73: opening + increase (NRV approved) − decrease (release) = closing; NRV decision and carry-forward live in 5P
+ok('5P shows the movement: opening, increase (NRV), decrease (release), closing', body.includes('Số dư đầu kỳ') && body.includes('Tăng: NRV được duyệt') && body.includes('Giảm: hoàn nhập') && body.includes('Số dư cuối kỳ'));
+ok('5P has the carry-from-previous-period button', (await page.locator('#prov-carry').count()) === 1);
+ok('5P holds the NRV decision section', body.includes('Quyết định NRV trong kỳ'));
+await page.goto(base + '#close'); await page.waitForSelector('.result');
+ok('5.3 no longer has the NRV decision form', (await page.locator('#f-nrv-decision').count()) === 0);
 await page.screenshot({ path: path.join(outDir, 'provision-5p-2.png') });
 
 ok('no page errors', errors.length === 0);

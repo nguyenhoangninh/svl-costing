@@ -109,12 +109,95 @@ export function applyOpeningProvision(opening, parsed) {
 }
 
 /**
+ * NRV approved for the period (v1.14.73), spread over the closing layers in proportion to the proposal.
+ * decision = the CURRENT decision (the caller has checked its key) or null. Only RECORDED moves provision; the
+ * recorded amount may differ from the proposal, so each layer gets provNeed × recorded / proposed.
+ * Returns { byLayer: lid → credit added (+ add / − release), total, proposed, unallocated }.
+ * unallocated ≠ 0 when an amount was recorded but nothing was proposed (it cannot be placed on a layer).
+ */
+export function nrvApproved(closing, decision) {
+  const proposed = (closing || []).reduce((a, c) => a + num(c.provNeed), 0);
+  const byLayer = {};
+  if (!decision || utxt(decision.status) !== 'RECORDED') return { byLayer, total: 0, proposed, unallocated: 0 };
+  const rec = num(decision.recordedAmount ?? decision.amount);
+  if (Math.abs(proposed) < TOL) return { byLayer, total: rec, proposed, unallocated: rec };
+  const f = rec / proposed;
+  for (const c of closing || []) if (num(c.provNeed)) byLayer[ttxt(c.lid)] = num(c.provNeed) * f;
+  return { byLayer, total: rec, proposed, unallocated: 0 };
+}
+
+/**
+ * Provision balance at the end of a period, per closing layer (negative, as stored on the layers): what is left on
+ * the layer after the period's takes, plus the NRV approved for that period. This is next period's opening provision.
+ * Returns { layers: [{ lid, key, prov }], total } with total as a credit balance (positive).
+ */
+export function closingProvision(step5, decision) {
+  const add = nrvApproved((step5 && step5.closing) || [], decision).byLayer;
+  const layers = ((step5 && step5.closing) || []).map((c) => ({
+    lid: ttxt(c.lid), key: layerKey({ pc: c.pc, prod: c.prod, mo: c.mo, loc: c.loc, date: c.date, qty: c.qty }),
+    prov: num(c.prov) - num(add[ttxt(c.lid)]),
+  }));
+  return { layers, total: -layers.reduce((a, l) => a + l.prov, 0) };
+}
+
+/**
+ * Carry last period's closing provision into this period's opening FG layers (v1.14.73). Each opening row is
+ * matched by Layer ID, else by the 6-field layer key. Nothing changes unless every previous layer that carries
+ * provision finds exactly one opening row. Opening rows with no previous provision get 0.
+ * Returns { ok, errors, matched, sum, expected } (sum / expected as credit balances).
+ */
+export function carryOpeningProvision(opening, prevStep5, prevDecision) {
+  const errors = [];
+  if (!prevStep5 || !(prevStep5.closing || []).length) return { ok: false, errors: ['Kỳ trước chưa có FG cuối kỳ (STEP 5) trên hệ thống.'], matched: 0, sum: 0, expected: 0 };
+  const prev = closingProvision(prevStep5, prevDecision);
+  const rows = (opening && opening.rows) || [];
+  const byLid = new Map(), byKey = new Map();
+  rows.forEach((r, i) => {
+    const lid = ttxt(r.lid); if (lid) byLid.set(lid, [...(byLid.get(lid) || []), i]);
+    const k = layerKey({ pc: r.pc, prod: r.prod, mo: r.mo, loc: r.loc, date: r.date, qty: r.qty });
+    byKey.set(k, [...(byKey.get(k) || []), i]);
+  });
+  const put = new Map(); const missing = [];
+  for (const l of prev.layers) {
+    if (Math.abs(l.prov) <= 0.005) continue;
+    const hit = (l.lid && byLid.get(l.lid)) || byKey.get(l.key) || [];
+    if (hit.length !== 1) { missing.push(l.lid || l.key); continue; }
+    if (put.has(hit[0])) errors.push(`Lớp đầu kỳ dòng ${hit[0] + 1} khớp nhiều lớp cuối kỳ trước.`);
+    put.set(hit[0], l.prov);
+  }
+  if (missing.length) errors.push(`${missing.length} lớp cuối kỳ trước có dự phòng nhưng không khớp đúng một lớp FG đầu kỳ: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}.`);
+  const sum = -[...put.values()].reduce((a, v) => a + v, 0);
+  if (!errors.length && Math.abs(sum - prev.total) > TOL) errors.push(`Tổng chuyển sang ${sum.toFixed(0)} khác số dư cuối kỳ trước ${prev.total.toFixed(0)}.`);
+  if (errors.length) return { ok: false, errors, matched: 0, sum, expected: prev.total };
+  rows.forEach((r, i) => { r.prov = put.has(i) ? put.get(i) : 0; });
+  return { ok: true, errors: [], matched: put.size, sum, expected: prev.total };
+}
+
+/**
+ * Period summary of TK 2294 (credit positive), the way accounting reads it (v1.14.73):
+ *   opening + increase (NRV approved this period) − decrease (release on sales and internal use, net of sales
+ *   returns) = closing on the books. The rework part is shown apart: it has left the FG layers but is not posted,
+ *   so closing on the books = FG layers closing + rework pending.
+ */
+export function provisionMovement(track, approved = null) {
+  const T = track.totals;
+  const increase = T.nrvAdj + num(approved && approved.unallocated);
+  const decrease = T.relSale + T.relCons - T.restore;
+  const closeBooks = T.open + increase - decrease;
+  const closeLayers = T.close + num(approved && approved.unallocated);
+  const check = closeBooks - T.relRw - closeLayers;
+  return { open: T.open, increase, nrvProposed: T.nrvProp, decrease, relSale: T.relSale, relCons: T.relCons, restore: T.restore,
+    rework: T.relRw, closeBooks, closeLayers, check, ok: Math.abs(check) <= TOL && track.ok };
+}
+
+/**
  * Per-layer provision roll-forward for the period (credit balance = −provision; movements positive = credit increase).
  * res = output of runFIFO after closing (ledger, closing, detail with prov per take).
+ * nrvAdd = NRV approved per layer (nrvApproved().byLayer); the proposal is kept apart in nrvProp (information only).
  * Columns: open (opening layers) + restore (sales returns put back) − sale release − consumption release − rework
- * (pending entry) + NRV true-up = close. Returns { rows, totals, check }.
+ * (pending entry) + NRV approved = close. Returns { rows, totals, check }.
  */
-export function provisionTrack(res) {
+export function provisionTrack(res, nrvAdd = {}) {
   const takes = new Map(); // lid → { sale, cons } (negative provision taken)
   for (const d of res.detail || []) {
     const k = ttxt(d.lid); const t = takes.get(k) || { sale: 0, cons: 0 };
@@ -123,7 +206,8 @@ export function provisionTrack(res) {
   }
   const closeBy = new Map((res.closing || []).map((c) => [ttxt(c.lid), c]));
   const rows = [];
-  const T = { open: 0, restore: 0, relSale: 0, relCons: 0, relRw: 0, nrvAdj: 0, closePre: 0, close: 0 };
+  const T = { open: 0, restore: 0, relSale: 0, relCons: 0, relRw: 0, nrvProp: 0, nrvAdj: 0, closePre: 0, close: 0 };
+  const add = nrvAdd || {};
   for (const l of res.ledger || []) {
     const lid = ttxt(l.lid);
     const prov = num(l.prov), provOut = num(l.provOut);
@@ -134,13 +218,14 @@ export function provisionTrack(res) {
     const restore = l.source === 'RETURN' ? -prov : 0;
     const relSale = -t.sale, relCons = -t.cons, relRw = -rwTake;
     const closePre = -(prov - provOut);
-    const nrvAdj = c ? num(c.provNeed) : 0;
+    const nrvProp = c ? num(c.provNeed) : 0;
+    const nrvAdj = num(add[lid]);
     const close = closePre + nrvAdj;
     const remQ = num(l.remQ);
     const row = { lid, source: l.source, pc: ttxt(l.pc), prod: utxt(l.prod), loc: ttxt(l.loc), date: l.date, mo: ttxt(l.mo), qtyIn: num(l.qtyIn), qtyRem: remQ,
-      open, restore, relSale, relCons, relRw, closePre, nrvAdj, close, nrvUnit: c ? num(c.nrvUnit) : null };
-    if ([open, restore, relSale, relCons, relRw, nrvAdj, closePre].some((v) => Math.abs(v) > 0.005)) rows.push(row);
-    T.open += open; T.restore += restore; T.relSale += relSale; T.relCons += relCons; T.relRw += relRw; T.nrvAdj += nrvAdj; T.closePre += closePre; T.close += close;
+      open, restore, relSale, relCons, relRw, closePre, nrvProp, nrvAdj, close, nrvUnit: c ? num(c.nrvUnit) : null };
+    if ([open, restore, relSale, relCons, relRw, nrvProp, nrvAdj, closePre].some((v) => Math.abs(v) > 0.005)) rows.push(row);
+    T.open += open; T.restore += restore; T.relSale += relSale; T.relCons += relCons; T.relRw += relRw; T.nrvProp += nrvProp; T.nrvAdj += nrvAdj; T.closePre += closePre; T.close += close;
   }
   const check = T.open + T.restore - T.relSale - T.relCons - T.relRw - T.closePre;
   return { rows, totals: T, check, ok: Math.abs(check) <= TOL };
@@ -156,7 +241,7 @@ export function provisionJournal(track, nrvRecorded = 0) {
     { code: 'PROV-SALE', desc: 'Hoàn nhập dự phòng theo giá vốn hàng bán (FIFO)', dr: PROV_ACC, cr: PROV_COST_ACC, amount: T.relSale },
     { code: 'PROV-CONS', desc: 'Hoàn nhập dự phòng theo tiêu dùng nội bộ FG', dr: PROV_ACC, cr: PROV_COST_ACC, amount: T.relCons },
     { code: 'PROV-RETURN', desc: 'Phục hồi dự phòng theo hàng bán bị trả lại', dr: PROV_COST_ACC, cr: PROV_ACC, amount: T.restore },
-    { code: 'PROV-NRV', desc: 'Trích lập / hoàn nhập dự phòng NRV (quyết định STEP 5.3)', dr: nrvRecorded >= 0 ? PROV_COST_ACC : PROV_ACC, cr: nrvRecorded >= 0 ? PROV_ACC : PROV_COST_ACC, amount: Math.abs(num(nrvRecorded)) },
+    { code: 'PROV-NRV', desc: 'Trích lập / hoàn nhập dự phòng NRV (quyết định đã duyệt ở 5P)', dr: nrvRecorded >= 0 ? PROV_COST_ACC : PROV_ACC, cr: nrvRecorded >= 0 ? PROV_ACC : PROV_COST_ACC, amount: Math.abs(num(nrvRecorded)) },
   ];
   for (const l of lines) l.amount = Math.round(num(l.amount));
   const pending = { code: 'PROV-REWORK', desc: 'Dự phòng chuyển vào rework — CHƯA GHI SỔ, chờ quyết định kế toán', amount: Math.round(T.relRw) };

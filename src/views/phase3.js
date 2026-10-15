@@ -48,6 +48,23 @@ export function returnStepStatus(S, D5) {
   return rc && rc.status === 'BLOCK' ? 'BLOCK' : rc && rc.status === 'REVIEW' ? 'PASS WITH REVIEW' : 'PASS';
 }
 /** NRV amount recorded in FAST for this STEP 5 result (signed; 0 when no current RECORDED decision). */
+/** The NRV decision that still belongs to this STEP 5 result, or null. */
+export const currentNrv = (S, res) => (res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
+/** NRV approved for this STEP 5 result, spread over the closing layers (v1.14.73; see PROV.nrvApproved). */
+export function nrvApprovedFor(S, res) {
+  return PROV.nrvApproved((res && res.closing) || [], res ? currentNrvDecision(S.d.nrvDecision, nrvKey(res)) : null);
+}
+/** Layer provision to add when a period's closing becomes the next opening (negative = more provision). */
+const nrvCarryAdd = (step5, decision) => {
+  const cur = step5 && decision && decision.key === nrvKey(step5) ? decision : null;
+  const by = PROV.nrvApproved((step5 && step5.closing) || [], cur).byLayer;
+  return Object.fromEntries(Object.entries(by).map(([lid, v]) => [lid, -v]));
+};
+/** Opening provision taken over from the previous period's closing (v1.14.73). */
+const carriedSource = (step5, decision, prev, by) => {
+  const c = PROV.closingProvision(step5, step5 && decision && decision.key === nrvKey(step5) ? decision : null);
+  return { kind: 'CARRY', from: prev, expected: c.total, sum: c.total, count: c.layers.filter((l) => Math.abs(l.prov) > 0.005).length, by, at: nowISO() };
+};
 export function nrvRecordedAmount(S, res) {
   const nd = S.d.nrvDecision;
   return nd && res && nd.key === nrvKey(res) && utxt(nd.status) === 'RECORDED' ? num(nd.recordedAmount ?? nd.amount) : 0;
@@ -160,7 +177,7 @@ export function derive(S, p2) {
   if (!closeReason && res && res.withReturns && res.returnControl && res.returnControl.status === 'BLOCK') closeReason = `STEP 5R Sales Return còn ${res.returnControl.blocked} giao dịch chưa xử lý đầy đủ (invoice gốc / số lượng / COGS reversal).`;
   if (!closeReason && res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 && !(d.closed && d.closed.period === S.period)) {
     const nd = d.nrvDecision, key = nrvKey(res);
-    if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
+    if (!nd || nd.key !== key || !['RECORDED', 'NO ADJUSTMENT APPROVED'].includes(utxt(nd.status))) closeReason = `NRV đề xuất dự phòng ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định kế toán hiện hành ở 5P (RECORDED hoặc NO ADJUSTMENT APPROVED).`;
   }
   if (!closeReason && res && tie && !(d.closed && d.closed.period === S.period)) {
     if (!tie.entered) closeReason = 'Chưa nhập số dư / phát sinh FAST 154 / 155 / 2294 / 632 / 511 / 5212 / 5213 (STEP 5.3 → tab Đối chiếu FAST).';
@@ -375,13 +392,9 @@ export async function doRollOpen() {
   }
   if (S.d.fgOpen && S.d.fgOpen.rows.length && !confirm(`FG đầu kỳ đã có dữ liệu. Thay bằng FG cuối kỳ ${prev}?`)) return;
   try {
-    // NRV provision recorded at the previous close is carried into the layers, so it is not proposed again this month.
-    const nd = pd.nrvDecision; let provAdd = null;
-    if (nd && utxt(nd.status) === 'RECORDED' && nd.key === nrvKey(pd.step5)) {
-      const need = num(nd.amount), rec = num(nd.recordedAmount ?? nd.amount), f = need ? rec / need : 0;
-      provAdd = Object.fromEntries((pd.step5.closing || []).filter((c) => num(c.provNeed) !== 0).map((c) => [c.lid, -num(c.provNeed) * f]));
-    }
-    S.d.fgOpen = F5.openingFromClosing(pd.step5, S.period, reason, provAdd);
+    // the provision balance at the previous close (layers + NRV approved there) becomes this period's opening provision
+    S.d.fgOpen = F5.openingFromClosing(pd.step5, S.period, reason, nrvCarryAdd(pd.step5, pd.nrvDecision));
+    S.d.fgOpen.provSource = carriedSource(pd.step5, pd.nrvDecision, prev, A.who());
     refreshFgRef(S);
     A.audit('STEP 5 - ROLL FORWARD OPENING FG', `Layers=${S.d.fgOpen.stats.layers}; Amount=${A.fmtNum(S.d.fgOpen.stats.amt)}`);
     A.markDirty('fgOpen', 'fgRef', 'audit');
@@ -761,7 +774,7 @@ function refreshFgRef(S) {
 }
 
 // ======================= 5.3 FG History & close =======================
-function nrvDecisionHTML(S, res, closed) {
+export function nrvDecisionHTML(S, res, closed) {
   const amt = num(res.totals && res.totals.nrvProv), key = nrvKey(res);
   const d = currentNrvDecision(S.d.nrvDecision, key), current = !!d;
   const summary = current ? `<div class="alert info"><b>NRV: ${esc(d.status)}</b> · yêu cầu ${A.fmtNum(d.amount)} VND${utxt(d.status) === 'RECORDED' ? ' · đã ghi ' + A.fmtNum(num(d.recordedAmount ?? d.amount)) + ' VND' : ''} · ${esc(d.by || '')} · ${A.fmtTs(d.at)}${d.ref ? ' · Ref ' + esc(d.ref) : ''}<br><span class="muted">${esc(d.note || '')}</span></div>` : `<div class="alert review"><b>NRV provision đề xuất: ${A.fmtNum(amt)} VND.</b> Cần quyết định kế toán trước khi CLOSE MONTH. Quyết định cũ (nếu có) không còn hiệu lực khi số liệu STEP 5 thay đổi.</div>`;
@@ -769,25 +782,8 @@ function nrvDecisionHTML(S, res, closed) {
   const undo = current ? '<div class="row"><button class="btn danger ghost" type="button" id="nrv-undo">Hoàn tác quyết định NRV</button></div>' : '';
   return summary + undo + `<form id="f-nrv-decision" class="inline"><label>Quyết định NRV <select name="status"><option value="">-- chọn --</option><option>RECORDED</option><option>NO ADJUSTMENT APPROVED</option></select></label><label>Số đã ghi FAST (VND)<input name="recordedAmount" inputmode="decimal" value="${A.fmtNum(amt)}"></label><label>Tham chiếu kế toán<input name="ref" placeholder="JV / FAST ref"></label><label style="flex:1">Giải trình<input name="note" placeholder="Lý do / bằng chứng review" style="min-width:260px"></label><button class="btn" type="submit">Lưu quyết định NRV</button></form>`;
 }
-export function viewClose(el) {
-  const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
-  const closed = d.closed && d.closed.period === S.period;
-  const H = d.fgHistory; const tab = S.tabH || 'gate';
-  el.innerHTML = `<section class="page">
-    <header class="ph"><div><h1>STEP 5.3 · FG History &amp; đóng kỳ</h1><p class="lead">FG History lưu toàn bộ lịch sử lô đã bán (cộng dồn qua các kỳ) và ảnh chụp FG cuối kỳ. Đóng kỳ chỉ được khi STEP 5 CURRENT, Batch 7 PASS, FG History khớp và Final Production Status = READY.</p></div>
-      <div class="result"><span>Final status</span>${A.pill(closed ? 'CLOSED' : recon.finalStatus)}<small>${closed ? `Đóng ${A.fmtTs(d.closed.closedAt)}` : `Cổng đóng kỳ: ${esc(recon.closeGate)}`}</small></div></header>
-    ${closed ? `<div class="alert pass"><b>Kỳ ${esc(S.period)} đã đóng</b> lúc ${A.fmtTs(d.closed.closedAt)} bởi ${esc(d.closed.closedBy)} · trạng thái ${esc(d.closed.status)}. Tạo kỳ ${esc(nextP(S.period))} rồi Roll forward FG đầu kỳ.</div>` : ''}
-    <div class="row">
-      <button class="btn" data-act="s5-hist" type="button" ${res ? '' : 'disabled'}>BUILD FG HISTORY</button>
-      <button class="btn" data-act="s5-close" type="button" ${closed || !A.isAdmin() ? 'disabled' : ''} title="${A.isAdmin() ? '' : 'Chỉ quản trị viên được đóng kỳ'}">CLOSE MONTH${A.isAdmin() ? '' : ' (quản trị viên)'}</button>
-      ${closed && A.isAdmin() ? '<button class="btn danger ghost" data-act="s5-reopen" type="button">Mở lại kỳ…</button>' : ''}
-      <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
-    </div>
-    ${!closed && D5.closeReason && res ? `<div class="alert review"><b>Chưa đóng được:</b> ${esc(D5.closeReason)}</div>` : ''}
-    ${res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 ? nrvDecisionHTML(S, res, closed) : ''}
-    <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
-    ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
-    <div id="th"></div></section>`;
+/** NRV decision block (v1.14.73: shown in 5P). Call after the HTML from nrvDecisionHTML is in el. */
+export function mountNrvDecision(el, S, res) {
   const nrvNow = nrvKey(res), fmtN = (v) => A.fmtNum(num(v));
   const nf = el.querySelector('#f-nrv-decision');
   if (nf) nf.addEventListener('submit', (e) => {
@@ -820,6 +816,26 @@ export function viewClose(el) {
     A.toast('Đã hoàn tác quyết định NRV. Cần quyết định NRV mới trước khi đóng kỳ.', 'review');
     A.render();
   });
+}
+export function viewClose(el) {
+  const S = A.S; const d = S.d; const D5 = A.derived().d5; const { recon, hg, res } = D5;
+  const closed = d.closed && d.closed.period === S.period;
+  const H = d.fgHistory; const tab = S.tabH || 'gate';
+  el.innerHTML = `<section class="page">
+    <header class="ph"><div><h1>STEP 5.3 · FG History &amp; đóng kỳ</h1><p class="lead">FG History lưu toàn bộ lịch sử lô đã bán (cộng dồn qua các kỳ) và ảnh chụp FG cuối kỳ. Đóng kỳ chỉ được khi STEP 5 CURRENT, Batch 7 PASS, FG History khớp và Final Production Status = READY.</p></div>
+      <div class="result"><span>Final status</span>${A.pill(closed ? 'CLOSED' : recon.finalStatus)}<small>${closed ? `Đóng ${A.fmtTs(d.closed.closedAt)}` : `Cổng đóng kỳ: ${esc(recon.closeGate)}`}</small></div></header>
+    ${closed ? `<div class="alert pass"><b>Kỳ ${esc(S.period)} đã đóng</b> lúc ${A.fmtTs(d.closed.closedAt)} bởi ${esc(d.closed.closedBy)} · trạng thái ${esc(d.closed.status)}. Tạo kỳ ${esc(nextP(S.period))} rồi Roll forward FG đầu kỳ.</div>` : ''}
+    <div class="row">
+      <button class="btn" data-act="s5-hist" type="button" ${res ? '' : 'disabled'}>BUILD FG HISTORY</button>
+      <button class="btn" data-act="s5-close" type="button" ${closed || !A.isAdmin() ? 'disabled' : ''} title="${A.isAdmin() ? '' : 'Chỉ quản trị viên được đóng kỳ'}">CLOSE MONTH${A.isAdmin() ? '' : ' (quản trị viên)'}</button>
+      ${closed && A.isAdmin() ? '<button class="btn danger ghost" data-act="s5-reopen" type="button">Mở lại kỳ…</button>' : ''}
+      <span class="muted">${H ? `History đến ${esc(H.through)} · tạo ${A.fmtTs(H.builtAt)}` : 'Chưa có FG History.'}</span>
+    </div>
+    ${!closed && D5.closeReason && res ? `<div class="alert review"><b>Chưa đóng được:</b> ${esc(D5.closeReason)}</div>` : ''}
+    ${res && Math.abs(num(res.totals && res.totals.nrvProv)) > 1 && !currentNrvDecision(d.nrvDecision, nrvKey(res)) ? `<div class="alert review"><b>NRV đề xuất ${A.fmtNum(res.totals.nrvProv)} VND chưa có quyết định.</b> Quyết định NRV nằm ở <a href="#provision">5P · Dự phòng FG</a>.</div>` : ''}
+    <div class="kpis">${A.kpiN('Dòng history', H ? H.rows.length : null)}${A.kpiN('Đã bán các kỳ trước', hg.prior)}${A.kpiN('COGS kỳ này (lớp)', hg.curCOGS)}${A.kpiN('FG cuối kỳ (lớp)', hg.curClose)}<div class="kpi"><span>Archive gate</span><b>${A.pill(hg.gate)}</b></div></div>
+    ${tabsHTML(tab, [['gate', 'Cổng đóng kỳ'], ['fast', `Đối chiếu FAST${D5.tie ? ' · ' + (D5.tie.status === 'PASS' ? 'khớp' : D5.tie.status === 'APPROVED' ? 'đã xác nhận' : D5.tie.status === 'NOT ENTERED' ? 'chưa nhập' : 'lệch') : ''}`], ['hist', 'FG History'], ['b7', 'Batch 7 – giá thành → FIFO']], 'data-tabh')}
+    <div id="th"></div></section>`;
     el.querySelectorAll('[data-tabh]').forEach((b) => b.addEventListener('click', () => { S.tabH = b.dataset.tabh; A.render(); }));
   const box = el.querySelector('#th');
   if (tab === 'gate') {
@@ -1050,7 +1066,11 @@ export function carryForward(prev, newPeriod) {
   if (prev.fgItems) out.fgItems = prev.fgItems;
   if (prev.s5cfg) out.s5cfg = prev.s5cfg;
   if (prev.step5 && prev.closed && prev.closed.period === prev.step5.period && prevPeriod(newPeriod) === prev.step5.period) {
-    try { out.fgOpen = F5.openingFromClosing(prev.step5, newPeriod, ''); } catch { /* not reconciled */ }
+    try {
+      // v1.14.73: the NRV approved at the previous close goes with the layers, and 5P sees the opening provision as carried
+      out.fgOpen = F5.openingFromClosing(prev.step5, newPeriod, '', nrvCarryAdd(prev.step5, prev.nrvDecision));
+      out.fgOpen.provSource = carriedSource(prev.step5, prev.nrvDecision, prev.step5.period, 'carry');
+    } catch { /* not reconciled */ }
   }
   return out;
 }

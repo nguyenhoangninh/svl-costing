@@ -15,6 +15,51 @@ export const EN = {
 "NRV RECORDED cần tham chiếu kế toán / số bút toán (Journal No.).": "NRV RECORDED needs an accounting reference or journal number (Journal No.).",
 "Điền tham chiếu kế toán, ngày ghi sổ, người ghi sau khi đã hạch toán trên FAST.": "Fill in the accounting reference, posting date and the person who posted it after booking in FAST.",
 "DIRECT_632 chỉ là đề xuất hạch toán – không vào PC-P hay WIP Allocation. Điền tham chiếu kế toán, ngày ghi sổ, người ghi sau khi đã hạch toán trên FAST.": "DIRECT_632 is only a posting proposal – it does not enter PC-P or WIP Allocation. Fill in the accounting reference, posting date and the person who posted it after booking in FAST.",
+// v1.14.73: 5P · provision roll-forward (opening + NRV approved − release = closing), carry from the previous period, NRV decision in 5P
+"Số dư cuối kỳ = đầu kỳ + tăng (NRV được duyệt trong kỳ) − giảm (hoàn nhập theo sản phẩm bán ra và tiêu dùng nội bộ, trừ hàng bán trả lại). Số dư cuối kỳ chuyển sang đầu kỳ sau. Dự phòng đi theo hàng chuyển rework được tách riêng và chưa ghi sổ.": "Closing balance = opening + increase (NRV approved in the period) − decrease (release on products sold and used internally, net of sales returns). The closing balance carries to next period's opening. Provision that goes with goods moved to rework is kept apart and not posted.",
+"Chưa có dự phòng đầu kỳ": "No opening provision",
+"Chuyển từ kỳ trước": "Carry from previous period",
+"Chuyển từ kỳ trước ({#})": "Carry from previous period ({#})",
+"Nạp dự phòng đầu kỳ (template)…": "Load opening provision (template)…",
+"Mở FG đầu kỳ ({#})": "Open opening FG ({#})",
+"Chưa có số dư đầu kỳ. Nếu kỳ trước đã có số liệu trên hệ thống, bấm": "No opening balance yet. If the previous period has data in the system, click",
+"; nếu không, nạp template PROVISION_OPENING (mỗi dòng phải khớp đúng một lớp FG đầu kỳ).": "; otherwise load the PROVISION_OPENING template (each line must match exactly one opening FG layer).",
+"2 · Tăng · Quyết định NRV trong kỳ": "2 · Increase · NRV decision for the period",
+"NRV đề xuất từ FIFO ({#}): {#} VND (+ trích lập / − hoàn nhập). Chỉ quyết định": "NRV proposed by FIFO ({#}): {#} VND (+ add / − release). Only a",
+"mới làm tăng dự phòng; số đã ghi FAST được phân bổ xuống từng lớp theo tỷ lệ đề xuất.": "decision changes the provision; the amount booked in FAST is spread over the layers in proportion to the proposal.",
+"= không thay đổi.": "= no change.",
+"Kỳ này không có NRV đề xuất (không lớp FG cuối kỳ nào có giá vốn sau dự phòng cao hơn NRV).": "No NRV proposal this period (no closing FG layer has a cost after provision above NRV).",
+"3 · Biến động TK 2294": "3 · TK 2294 movement",
+"Tăng (NRV duyệt)": "Increase (NRV approved)",
+"Giảm (hoàn nhập)": "Decrease (release)",
+"Theo file upload": "From the uploaded file",
+"Chuyển từ cuối kỳ trước": "Carried from previous closing",
+"Có sẵn trên lớp FG đầu kỳ, chưa xác nhận nguồn (upload hoặc chuyển từ kỳ trước)": "Already on the opening FG layers, source not confirmed (upload or carry from previous period)",
+"Chưa có": "None",
+"(+) Tăng: NRV được duyệt trong kỳ": "(+) Increase: NRV approved in the period",
+"Chưa có quyết định – đề xuất {#}": "No decision yet – proposed {#}",
+"Đề xuất {#}": "Proposed {#}",
+"(−) Giảm: hoàn nhập dự phòng": "(−) Decrease: provision released",
+"= bán + tiêu dùng − trả hàng": "= sales + internal use − returns",
+"· Hoàn nhập theo sản phẩm bán ra": "· Release on products sold",
+"· Hoàn nhập theo tiêu dùng nội bộ": "· Release on internal use",
+"· Trừ: hàng bán bị trả lại (phục hồi)": "· Less: sales returns (restored)",
+"Số dư cuối kỳ": "Closing balance",
+"= đầu + tăng − giảm": "= opening + increase − decrease",
+"Chuyển sang đầu kỳ sau": "Carried to next period's opening",
+"Trong đó: trên lớp FG cuối kỳ": "Of which: on closing FG layers",
+"Trong đó: đi theo hàng chuyển rework (mục 4)": "Of which: with goods moved to rework (section 4)",
+"Chưa ghi sổ": "Not posted",
+"Trích lập / hoàn nhập dự phòng NRV (quyết định đã duyệt ở 5P)": "NRV provision add / release (decision approved in 5P)",
+"NRV đã duyệt (tăng)": "NRV approved (increase)",
+"4 · Chuyển rework — tách riêng, chưa ghi sổ": "4 · Moved to rework — kept apart, not posted",
+"NRV đề xuất {#} VND chưa có quyết định.": "NRV proposed {#} VND has no decision yet.",
+"Quyết định NRV nằm ở": "The NRV decision is in",
+"Dự phòng đầu kỳ đã có nhưng FG đầu kỳ chưa validate lại. Vào": "Opening provision is in place but the opening FG has not been validated again. Go to",
+"→ Validate, rồi chạy lại FIFO ({#}).": "→ Validate, then run FIFO again ({#}).",
+"Nạp hoặc roll forward FG đầu kỳ ({#}) trước, rồi chuyển dự phòng.": "Load or roll forward the opening FG ({#}) first, then carry the provision.",
+"Kỳ trước chưa có FG cuối kỳ (STEP {#}) trên hệ thống.": "The previous period has no closing FG (STEP {#}) in the system.",
+"Chuyển cùng FG đầu kỳ (roll forward từ kỳ trước) · trên lớp FG": "Carried with the opening FG (roll forward from previous period) · on FG layers",
 // v1.14.72: remaining UI strings (provision messages, STEP 2 rule labels, install help, dialogs)
 "Chưa nạp dự phòng:": "Provision not loaded:",
 "Nạp dự phòng lỗi:": "Opening provision load failed:",
@@ -2910,6 +2955,66 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+[
+"File {*} · {*} dòng · tổng {*} VND = sổ cái {*} · trên lớp FG {*} · nạp {*}",
+"File {*} · {*} lines · total {*} VND = GL {*} · on FG layers {*} · loaded {*}"
+],
+[
+"Chuyển cùng FG đầu kỳ (roll forward từ kỳ trước) · trên lớp FG {*} VND.",
+"Carried with the opening FG (roll forward from previous period) · on FG layers {*} VND."
+],
+[
+"Chuyển từ số dư cuối kỳ {*} · {*} lớp · {*} VND · trên lớp FG {*} · {*}",
+"Carried from the {*} closing balance · {*} layers · {*} VND · on FG layers {*} · {*}"
+],
+[
+"Đầu kỳ khác số dư cuối kỳ {*}:",
+"Opening differs from the {*} closing balance:"
+],
+[
+"chênh {*} VND. Bấm Chuyển từ kỳ trước để lấy lại.",
+"difference {*} VND. Click Carry from previous period to take it again."
+],
+[
+"NRV đã ghi {*} VND nhưng kỳ này không có NRV đề xuất để phân bổ xuống lớp. Kiểm tra lại quyết định NRV.",
+"NRV booked {*} VND but there is no NRV proposal this period to spread over the layers. Check the NRV decision."
+],
+[
+"Kỳ {*} chưa có số liệu STEP 5 trên hệ thống. Nạp dự phòng đầu kỳ bằng template.",
+"Period {*} has no STEP 5 data in the system. Load the opening provision with the template."
+],
+[
+"Kỳ {*} chưa đóng, số dư cuối kỳ có thể còn thay đổi. Vẫn chuyển sang đầu kỳ {*}?",
+"Period {*} is not closed, its closing balance may still change. Carry it to the {*} opening anyway?"
+],
+[
+"Đầu kỳ đã có dự phòng ({*}). Thay bằng số dư cuối kỳ {*}?",
+"The opening already has provision ({*}). Replace it with the {*} closing balance?"
+],
+[
+"Chưa chuyển được: {*}",
+"Not carried: {*}"
+],
+[
+"Đã chuyển dự phòng {*} VND ({*} lớp) từ {*}. Bước tiếp: Validate FG đầu kỳ ({*}).",
+"Provision {*} VND ({*} layers) carried from {*}. Next: Validate opening FG ({*})."
+],
+[
+"Lớp đầu kỳ dòng {*} khớp nhiều lớp cuối kỳ trước.",
+"Opening layer on line {*} matches several previous closing layers."
+],
+[
+"{*} lớp cuối kỳ trước có dự phòng nhưng không khớp đúng một lớp FG đầu kỳ: {*}.",
+"{*} previous closing layers carry provision but do not match exactly one opening FG layer: {*}."
+],
+[
+"Tổng chuyển sang {*} khác số dư cuối kỳ trước {*}.",
+"Total carried {*} differs from the previous closing balance {*}."
+],
+[
+"NRV đề xuất dự phòng {*} VND chưa có quyết định kế toán hiện hành ở 5P (RECORDED hoặc NO ADJUSTMENT APPROVED).",
+"The proposed NRV provision of {*} VND has no current accounting decision in 5P (RECORDED or NO ADJUSTMENT APPROVED)."
+],
 // v1.14.72: messages with values (provision import, dialogs, notifications, tabs, install help)
 ["Không thấy template dự phòng (A1 = SVL_PROVISION_OPENING_TEMPLATE) trong {*}.", "No provision template found (A1 = SVL_PROVISION_OPENING_TEMPLATE) in {*}."],
 ["Dòng {*}: Kỳ '{*}' khác kỳ đang mở {*}.", "Line {*}: period '{*}' differs from the open period {*}."],

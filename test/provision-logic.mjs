@@ -2,7 +2,7 @@
 // RM split, roll-forward and the opening provision file. Hand-checked numbers; no company data.
 // Run: node test/provision-logic.mjs
 import * as F5 from '../src/engine/step5.js';
-import { nrvNeed, layerKey, parseOpeningProvision, applyOpeningProvision, provisionTrack, provisionJournal, PROV_ACC, PROV_COST_ACC } from '../src/engine/provision.js';
+import { nrvNeed, layerKey, parseOpeningProvision, applyOpeningProvision, provisionTrack, provisionJournal, nrvApproved, provisionMovement, closingProvision, carryOpeningProvision, PROV_ACC, PROV_COST_ACC } from '../src/engine/provision.js';
 import { fgLayerSheet, provisionTrackSheet, provisionJournalSheet } from '../src/engine/exportform.js';
 
 let total = 0, fail = 0;
@@ -113,7 +113,34 @@ const tr = provisionTrack(ret);
 ok('provision roll-forward ties per period (opening + restore − releases = closing before NRV)', tr.ok && Math.abs(tr.check) <= 1);
 ok('roll-forward totals: opening 700,000 (both layers), restore 60,000, release 360,000', near(tr.totals.open, 700000) && near(tr.totals.restore, 60000) && near(tr.totals.relSale, 360000));
 const trA = tr.rows.find((r) => r.lid === 'OP-A');
-ok('layer A: open 600,000, release 360,000, pre-NRV 240,000, NRV +172,000, close 412,000', trA && near(trA.open, 600000) && near(trA.relSale, 360000) && near(trA.closePre, 240000) && near(trA.nrvAdj, 172000) && near(trA.close, 412000));
+ok('layer A without a decision: NRV proposal kept apart (+172,000), nothing approved, close 240,000', trA && near(trA.open, 600000) && near(trA.relSale, 360000) && near(trA.closePre, 240000) && near(trA.nrvProp, 172000) && near(trA.nrvAdj, 0) && near(trA.close, 240000));
+
+// ---- v1.14.73: increase = NRV approved (RECORDED), spread over the layers in proportion to the proposal
+const recFull = { status: 'RECORDED', amount: 115000, recordedAmount: 115000 }; // proposal: A +172,000, C −100,000, return layer +43,000
+const ap = nrvApproved(ret.closing, recFull);
+ok('NRV approved in full: each layer gets its proposal (A +172,000, C −100,000, return +43,000)', near(ap.proposed, 115000) && near(ap.byLayer['OP-A'], 172000) && near(ap.byLayer['OP-C'], -100000) && near(ap.total, 115000));
+const apHalf = nrvApproved(ret.closing, { status: 'RECORDED', amount: 115000, recordedAmount: 57500 });
+ok('NRV recorded at half the proposal is spread in proportion (A +86,000, C −50,000)', near(apHalf.byLayer['OP-A'], 86000) && near(apHalf.byLayer['OP-C'], -50000));
+ok('NO ADJUSTMENT APPROVED or no decision: nothing approved', Object.keys(nrvApproved(ret.closing, { status: 'NO ADJUSTMENT APPROVED' }).byLayer).length === 0 && nrvApproved(ret.closing, null).total === 0);
+const trOk = provisionTrack(ret, ap.byLayer);
+ok('layer A with NRV approved: close 240,000 + 172,000 = 412,000', near(trOk.rows.find((r) => r.lid === 'OP-A').close, 412000));
+const mv = provisionMovement(trOk, ap);
+ok('movement: opening 700,000 + increase 115,000 − decrease (360,000 − 60,000) = closing 515,000', near(mv.open, 700000) && near(mv.increase, 115000) && near(mv.decrease, 300000) && near(mv.closeBooks, 515000) && mv.ok);
+ok('movement: closing on the layers = closing on the books when nothing went to rework', near(mv.closeLayers, mv.closeBooks) && near(mv.rework, 0));
+ok('movement without a decision: no increase, closing = 700,000 − 300,000', near(provisionMovement(tr, nrvApproved(ret.closing, null)).closeBooks, 400000));
+
+// ---- v1.14.73: closing provision carried to next period's opening
+const prevS5 = { closing: ret.closing };
+ok('closing provision (next opening) = layers + NRV approved = 515,000', near(closingProvision(prevS5, recFull).total, 515000));
+const nextOpen = { rows: ret.closing.map((c) => ({ ...c, prov: 0 })) };
+const car = carryOpeningProvision(nextOpen, prevS5, recFull);
+ok('carry onto a rolled-forward opening (same Layer IDs): opening = previous closing 515,000', car.ok && near(car.sum, 515000) && near(-nextOpen.rows.reduce((a, r) => a + r.prov, 0), 515000));
+const nextFile = { rows: ret.closing.map((c) => ({ pc: c.pc, prod: c.prod, mo: c.mo, loc: c.loc, date: c.date, qty: c.qty, prov: 0 })) };
+ok('carry onto a file-imported opening matches on the 6-field layer key', carryOpeningProvision(nextFile, prevS5, recFull).ok && near(-nextFile.rows.reduce((a, r) => a + r.prov, 0), 515000));
+const short = { rows: ret.closing.filter((c) => c.lid !== 'OP-A').map((c) => ({ pc: c.pc, prod: c.prod, mo: c.mo, loc: c.loc, date: c.date, qty: c.qty, prov: 0 })) };
+const carShort = carryOpeningProvision(short, prevS5, recFull);
+ok('carry refused when a layer with provision has no opening row (nothing changed)', !carShort.ok && short.rows.every((r) => r.prov === 0));
+ok('carry refused when the previous period has no STEP 5', !carryOpeningProvision(nextFile, null, null).ok);
 
 // ---- journal for FAST: sale release, return put-back, NRV recorded by decision
 const jr = provisionJournal(tr, 115000);

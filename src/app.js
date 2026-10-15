@@ -1624,9 +1624,11 @@ async function exportAll() {
     tbl('05_COGS_SUMMARY', P3.F5.SUM_FIELDS, P3.F5.SUM_HEADERS, r5.summary);
     if (r5.rollforward) tbl('05_FG_ROLLFORWARD', P3.F5.XNT_FIELDS, P3.F5.XNT_HEADERS, r5.rollforward.rows);
     // provision on FG (v1.14.70): roll-forward per layer and the FAST entries (TK 2294 / 632)
-    const trk = provisionTrack(r5);
+    // v1.14.73: NRV column = NRV approved in 5P (spread over the layers); the proposal is its own column
+    const nrvOk = P3.nrvApprovedFor(S, r5);
+    const trk = provisionTrack(r5, nrvOk.byLayer);
     sheets.push(provisionTrackSheet(trk, S.period));
-    sheets.push(provisionJournalSheet(provisionJournal(trk, P3.nrvRecordedAmount(S, r5)), S.period));
+    sheets.push(provisionJournalSheet(provisionJournal(trk, nrvOk.total), S.period));
   }
   if (S.d.fgHistory) tbl('05_FG_HISTORY', P3.F5.HIST_FIELDS, P3.F5.HIST_HEADERS, S.d.fgHistory.rows.map((r) => ({ ...r, date: typeof r.date === 'number' ? serialToISO(r.date) : r.date })));
   if (!sheets.length) { toast('Chưa có kết quả để xuất.', 'review'); return; }
