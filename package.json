@@ -1,6 +1,6 @@
 {
   "name": "svl-costing",
-  "version": "1.14.66",
+  "version": "1.14.67",
   "description": "SVL Costing Master on the web",
   "scripts": {
     "test": "node test/unit.mjs && node test/synth.mjs && node test/rules-syntax.mjs && node test/rules-contract.mjs && node test/xlsxstyle.mjs && node test/approvals-logic.mjs && node test/notifications.mjs && node test/notification-fallback.mjs && node test/matcost-logic.mjs && node test/r6-basis.mjs",

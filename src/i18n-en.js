@@ -1,6 +1,15 @@
 // v1.14.59: English UI strings. Keys are the Vietnamese text as rendered (trimmed, single spaces), numbers replaced by {#}.
 // Generated from a crawl of every screen and tab; values keep {#} in the same order.
 export const EN = {
+"A: {#} PC lệch PC-P / PC-M (chưa xác nhận)": "A: {#} PCs with PC-P / PC-M difference (not confirmed)",
+"A: {#} PC lệch PC-P / PC-M (thay đổi sau lần xác nhận)": "A: {#} PCs with PC-P / PC-M difference (changed since confirmation)",
+"B: {#} dòng SL ≠ 0 nhưng Total Cost = 0 (chưa xác nhận)": "B: {#} lines with qty ≠ 0 but Total Cost = 0 (not confirmed)",
+"B: {#} dòng SL ≠ 0 nhưng Total Cost = 0 (thay đổi sau lần xác nhận)": "B: {#} lines with qty ≠ 0 but Total Cost = 0 (changed since confirmation)",
+"C: {#} dòng vật tư số âm, sai kiểu hoặc đơn giá xuất NVL bất thường (chưa xác nhận)": "C: {#} material lines with negative, wrong-type or abnormal issue price (not confirmed)",
+"C: {#} dòng vật tư số âm, sai kiểu hoặc đơn giá xuất NVL bất thường (thay đổi sau lần xác nhận)": "C: {#} material lines with negative, wrong-type or abnormal issue price (changed since confirmation)",
+"D: {#} lô PC bất thường (PC-P) (chưa xác nhận)": "D: {#} abnormal PC lots (PC-P) (not confirmed)",
+"D: {#} lô PC bất thường (PC-P) (thay đổi sau lần xác nhận)": "D: {#} abnormal PC lots (PC-P) (changed since confirmation)",
+"Áp dụng sẽ đổi đơn giá lô PC-P dùng để tính giá, nên thẻ D (đơn giá thành phẩm theo lô PC) có thể thay đổi. Khi đó STEP 1 phải xác nhận lại thẻ D trước khi chạy STEP 2.": "Applying will change the PC-P lot unit costs used for costing, so card D (finished-goods unit cost by PC lot) may change. In that case STEP 1 must re-confirm card D before running STEP 2.",
 "Số âm, hoặc ô là chữ thay vì số: sửa trên ERP rồi import lại. Đơn giá xuất NVL (MI-M): dòng có thành tiền ≥ {#} VND và đơn giá lệch > {#} % so với đơn giá chuẩn (trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ). Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP {#}.": "Negative quantity or Total Cost, or a text cell instead of a number: fix in ERP and re-import. Material issue price (MI-M): lines with amount ≥ {#} VND and unit cost more than {#} % away from the reference (median unit cost of the lines with the same system, material code and unit in the period). If correct, confirm; if wrong, fix ERP and re-import. The list must be confirmed before running STEP {#}.",
 "Đơn giá lô = Total Cost ÷ SL hoàn thành, so với trung vị đơn giá các lô cùng hệ và cùng mã sản phẩm trong kỳ. Bất thường: lệch > {#} % và Total Cost ≥ {#} VND; hoặc SL ≤ {#} nhưng có cost; hoặc SL > {#} nhưng Total Cost = {#}. Đúng thì xác nhận; sai thì sửa ERP và import lại. Danh sách cần được xác nhận trước khi chạy STEP {#}.": "Lot unit cost = Total Cost ÷ completed qty, compared with the median lot unit cost of the same system and product code in the period. Abnormal: deviation > {#} % and Total Cost ≥ {#} VND; or qty ≤ {#} with cost; or qty > {#} with Total Cost = {#}. If correct, confirm; if wrong, fix ERP and re-import. The list must be confirmed before running STEP {#}.",
 "Đơn giá lô = Total Cost ÷ SL hoàn thành. Đơn giá chuẩn = trung vị đơn giá các lô cùng hệ và cùng mã sản phẩm trong kỳ. Bất thường: lệch > {#} % và Total Cost ≥ {#} VND; hoặc SL ≤ {#} nhưng có cost; hoặc SL > {#} nhưng Total Cost = {#}. Chỉ để rà soát, không chặn STEP {#}.": "Lot unit cost = Total Cost ÷ completed qty. Reference cost = median lot unit cost of the same system and product code in the period. Abnormal: deviation > {#} % and Total Cost ≥ {#} VND; or qty ≤ {#} with cost; or qty > {#} with Total Cost = {#}. For review only, not blocking STEP {#}.",
@@ -1292,11 +1301,10 @@ export const MSG_WILD = [
 },
 {
 "vi": [
-"STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận (",
-" PC lệch PC-P / PC-M, ",
-" dòng vật tư bất thường). Mở STEP 1 → \"Kiểm tra dữ liệu ERP\", rà soát rồi bấm Xác nhận."
+"STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận – ",
+". Mở STEP 1 → \"Kiểm tra dữ liệu ERP\", rà soát rồi bấm Xác nhận."
 ],
-"en": "STEP 2 blocked: STEP 1 has unconfirmed ERP data-check results ({*} PCs PC-P / PC-M mismatch, {*} abnormal material lines). Open STEP 1 → \"ERP data check\", review and click Confirm.",
+"en": "STEP 2 blocked: STEP 1 has unconfirmed ERP data-check results – {*}. Open STEP 1 → \"ERP data check\", review and click Confirm.",
 "prefix": false
 },
 {
@@ -1425,9 +1433,10 @@ export const MSG_WILD = [
 {
 "vi": [
 "Đã điều chỉnh ",
-" dòng PC-P về PC-M. Chạy lại STEP 2 và STEP 3."
+" dòng PC-P về PC-M. Cần xác nhận lại ở STEP 1 trước khi chạy STEP 2: ",
+"."
 ],
-"en": "Adjusted {*} PC-P lines to PC-M. Re-run STEP 2 and STEP 3.",
+"en": "Adjusted {*} PC-P lines to PC-M. Re-confirm at STEP 1 before running STEP 2: {*}.",
 "prefix": false
 },
 {
@@ -2822,6 +2831,7 @@ export const SRC_EXACT = {
 "− Xuất rework": "− Issued to rework"
 };
 export const SRC_WILD = [
+["Nguyên nhân: điều chỉnh PC-P theo PC-M ở STEP 3 lúc {*} đã đổi đơn giá lô PC-P.", "Cause: the PC-P to PC-M adjustment at STEP 3 on {*} changed the PC-P lot unit costs."],
 ["Đơn giá xuất NVL (MI-M) · {*} dòng · {*} bất thường", "Material issue unit cost (MI-M) · {*} lines · {*} abnormal"],
 ["{*} dòng xuất NVL đơn giá bất thường", "{*} lines with abnormal material issue prices"],
 ["Đơn giá lô PC (PC-P) · {*} lô · {*} bất thường", "PC-lot unit cost (PC-P) · {*} lots · {*} abnormal"],
@@ -3204,8 +3214,12 @@ export const SRC_WILD = [
 "and {*} PCs with PC-P / PC-M difference"
 ],
 [
-"Rà soát và xác nhận {*} dòng dữ liệu ERP bất thường{*} (STEP 1) trước khi chạy STEP 2",
-"Review and confirm {*} abnormal ERP data lines{*} (STEP 1) before running STEP 2"
+"Rà soát và xác nhận dữ liệu ERP bất thường (STEP 1) trước khi chạy STEP 2",
+"Review and confirm abnormal ERP data (STEP 1) before running STEP 2"
+],
+[
+"Rà soát và xác nhận dữ liệu ERP bất thường (STEP 1) trước khi chạy STEP 2: {*}",
+"Review and confirm abnormal ERP data (STEP 1) before running STEP 2: {*}"
 ],
 [
 "Kỳ vọng = ngưỡng {*}% × tổng đã phân bổ; Chênh lệch = số tiền vượt ngưỡng (VND). Tỷ lệ thực tế {*}. Vượt ngưỡng phải được Quản trị xác nhận kèm lý do",

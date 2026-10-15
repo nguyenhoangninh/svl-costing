@@ -359,7 +359,7 @@ function datasetsMeta() {
 function statusAll() {
   const s1 = step1Status(datasetsMeta());
   const dq = DQ.erpAnomalies(S.d.datasets, S.period);
-  const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets), outOfPeriodRows(S.d.datasets, S.period), { ...dq, status: DQ.anomalyStatus(dq, S.d.importAck) });
+  const s1c = step1Controls(s1, accessLimitedCount(S.d.datasets), outOfPeriodRows(S.d.datasets, S.period), { ...dq, status: DQ.anomalyStatus(dq, S.d.importAck), blocking: DQ.blockingParts(dq, S.d.importAck) });
   const ctx = { period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport, opening: S.d.opening, step3: S.d.step3, datasets: S.d.datasets };
   const p2 = S.period ? P2.derive(S) : { d3b: null, d4: null };
   const s3bc = p2.d3b ? p2.d3b.controls : { status: 'NOT RUN', okText: '', rows: [], next: 'Chạy STEP 3A trước' };
@@ -718,7 +718,7 @@ function dqSection(dq) {
     if (s === 'NONE') return '';
     const pc = parts[k];
     const info = s === 'CONFIRMED' ? `<span>Đã xác nhận bởi <b>${esc(pc.by)}</b> lúc ${fmtTs(pc.at)}: ${esc(pc.note)}</span>`
-      : s === 'CHANGED' ? `<span><b>Danh sách đã thay đổi</b> sau lần xác nhận ${fmtTs(pc.at)} của ${esc(pc.by)} – cần xác nhận lại.</span>`
+      : s === 'CHANGED' ? `<span><b>Danh sách đã thay đổi</b> sau lần xác nhận ${fmtTs(pc.at)} của ${esc(pc.by)} – cần xác nhận lại.${S.d.pcAdj && new Date(S.d.pcAdj.at) > new Date(pc.at) ? ` Nguyên nhân: điều chỉnh PC-P theo PC-M ở STEP 3 lúc ${fmtTs(S.d.pcAdj.at)} đã đổi đơn giá lô PC-P.` : ''}</span>`
       : '<span class="muted">Chưa xác nhận phần này.</span>';
     const btnOk = s === 'CONFIRMED' ? '' : `<button class="btn" type="button" data-act="dq-confirm" data-part="${k}">${s === 'CHANGED' ? `Xác nhận lại phần ${k}` : `Xác nhận phần ${k}`}</button>`;
     const btnClear = pc ? `<button class="btn danger ghost" type="button" data-act="dq-unconfirm" data-part="${k}">Xóa xác nhận</button>` : '';
@@ -1083,7 +1083,7 @@ VIEWS.step2 = (el) => {
 function doStep2() {
   const dq = DQ.erpAnomalies(S.d.datasets, S.period);
   if (DQ.anomalyStatus(dq, S.d.importAck) === 'BLOCK - CONFIRM') {
-    toast(`STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận (${dq.recon.issues.length} PC lệch PC-P / PC-M, ${dq.lines.length} dòng vật tư bất thường). Mở STEP 1 → "Kiểm tra dữ liệu ERP", rà soát rồi bấm Xác nhận.`, 'block');
+    toast(`STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận – ${DQ.blockingSummary(DQ.blockingParts(dq, S.d.importAck))}. Mở STEP 1 → "Kiểm tra dữ liệu ERP", rà soát rồi bấm Xác nhận.`, 'block');
     location.hash = '#step1'; return;
   }
   const periodIssues = outOfPeriodRows(S.d.datasets, S.period);
@@ -1335,6 +1335,7 @@ function pcBasisPanel() {
       <table class="cp"><thead><tr><th>Hệ</th><th>PC No.</th><th>Product Code</th><th>Location</th><th class="r">PC-P</th><th class="r">PC-M</th><th class="r">Điều chỉnh</th></tr></thead><tbody>
       ${sc.lines.map((g) => `<tr><td>${esc(g.erp)}</td><td>${esc(g.pcNo)}</td><td>${esc(g.prod)}</td><td>${esc(g.loc)}</td><td class="r">${fmtNum(g.pcp)}</td><td class="r">${fmtNum(g.pcm)}</td><td class="r">${fmtNum(g.diff)}</td></tr>`).join('')}
       <tr class="tot"><td colspan="4">Tổng</td><td class="r">${fmtNum(sc.totals.pcp)}</td><td class="r">${fmtNum(sc.totals.pcm)}</td><td class="r">${fmtNum(sc.totals.diff)}</td></tr></tbody></table>
+      <div class="alert review">Áp dụng sẽ đổi đơn giá lô PC-P dùng để tính giá, nên thẻ D (đơn giá thành phẩm theo lô PC) có thể thay đổi. Khi đó STEP 1 phải xác nhận lại thẻ D trước khi chạy STEP 2.</div>
       <div class="row"><input id="pcb-note" type="text" placeholder="Lý do điều chỉnh (tối thiểu 5 ký tự)" style="min-width:340px" ${dis}/><button class="btn" data-act="pc-basis-apply" type="button" ${dis}>Áp dụng điều chỉnh về PC-M</button></div>`;
   }
   if (!body) return '';
@@ -1699,7 +1700,10 @@ document.addEventListener('click', async (e) => {
         S.d.step2 = null; S.d.step3 = null; S.d.register = null;
         audit('PC-P COST BASIS → PC-M', `${res.changes.length} dòng · tổng ${fmtNum(total)} VND · ${reason}`);
         markDirty('pcAdj', 'step2', 'step3', 'register', 'audit');
-        toast(`Đã điều chỉnh ${res.changes.length} dòng PC-P về PC-M. Chạy lại STEP 2 và STEP 3.`, 'pass');
+        const blk = DQ.blockingParts(DQ.erpAnomalies(S.d.datasets, S.period), S.d.importAck);
+        toast(blk.length
+          ? `Đã điều chỉnh ${res.changes.length} dòng PC-P về PC-M. Cần xác nhận lại ở STEP 1 trước khi chạy STEP 2: ${DQ.blockingSummary(blk)}.`
+          : `Đã điều chỉnh ${res.changes.length} dòng PC-P về PC-M. Chạy lại STEP 2 và STEP 3.`, blk.length ? 'review' : 'pass');
       } catch (e) { toast('Không điều chỉnh được: ' + e.message, 'block'); }
       render(); break;
     }

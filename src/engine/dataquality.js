@@ -136,3 +136,20 @@ export function anomalyStatus(an, ack) {
   if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length) && !(an.mcLines && an.mcLines.length) && !(an.pcFlagged && an.pcFlagged.length))) return 'PASS';
   return Object.keys(DQ_PARTS).every((k) => ['NONE', 'CONFIRMED'].includes(partStatus(an, ack, k))) ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
 }
+
+/** Unit of each confirmable part, for notifications. */
+export const DQ_PART_UNIT = {
+  A: 'PC lệch PC-P / PC-M',
+  B: 'dòng SL ≠ 0 nhưng Total Cost = 0',
+  C: 'dòng vật tư số âm, sai kiểu hoặc đơn giá xuất NVL bất thường',
+  D: 'lô PC bất thường (PC-P)',
+};
+/** Parts that still block STEP 2: not confirmed, or changed since the last confirmation. */
+export function blockingParts(an, ack) {
+  return Object.keys(DQ_PARTS).map((k) => ({ key: k, status: partStatus(an, ack, k), count: an && an.parts && an.parts[k] ? an.parts[k].count : 0 }))
+    .filter((p) => p.status !== 'NONE' && p.status !== 'CONFIRMED');
+}
+/** One line per blocking part, e.g. "A: 12 PC lệch PC-P / PC-M (chưa xác nhận); D: 43 lô PC bất thường (PC-P) (thay đổi sau lần xác nhận)". */
+export function blockingSummary(list) {
+  return (list || []).map((p) => `${p.key}: ${p.count} ${DQ_PART_UNIT[p.key]} (${p.status === 'CHANGED' ? 'thay đổi sau lần xác nhận' : 'chưa xác nhận'})`).join('; ');
+}
