@@ -51,6 +51,17 @@ if (await page.locator('#f-nrv-decision').count()) {
   await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
   await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: chưa trích lập kỳ này'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(500);
 }
+// v1.14.68: NRV decision can be withdrawn and replaced (replacement asks for confirmation; the dialog handler accepts it)
+if (await page.locator('#nrv-undo').count()) {
+  await page.click('#nrv-undo'); await page.waitForTimeout(500);
+  console.log('NRV after undo: summary gone', !(await page.locator('.alert.info:has-text("NRV:")').count()), '| form back', !!(await page.locator('#f-nrv-decision').count()));
+  await page.selectOption('#f-nrv-decision select[name=status]', 'RECORDED'); await page.fill('#f-nrv-decision input[name=ref]', 'JV-E2E-1');
+  await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: ghi nhận dự phòng'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(400);
+  console.log('NRV after RECORDED:', (await txt('main')).match(/NRV: [A-Z ]+/)?.[0]);
+  await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
+  await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: thay thế quyết định'); await page.click('#f-nrv-decision button[type=submit]'); await page.waitForTimeout(400);
+  console.log('NRV after replace:', (await txt('main')).match(/NRV: [A-Z ]+/)?.[0]);
+}
 console.log('close before FAST:', ((await txt('main')).match(/Chưa đóng được:.{0,120}/) || [''])[0]);
 await page.click('[data-tabh="fast"]'); await page.waitForSelector('#f-fast');
 const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => [tr.querySelector('input').name, tr.children[2].textContent.replace(/\./g, '').replace(',', '.').replace(/[–-]$/, '0')]));
