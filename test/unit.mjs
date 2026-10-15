@@ -881,6 +881,20 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   const gf = book([fgData, T.fgOpeningGuide(P9)], T.exampleRows(T.FG_OPEN_COLS));
   const of = F5.importOpeningFG(gf, 'fg.xlsx', P9); F5.validateOpeningFG(of, P9);
   eq('template FG opening: 2 example lots validate', [of.rows.length, of.status, of.rows.filter((r) => /ERROR|BLOCK/.test(String(r.status))).length], [2, 'VALIDATED', 0]);
+  // v1.14.76: RM split, Unit Cost, Provision USD, Net Inventory
+  eq('template FG opening v2: example 1 carries the RM split (24M PC RM, 5M Stock Out, 1M adj)', [of.rows[0].splitOK, of.rows[0].rmPC, of.rows[0].rmSO, of.rows[0].rmAdj], [true, 24000000, 5000000, 1000000]);
+  eq('template FG opening v2: example 2 without split keeps all RM as PC RM; Provision USD and Net Inventory read', [of.rows[1].splitOK, of.rows[1].rmPC, of.rows[1].provUSD, of.rows[1].netIn], [false, 5250000, -6, 6850000]);
+  const fgRun = F5.runFIFO({ period: P9, opening: of, caRows: [], salesRows: [], pmRows: [], fx: 25000, overrides: {}, dupDecisions: {}, mode: 'MONTHLY', tol: 1, step4: { current: 'CURRENT', overall: 'PASS', finalCost: 0, qty: 0 } });
+  const cl0 = fgRun.closing.find((c) => c.pc === of.rows[0].pc);
+  eq('template FG opening v2: the RM split goes into the FIFO layer and the closing', [cl0 && cl0.splitOK, cl0 && Math.round(cl0.rmPC), cl0 && Math.round(cl0.rmSO)], [true, 24000000, 5000000]);
+  const fgBad = (patch) => { const rowsX = T.exampleRows(T.FG_OPEN_COLS); const H = F5.TPL_HEADERS; const r0 = [...(rowsX[0] || [])]; for (const [h, v] of Object.entries(patch)) r0[H.indexOf(h)] = v; const g2 = book([fgData, T.fgOpeningGuide(P9)], [r0]); const o = F5.importOpeningFG(g2, 'fg.xlsx', P9); F5.validateOpeningFG(o, P9); return o.rows[0]; };
+  eq('template FG opening v2: Unit Cost ≠ Total / Qty → REVIEW', /Unit Cost/.test(fgBad({ 'Unit Cost': 300000 }).msg) && fgBad({ 'Unit Cost': 300000 }).status === 'REVIEW', true);
+  eq('template FG opening v2: Net Inventory ≠ Total + Provision → REVIEW', /Net Inventory/.test(fgBad({ 'Net Inventory': 1 }).msg), true);
+  eq('template FG opening v2: RM split above RM Amount → BLOCK', fgBad({ 'RM cost': 29000000 }).status, 'BLOCK');
+  const v1Data = { name: 'FG_OPENING', aoa: [[F5.TPL_MARKER, 'v1', 'x'], ['Opening Period', '', P9, 'Source Closing', '2026-08', 'Prepared By', 'tester', 'Prepared At'], ['note'], F5.TPL_HEADERS_V1] };
+  const v1Row = ['PC-2608-0012', '2026-08-20', 'MO-1', 'SP101-10-043-003', 'Seat', 'FG', 'PCS', 120, 30000000, 4000000, 6000000, 40000000, 137.78, -150000, '', 'ref', ''];
+  const ov1 = F5.importOpeningFG(book([v1Data], [v1Row]), 'old.xlsx', P9); F5.validateOpeningFG(ov1, P9);
+  eq('template FG opening: the old 17-column layout still imports', [ov1.rows.length, ov1.rows[0].rm, ov1.rows[0].tot, ov1.rows[0].prov, ov1.rows[0].splitOK, ov1.status], [1, 30000000, 40000000, -150000, false, 'VALIDATED']);
   eq('template FG opening: guide sheet alone is not a template', /Không thấy template/.test(thrown(() => F5.importOpeningFG(guideOnly([T.fgOpeningGuide(P9)].map((x) => x)), 'g.xlsx', P9))), true);
   // FG production YTD
   const fpData = { name: 'FG_PRODUCTION', aoa: FPx.templateAOA([], P9) };

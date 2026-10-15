@@ -13,7 +13,10 @@ const TOL_AMT = 1;
 
 export const LAYER_FIELDS = ['period', 'srcPeriod', 'lid', 'source', 'pc', 'date', 'mo', 'prod', 'name', 'loc', 'unit', 'qty', 'rm', 'a622', 'a627', 'tot', 'unitCost', 'price', 'prov', 'cons', 'status', 'msg'];
 export const LAYER_HEADERS = ['Period', 'Source Period', 'Layer ID', 'Source', 'PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Location', 'Unit', 'Qty', 'RM Amount', '622 Amount', '627 Amount', 'Total Amount', 'Total / Unit', 'Sales Price (USD)', 'Provision VND (memo)', 'Consignment 157 (memo)', 'Status', 'Message'];
-export const TPL_HEADERS = ['PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Location', 'Unit', 'Qty', 'RM Amount', '622 Amount', '627 Amount', 'Total Amount', 'Sales Price (USD)', 'Provision VND (memo)', 'Consignment 157 (memo)', 'Source Reference', 'Note'];
+// v1.14.76 template (22 columns): RM split (RM cost = PC RM, RM cost (Stock out)), Unit Cost, Provision USD, Net Inventory.
+// Names follow the 05_FG_OPENING / 05_FG_CLOSING export. The v1 layout (17 columns) is still read.
+export const TPL_HEADERS = ['PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Location', 'Unit', 'Qty', 'RM cost', 'RM cost (Stock out)', 'RM Amount', '622 Amount', '627 Amount', 'Total Amount', 'Unit Cost', 'Sales Price (USD)', 'Provision USD (memo)', 'Provision VND (memo)', 'Net Inventory', 'Consignment 157 (memo)', 'Source Reference', 'Note'];
+export const TPL_HEADERS_V1 = ['PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Location', 'Unit', 'Qty', 'RM Amount', '622 Amount', '627 Amount', 'Total Amount', 'Sales Price (USD)', 'Provision VND (memo)', 'Consignment 157 (memo)', 'Source Reference', 'Note'];
 export const TPL_MARKER = 'SVL_FG_OPENING_TEMPLATE';
 export const LEDGER_FIELDS = ['seq', 'lid', 'source', 'srcPeriod', 'pc', 'date', 'mo', 'prod', 'name', 'unit', 'qtyIn', 'rm', 'a622', 'a627', 'tot', 'unitCost', 'qtyOut', 'rmOut', 'o622', 'o627', 'totOut', 'remQ', 'remTot', 'flag'];
 export const LEDGER_HEADERS = ['Seq', 'Layer ID', 'Source', 'Source Period', 'PC No.', 'Layer Date', 'MO No.', 'Product Code', 'Product Name', 'Unit', 'Qty In', 'RM', '622', '627', 'Total', 'Total / Unit', 'Qty Out', 'RM Out', '622 Out', '627 Out', 'Total Out', 'Qty Remaining', 'Total Remaining', 'Flag'];
@@ -78,14 +81,29 @@ export function importOpeningFG(grids, fileName, period) {
     const per = periodText(g[1] && g[1][2]);
     if (per !== period) throw new Error(`Opening Period trên template (C2) là '${per}' nhưng kỳ đang mở là ${period}.`);
     if (g.length < 5) throw new Error('Template không có dòng dữ liệu (dữ liệu bắt đầu từ dòng 5).');
-    const bad = TPL_HEADERS.map((h, c) => (norm(g[3] && g[3][c]) !== norm(h) ? `cột ${c + 1} phải là '${h}' (đang là '${s5t(g[3] && g[3][c])}')` : '')).filter(Boolean);
+    const diff = (H) => H.map((h, c) => (norm(g[3] && g[3][c]) !== norm(h) ? `cột ${c + 1} phải là '${h}' (đang là '${s5t(g[3] && g[3][c])}')` : '')).filter(Boolean);
+    const isV1 = !diff(TPL_HEADERS_V1).length, bad = isV1 ? [] : diff(TPL_HEADERS);
     if (bad.length) throw new Error('Dòng tiêu đề 4 của template bị thay đổi: ' + bad.join('; '));
+    const H = isV1 ? TPL_HEADERS_V1 : TPL_HEADERS;
+    const C = (h) => H.indexOf(h); // column of a header in this layout; -1 when the v1 layout has no such column
+    const cell = (x, h) => (C(h) < 0 ? undefined : x[C(h)]);
+    const blank = (v) => v === undefined || v === null || ttxt(v) === '';
     const srcP = periodText(g[1] && g[1][4]) || prevP;
     for (let r = 4; r < g.length; r++) {
-      const x = g[r] || []; const prod = utxt(x[3]);
-      if (!prod && !s5t(x[0]) && num(x[7]) === 0) continue;
-      const qty = num(x[7]), tot = num(x[11]);
-      rows.push({ period, srcPeriod: srcP, lid: `OP-${s5t(x[0])}-T${r + 1}`, source: 'OPENING', pc: s5t(x[0]), date: dateVal(x[1]), mo: s5t(x[2]), prod, name: s5t(x[4]), loc: s5t(x[5]), unit: s5t(x[6]), qty, rm: num(x[8]), a622: num(x[9]), a627: num(x[10]), tot, unitCost: qty !== 0 ? tot / qty : null, price: num(x[12]), prov: num(x[13]), cons: s5t(x[14]), status: 'NOT VALIDATED', msg: '' });
+      const x = g[r] || []; const prod = utxt(cell(x, 'Product Code'));
+      if (!prod && !s5t(cell(x, 'PC No.')) && num(cell(x, 'Qty')) === 0) continue;
+      const qty = num(cell(x, 'Qty')), tot = num(cell(x, 'Total Amount')), rm = num(cell(x, 'RM Amount'));
+      // RM split: filled in either column → the layer carries PC RM / Stock Out / WIP-rework adj (= RM − PC RM − Stock Out)
+      const vPC = cell(x, 'RM cost'), vSO = cell(x, 'RM cost (Stock out)');
+      const split = !blank(vPC) || !blank(vSO);
+      const rmPC = split ? num(vPC) : rm, rmSO = split ? num(vSO) : 0;
+      const vUnit = cell(x, 'Unit Cost'), vNet = cell(x, 'Net Inventory'), vUSD = cell(x, 'Provision USD (memo)');
+      rows.push({ period, srcPeriod: srcP, lid: `OP-${s5t(cell(x, 'PC No.'))}-T${r + 1}`, source: 'OPENING', pc: s5t(cell(x, 'PC No.')), date: dateVal(cell(x, 'Layer Date')), mo: s5t(cell(x, 'MO No.')), prod,
+        name: s5t(cell(x, 'Product Name')), loc: s5t(cell(x, 'Location')), unit: s5t(cell(x, 'Unit')), qty, rm, a622: num(cell(x, '622 Amount')), a627: num(cell(x, '627 Amount')), tot,
+        unitCost: qty !== 0 ? tot / qty : null, price: num(cell(x, 'Sales Price (USD)')), prov: num(cell(x, 'Provision VND (memo)')), cons: s5t(cell(x, 'Consignment 157 (memo)')),
+        rmPC, rmSO, rmAdj: rm - rmPC - rmSO, splitOK: split,
+        provUSD: blank(vUSD) ? null : num(vUSD), unitCostIn: blank(vUnit) ? null : num(vUnit), netIn: blank(vNet) ? null : num(vNet),
+        status: 'NOT VALIDATED', msg: '' });
     }
     srcLabel = `${fileName} | TEMPLATE ${n} | prepared by ${s5t(g[1] && g[1][6])}`;
   } else {
@@ -153,6 +171,11 @@ export function validateOpeningFG(open, period) {
     if (tot <= 0) { sev = 2; msg += 'Total Amount <= 0; '; }
     if (rm < 0 || v622 < 0 || v627 < 0) { sev = 2; msg += 'Negative cost component; '; }
     if (Math.abs(rm + v622 + v627 - tot) > 1) { sev = 2; msg += `RM + 622 + 627 <> Total (${(rm + v622 + v627 - tot).toFixed(2)}); `; }
+    // v1.14.76 template columns: RM split must stay inside RM; Unit Cost and Net Inventory, when given, must match the layer
+    if (r.splitOK && (num(r.rmPC) < 0 || num(r.rmSO) < 0)) { sev = 2; msg += 'Negative RM cost / RM cost (Stock out); '; }
+    if (r.splitOK && num(r.rmPC) + num(r.rmSO) - rm > 1) { sev = 2; msg += `RM cost + RM cost (Stock out) > RM Amount (${(num(r.rmPC) + num(r.rmSO) - rm).toFixed(2)}); `; }
+    if (r.unitCostIn !== null && r.unitCostIn !== undefined && qty > 0 && Math.abs(num(r.unitCostIn) - tot / qty) > Math.max(1, Math.abs(tot / qty) * 1e-6)) { if (sev < 1) sev = 1; msg += `Unit Cost ${vbFmt(num(r.unitCostIn), 2, true)} <> Total / Qty ${vbFmt(tot / qty, 2, true)}; `; }
+    if (r.netIn !== null && r.netIn !== undefined && Math.abs(num(r.netIn) - (tot + num(r.prov))) > 1) { if (sev < 1) sev = 1; msg += `Net Inventory ${vbFmt(num(r.netIn), 0, true)} <> Total + Provision ${vbFmt(tot + num(r.prov), 0, true)}; `; }
     const u = utxt(r.unit);
     if (u && u !== 'PC' && u !== 'PCS') { if (sev < 1) sev = 1; msg += `Unit '${u}' is not PC/PCS; `; }
     const key = `${prod}|${utxt(r.pc)}|${utxt(r.mo)}|${vbFmt(qty, 4)}|${vbFmt(tot, 0)}`.toUpperCase();
@@ -213,7 +236,7 @@ export function runFIFO(ctx) {
   const L = [];
   for (const r of opening.rows) {
     if (!s5t(r.prod) || !(num(r.qty) > 0)) continue;
-    L.push({ lid: s5t(r.lid), src: 'OPENING', sp: s5t(r.srcPeriod), pc: s5t(r.pc), dt: dateVal(r.date) || 0, mo: s5t(r.mo), prod: utxt(r.prod), name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty: num(r.qty), rm: num(r.rm), a622: num(r.a622), a627: num(r.a627), tot: num(r.tot), price: num(r.price), prov: num(r.prov), cons: s5t(r.cons), flag: utxt(r.status) === 'REVIEW' ? 'OPENING REVIEW: ' + s5t(r.msg) : '', rmPC: num(r.rm), rmSO: 0, rmAdj: 0, splitOK: false });
+    L.push({ lid: s5t(r.lid), src: 'OPENING', sp: s5t(r.srcPeriod), pc: s5t(r.pc), dt: dateVal(r.date) || 0, mo: s5t(r.mo), prod: utxt(r.prod), name: s5t(r.name), loc: s5t(r.loc), unit: s5t(r.unit), qty: num(r.qty), rm: num(r.rm), a622: num(r.a622), a627: num(r.a627), tot: num(r.tot), price: num(r.price), prov: num(r.prov), cons: s5t(r.cons), flag: utxt(r.status) === 'REVIEW' ? 'OPENING REVIEW: ' + s5t(r.msg) : '', ...(r.splitOK ? { rmPC: num(r.rmPC), rmSO: num(r.rmSO), rmAdj: num(r.rm) - num(r.rmPC) - num(r.rmSO), splitOK: true } : { rmPC: num(r.rm), rmSO: 0, rmAdj: 0, splitOK: false }) });
   }
   const nO = L.length;
   const caRows = ctx.caRows || [];

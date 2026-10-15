@@ -127,7 +127,7 @@ export function fgLayerCols(kind) {
     { key: 'tot', head: 'Total Amount', width: 18, z: Z_VND },
     { key: 'unitCost', head: 'Total / Unit', width: 16, z: Z_UNIT },
     { key: 'price', head: 'Sales Price (USD)', width: 16, z: Z_USD },
-    { key: null, head: kind === 'closing' ? 'provision in 2512-usd' : 'Provision USD (memo)', width: 20, z: Z_USD },
+    { key: kind === 'closing' ? null : 'provUSD', head: kind === 'closing' ? 'provision in 2512-usd' : 'Provision USD (memo)', width: 20, z: Z_USD },
     { key: 'prov', head: 'Provision VND (memo)', width: 20, z: Z_VND },
     { key: null, calc: 'net', head: 'net inventory', width: 20, z: Z_VND },
     { key: 'cons', head: 'Consignment 157 (memo)', width: 22 },
