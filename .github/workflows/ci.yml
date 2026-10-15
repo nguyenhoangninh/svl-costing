@@ -18,20 +18,11 @@ jobs:
           node-version: 24
       - name: Syntax check (all modules)
         run: for f in $(find src -name '*.js') test/*.mjs sw.js; do node --check "$f" || exit 1; done
-      - name: Synthetic control tests
-        run: node test/unit.mjs
-      - name: Dashboard render (synthetic STEP 5)
-        run: node test/dashboard-render.mjs
-      - name: Synthetic end-to-end costing regression (STEP 2 → 5, no company data)
-        run: node test/synth.mjs
-      - name: Live notifications unit tests
-        run: node test/notifications.mjs
-      - name: Notification permissions compatibility contracts
-        run: node test/notification-fallback.mjs
-      - name: Firestore Rules lexical / structural sanity check
-        run: node test/rules-syntax.mjs
-      - name: Firestore accounting-retention contract tests
-        run: node test/rules-contract.mjs
+      # v1.14.81 (audit AUD-12): run the whole npm test suite (unit, dashboard, NRV, synthetic STEP 2 → 5, rules,
+      # styled export, export form, approvals, notifications, material cost, R6 basis, provision, Vietnamese mode),
+      # so CI proves the same list as a local "npm test". Browser / fixture tests stay manual (test:e2e:*).
+      - name: Full test suite (npm test)
+        run: npm test
       - name: Release / PWA / security contract tests
         run: node test/release-contract.mjs
 

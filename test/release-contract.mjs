@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.80', v === '1.14.80');
+ok('package version = 1.14.81', v === '1.14.81');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -38,7 +38,12 @@ ok('dashboard chart styles use theme tokens (dark mode follows)', html.includes(
 ok('dashboard is documented in README', readme.includes('Dashboard doanh thu & GP'));
 ok('dashboard plan is saved with the period (dashPlan blob)', app.includes('...DBV.DASH_BLOBS') && fs.readFileSync(new URL('../src/views/dashboard.js', import.meta.url), 'utf8').includes("DASH_BLOBS = ['dashPlan']"));
 ok('journal summary export has the product sheet', app.includes("'3_TongHop_SanPham'"));
-ok('dashboard render test runs in npm test and CI', String(pkg.scripts.test).includes('dashboard-render.mjs') && fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8').includes('dashboard-render.mjs'));
+ok('5P provision movement gates CLOSE (AUD-08)', phase3.includes('export function provisionGate') && phase3.includes('const pg = provisionGate(S, res); if (pg) closeReason = pg;'));
+const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+ok('dashboard render test runs in npm test', String(pkg.scripts.test).includes('dashboard-render.mjs'));
+// v1.14.81 (audit AUD-12): CI runs the full npm test list, plus the release contracts
+ok('CI runs the full npm test suite and the release contracts', /run: npm test\b/.test(ci) && ci.includes('node test/release-contract.mjs'));
+ok('CI lists no test that npm test leaves out (single test manifest)', ['nrv-decision', 'provision-logic', 'i18n-vi', 'export-form', 'xlsxstyle'].every((t) => String(pkg.scripts.test).includes(t)));
 
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

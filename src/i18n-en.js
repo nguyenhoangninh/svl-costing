@@ -1239,6 +1239,10 @@ export const EN = {
 "Dashboard": "Dashboard",
 "Dashboard doanh thu & GP": "Revenue & GP dashboard",
 "Theo khách hàng · GP %": "By customer · GP %",
+// v1.14.81: 5P CLOSE gate
+"5P Dự phòng FG (TK {#}) chưa khớp: đầu kỳ + tăng − giảm − phần rework − cuối kỳ theo lớp = {#}. Mở màn 5P để kiểm tra trước khi CLOSE.": "5P FG provision (TK {#}) does not reconcile: opening + increase − decrease − rework part − closing on layers = {#}. Open 5P and check before CLOSE.",
+"5P Dự phòng FG (TK {#}) chưa khớp: đầu kỳ + tăng − giảm − phần rework − cuối kỳ theo lớp = {#} · có lớp chưa theo dõi được dự phòng. Mở màn 5P để kiểm tra trước khi CLOSE.": "5P FG provision (TK {#}) does not reconcile: opening + increase − decrease − rework part − closing on layers = {#} · some layers cannot be traced. Open 5P and check before CLOSE.",
+
 // v1.14.80: dashboard điều hành (bộ lọc, KPI so với kỳ trước, xu hướng tháng, kế hoạch, sản phẩm)
 "Dashboard điều hành · Doanh thu & lãi gộp": "Executive dashboard · Revenue & gross profit",
 "Kỳ {#} · theo khách hàng và sản phẩm · lấy từ STEP {#} (FIFO COGS). Lãi gộp = doanh thu thuần − giá vốn; chưa trừ dự phòng TK {#} (màn {#}P).": "Period {#} · by customer and product · from STEP {#} (FIFO COGS). Gross profit = net revenue − COGS; provision TK {#} not yet deducted (screen {#}P).",

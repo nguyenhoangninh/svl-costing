@@ -243,6 +243,8 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   // Never announce a no-op manual sync; every announcement is atomically linked to a committed revision.
   const changed = Object.keys({ ...old, ...manifest }).some((name) => (old[name] && old[name].hash) !== (manifest[name] && manifest[name].hash))
     || JSON.stringify(cur && cur.summary || {}) !== JSON.stringify(safeSummary);
+  // v1.14.81 (audit AUD-07): a sync that changes nothing (same manifest, same summary) writes no revision: NO_CHANGE.
+  if (cur && !changed && !opts.forceRevision) return { ...cur, noChange: true };
   const announcement = changed && opts.notice ? {
     ...opts.notice, period, rev: meta.rev, actor: cloud.user.email.toLowerCase(),
     actorUid: cloud.user.uid, clientAt: meta.updatedAt, createdAt: F.serverTimestamp(),
@@ -274,15 +276,9 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
       }
     }
   } catch (e) {
-    // v1.14.36 (fix, found by test/e2e-cloud.mjs): a lost reply does NOT mean the commit failed. Remove this attempt's chunks
-    // only when the pointer proves the commit did not land; if the pointer cannot be read, keep them (orphans are harmless,
-    // deleting chunks that a committed revision references is data loss).
-    let landed = true;
-    try {
-      const now = await F.getDoc(pdoc(period));
-      landed = now.exists() && (now.data().rev || 0) === meta.rev && now.data().manifestHash === manifestHash;
-    } catch { landed = true; }
-    if (!landed && isAdmin()) for (const id of written) { if (!referenced(old, id)) await F.deleteDoc(cdoc(period, id)).catch(() => {}); }
+    // v1.14.81 (audit AUD-05): never delete chunks after a failed commit. Another session may have reused the same
+    // content-addressed chunk and committed a revision that references it; an orphan chunk is harmless, a missing one is
+    // data loss. Clean-up of orphans belongs to a separate archival process, not to this error path.
     throw e;
   }
   // Do not sweep superseded content-addressed chunks: immutable revision manifests may still reference them.

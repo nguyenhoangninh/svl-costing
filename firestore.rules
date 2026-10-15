@@ -35,12 +35,16 @@ service cloud.firestore {
     function closedOf(d) { return d.get('summary', {}).get('closed', null); }
     function periodPath(p) { return /databases/$(database)/documents/svl_costing_periods/$(p); }
     function periodOpen(p) { return !exists(periodPath(p)) || closedOf(get(periodPath(p)).data) == null; }
+    // v1.14.81 (audit AUD-04): everClosed is one-way. Once a period has been CLOSED, no write may lower the flag.
+    function everClosedOf(d) { return d.get('summary', {}).get('everClosed', false) == true; }
+    function keepsEverClosed() { return !everClosedOf(resource.data) || everClosedOf(request.resource.data); }
     // Periods: optimistic revisioning. CLOSED periods are immutable until an explicit admin REOPEN revision.
     match /svl_costing_periods/{period} {
       allow read: if canRead();
       allow create: if canWrite() && request.resource.data.rev == 1
         && (isAdmin() || closedOf(request.resource.data) == null);
       allow update: if canWrite() && request.resource.data.rev == resource.data.get('rev', 0) + 1
+        && keepsEverClosed()
         && (
           // Normal OPEN-period work. Editors and admins may save, but the period stays OPEN.
           (closedOf(resource.data) == null && closedOf(request.resource.data) == null)

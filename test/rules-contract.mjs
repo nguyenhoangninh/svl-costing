@@ -54,8 +54,13 @@ ok('ENH-10 CLOSE re-reads the previous period before the gate', phase3Js.include
 ok('ENH-10 previous period reopened after roll-forward is a drift', app.includes('op.closedAt && !isClosedIn(prevD, p)'));
 
 // v1.14.37 (found by the browser cloud run)
-ok('lost reply does not delete chunks of a committed revision (pointer checked first)', store.includes('const now = await F.getDoc(pdoc(period));') && store.includes('if (!landed && isAdmin())'));
-ok('cloud save keeps chunks when the pointer cannot be read', store.includes('} catch { landed = true; }'));
+// v1.14.81 (AUD-05): a failed commit never deletes chunks (another session may have reused and committed them)
+const saveBody = store.slice(store.indexOf('export async function cloudSave'), store.indexOf('export async function', store.indexOf('export async function cloudSave') + 10));
+ok('cloud save never deletes chunks, even after a failed commit', saveBody.length > 0 && !saveBody.includes('deleteDoc(cdoc('));
+// v1.14.81 (AUD-07): a sync with the same manifest and summary writes no revision
+ok('no-op sync writes no revision (NO_CHANGE)', saveBody.includes('if (cur && !changed && !opts.forceRevision) return { ...cur, noChange: true };') && saveBody.indexOf('noChange: true') < saveBody.indexOf('commitRevision('));
+// v1.14.81 (AUD-04): everClosed is one-way on every update, not only on REOPEN
+ok('rules: everClosed cannot be lowered by any update', rules.includes('function keepsEverClosed()') && /allow update: if canWrite\(\) && request\.resource\.data\.rev == resource\.data\.get\('rev', 0\) \+ 1\s*&& keepsEverClosed\(\)/.test(rules));
 
 // v1.14.41 (maker–checker for STEP 5R manual unit costs, rules-based; no Cloud Functions on the Spark plan)
 const sw = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');

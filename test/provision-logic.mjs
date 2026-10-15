@@ -189,5 +189,18 @@ ok('06_PROVISION_JE sheet: pending rework line has no accounts', jsheet.aoa.some
 ok('05 export: RM split blank for layers without a split (opening layer)', (() => { const cl = fgLayerSheet(split.closing, 'closing', P); const h = cl.aoa[1]; const iPC = h.indexOf('RM cost'); const row = cl.aoa.find((r) => r[2] === 'OP-A'); return iPC >= 0 && row[iPC] === ''; })());
 ok('05 export: RM split filled for the production layer (PC RM 250,000)', (() => { const cl = fgLayerSheet(split.closing, 'closing', P); const h = cl.aoa[1]; const iPC = h.indexOf('RM cost'); const iSO = h.indexOf('RM cost (Stock out)'); const row = cl.aoa.find((r) => r[2] && String(r[2]).startsWith('PR-')); return row && near(row[iPC].v, 250000) && near(row[iSO].v, 50000); })());
 
+// ---- v1.14.81 (audit AUD-08): 5P must reconcile before CLOSE – the gate used by STEP 5.3
+const P3 = await import('../src/views/phase3.js');
+P3.install({ fmtNum: (n) => String(Math.round(n)) });
+const gS = { period: P, d: { nrvDecision: null } };
+ok('5P gate: a reconciled provision movement does not block CLOSE', P3.provisionGate(gS, ret) === '');
+// a production layer carrying provision with no opening / return source: the 2294 movement cannot explain it
+const bad = structuredClone(ret); const prodLayer = bad.ledger.find((l) => l.source !== 'OPENING' && l.source !== 'RETURN'); prodLayer.prov = num(prodLayer.prov) - 50000;
+const badS = gS;
+ok('5P gate: the same data with the NRV decision recorded on every layer passes', P3.provisionGate({ period: P, d: { nrvDecision: { status: 'RECORDED', amount: 115000, recordedAmount: 115000, key: P3.nrvKey(ret) } } }, ret) === '');
+const gMsg = P3.provisionGate(badS, bad);
+ok('5P gate: provision with no source on a production layer blocks CLOSE (50,000)', /5P Dự phòng FG \(TK 2294\) chưa khớp/.test(gMsg) && /50000/.test(gMsg));
+ok('5P gate: no STEP 5 result → no 5P block (STEP 5 gates apply)', P3.provisionGate(gS, null) === '');
+
 console.log(`\n${total - fail}/${total} provision checks passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
