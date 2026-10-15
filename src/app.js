@@ -457,7 +457,9 @@ async function exportBook(fileName, sheets) {
   const subtitle = `SVL – Starry Vietnam Co., Ltd.   ·   Kỳ ${S.period}   ·   ${APP_VERSION.split('·')[0].trim()}   ·   Xuất lúc ${when}`;
   await exportStyledBook(fileName, sheets, { title: fileName.replace(/\.xlsx$/, ''), subtitle, company: 'SVL – Starry Vietnam Co., Ltd.' });
 }
-const exportTable = (name, columns) => (rows) => exportBook(`${name}_${S.period}.xlsx`, [{ name, title: `${name.replace(/_/g, ' ')}`, aoa: [columns.map((c) => c.label), ...rows.map((r) => columns.map((c) => { const x = Array.isArray(r) ? r[c.key] : r[c.key]; return c.type === 'date' && typeof x === 'number' ? serialToISO(x) : x ?? ''; }))], cols: columns.map((c) => Math.round((c.width || 120) / 7)) }]);
+// v1.14.61: a 'pct' / 'pct1' column carries its own Excel format (0.00% / 0.0%), so the export does not depend on the header text
+const PCT_Z = { pct: '0.00%', pct1: '0.0%' };
+const exportTable = (name, columns) => (rows) => exportBook(`${name}_${S.period}.xlsx`, [{ name, title: `${name.replace(/_/g, ' ')}`, aoa: [columns.map((c) => c.label), ...rows.map((r) => columns.map((c) => { const x = Array.isArray(r) ? r[c.key] : r[c.key]; if (c.type === 'date' && typeof x === 'number') return serialToISO(x); if (PCT_Z[c.type] && typeof x === 'number' && Number.isFinite(x)) return { v: x, z: PCT_Z[c.type] }; return x ?? ''; }))], cols: columns.map((c) => Math.round((c.width || 120) / 7)) }]);
 
 // ======================= layout =======================
 const NAV = [
