@@ -47,6 +47,20 @@ await page.goto(base + '#cc');
 await page.waitForFunction(() => document.querySelector('#account')?.textContent?.length > 0, null, { timeout: 30000 });
 await sleep(1200);
 ok('choice remembered on a new page (EN)', (await text(page)).includes('Sign out') && (await page.textContent('#lang')).trim() === 'VI');
+
+// v1.14.72: the 5P tab and the labels the app writes itself, in both languages (the page is in English here)
+await page.goto(base + '#provision'); await sleep(1200);
+t = await text(page);
+ok('EN: 5P tab title in English', t.includes('FG provision · TK 2294') && !t.includes('Dự phòng FG · TK 2294'));
+await page.goto(base + '#rework'); await sleep(1200);
+t = await text(page);
+ok('EN: app-written column headers in English (rework)', t.includes('Rework ID') && !t.includes('Mã rework'));
+await page.click('#lang'); await sleep(800);
+t = await text(page);
+ok('VI: app-written column headers in Vietnamese (rework)', t.includes('Mã rework') && !t.includes('Rework ID'));
+await page.goto(base + '#provision'); await sleep(1200);
+t = await text(page);
+ok('VI: 5P tab title in Vietnamese', t.includes('Dự phòng FG · TK 2294') && !t.includes('FG provision · TK 2294'));
 await page.evaluate(() => { try { localStorage.removeItem('svl.lang'); } catch {} });
 
 ok('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

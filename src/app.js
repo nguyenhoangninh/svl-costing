@@ -1984,7 +1984,7 @@ function installCard() {
   const img = '<img src="icons/icon-192.png" alt="">';
   if (isStandalone()) return `<div class="card install-card">${img}<div><b>Đang chạy như ứng dụng</b><div class="muted">Mở từ biểu tượng SVL Costing trên màn hình chính. Ứng dụng tự cập nhật khi có phiên bản mới.</div></div></div>`;
   if (installEvt) return `<div class="card install-card">${img}<div style="flex:1"><b>Cài SVL Costing lên máy</b><div class="muted">Có biểu tượng trên màn hình chính, mở toàn màn hình, xem được khi mất mạng.</div></div><button class="btn" data-act="install-app" type="button">Cài ứng dụng</button></div>`;
-  if (isIOS()) return `<div class="card install-card">${img}<div><b>Cài lên iPhone / iPad</b><div class="muted">Mở trang này bằng <b>Safari</b> → bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → <b>Thêm vào MH chính</b> → <b>Thêm</b>.</div></div></div>`;
+  if (isIOS()) return `<div class="card install-card">${img}<div><b>Cài lên iPhone / iPad</b><div class="muted">Mở trang này bằng <b>Safari</b> → bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên lên) → <b>Thêm vào màn hình chính</b> → <b>Thêm</b>.</div></div></div>`;
   return `<div class="card install-card">${img}<div><b>Cài SVL Costing như ứng dụng</b><div class="muted">Android: mở bằng Chrome → menu ⋮ → <b>Cài đặt ứng dụng</b> (hoặc <b>Thêm vào màn hình chính</b>). Máy tính: biểu tượng cài đặt trên thanh địa chỉ Chrome / Edge.</div></div></div>`;
 }
 document.addEventListener('click', async (e) => {
