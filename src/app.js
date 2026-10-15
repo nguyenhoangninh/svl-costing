@@ -302,10 +302,11 @@ async function openPeriod(p, { preferCloud = false } = {}) {
           const d = emptyData();
           for (const [k, v] of Object.entries(r.blobs)) { if (k.startsWith('ds:')) d.datasets[k.slice(3)] = v; else d[k] = v; }
           d.audit = d.audit || []; d.importLog = d.importLog || {}; d.soPrice = d.soPrice || []; d.manualPrice = d.manualPrice || []; d.directAdj = d.directAdj || [];
-          for (const k of await store.localKeys()) if (String(k).startsWith(`p/${p}/`)) await store.localDel(k);
-          await saveBlobs(p, d, Object.keys(blobsOf(d)));
+          // DATA-01: one IndexedDB transaction; the prior local snapshot stays
+          // intact on quota, storage or browser interruption. Only adopt in-memory
+          // state after the complete Cloud payload has passed chunk hash checks.
+          await store.localReplacePeriod(p, blobsOf(d), r.meta);
           S.d = d;
-          await store.localSet(lk(p, 'cloudRev'), r.meta.rev || 0); await store.localSet(lk(p, 'cloudAt'), r.meta.updatedAt); await store.localDel(lk(p, 'unsynced'));
         });
         S.sync = 'synced';
       } else if (meta && cloudNewer) {
