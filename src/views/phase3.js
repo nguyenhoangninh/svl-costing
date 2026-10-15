@@ -416,9 +416,16 @@ export async function doTemplate() {
   const pd = await A.loadPeriodData(prev);
   let rows = [];
   if (pd && pd.step5 && pd.step5.closing && confirm(`Điền sẵn template bằng FG cuối kỳ ${prev} (${pd.step5.closing.length} lớp)?`)) {
-    rows = pd.step5.closing.map((c) => [c.pc, typeof c.date === 'number' ? serialToISO(c.date) : c.date, c.mo, c.prod, c.name, c.loc, c.unit, c.qty, c.rm, c.a622, c.a627, c.tot, c.price, c.prov, c.cons, `05_FG_CLOSING ${prev} | ${c.lid}`, '']);
+    // v1.14.76: 22 columns; provision includes the NRV approved at that close (same as the 5P carry), so Net Inventory = Total + Provision
+    const add = nrvCarryAdd(pd.step5, pd.nrvDecision);
+    rows = pd.step5.closing.map((c) => {
+      const prov = num(c.prov) + num(add[c.lid]), q = num(c.qty), tot = num(c.tot);
+      return [c.pc, typeof c.date === 'number' ? serialToISO(c.date) : c.date, c.mo, c.prod, c.name, c.loc, c.unit, c.qty,
+        c.splitOK ? num(c.rmPC) : '', c.splitOK ? num(c.rmSO) : '', c.rm, c.a622, c.a627, c.tot, q ? Math.round(tot / q * 100) / 100 : '', c.price,
+        '', prov, tot + prov, c.cons, `05_FG_CLOSING ${prev} | ${c.lid}`, ''];
+    });
   }
-  await A.exportBook(`SVL_FG_Opening_Import_Template_v1_${S.period}.xlsx`, [{ name: 'FG_OPENING', keep: true, header: 4, aoa: [[F5.TPL_MARKER, 'v1', 'SVL - OPENING FINISHED GOODS BY PRODUCTION LOT (IMPORT TEMPLATE FOR STEP 5)'], ['Opening Period', '', S.period, 'Source Closing', prev, 'Prepared By', '', 'Prepared At'], ['Mỗi dòng là một lô còn tồn. Bắt buộc: PC No., Layer Date, Product Code, Qty, RM / 622 / 627 / Total Amount. Không đổi tiêu đề dòng 4 và dấu A1. Hướng dẫn chi tiết và ví dụ: sheet HUONG_DAN.'], F5.TPL_HEADERS, ...rows], cols: [15, 11, 17, 19, 32, 12, 7, 10, 17, 16, 16, 17, 11, 15, 13, 22, 24] }, TPL.fgOpeningGuide(S.period)]);
+  await A.exportBook(`SVL_FG_Opening_Import_Template_v2_${S.period}.xlsx`, [{ name: 'FG_OPENING', keep: true, header: 4, aoa: [[F5.TPL_MARKER, 'v2', 'SVL - OPENING FINISHED GOODS BY PRODUCTION LOT (IMPORT TEMPLATE FOR STEP 5)'], ['Opening Period', '', S.period, 'Source Closing', prev, 'Prepared By', '', 'Prepared At'], ['Mỗi dòng là một lô còn tồn. Bắt buộc: PC No., Layer Date, Product Code, Qty, RM / 622 / 627 / Total Amount. RM cost, RM cost (Stock out), Unit Cost, Provision USD, Net Inventory: không bắt buộc. Không đổi tiêu đề dòng 4 và dấu A1. Hướng dẫn: sheet HUONG_DAN.'], F5.TPL_HEADERS, ...rows], cols: [15, 11, 17, 19, 32, 12, 7, 10, 16, 18, 17, 16, 16, 17, 14, 11, 15, 17, 18, 13, 22, 24] }, TPL.fgOpeningGuide(S.period)]);
 }
 
 // ======================= 5.2 FIFO COGS =======================
