@@ -40,12 +40,18 @@ ok('STEP 5.2 no longer has the "Dự phòng FG" tab', (await page.locator('[data
 
 await page.goto(base + '#provision'); await page.waitForSelector('#f-provopen', { state: 'attached' }); await page.waitForTimeout(400);
 const body = await txt('main');
-ok('5P shows the FAST entries and the layer table', body.includes('Bút toán FAST') && body.includes('Theo dõi theo lớp'));
-ok('5P shows the rework block apart from the layer table', body.includes('Chuyển rework — tách riêng'));
+ok('5P shows the detail tabs: movement, FAST entries, layers, rework', body.includes('Bút toán FAST') && body.includes('Theo lớp (') && body.includes('Rework · chờ ('));
+ok('5P shows the equation strip: opening + increase − decrease = closing', body.includes('Tăng (NRV duyệt)') && body.includes('Giảm (hoàn nhập)') && body.includes('Cuối kỳ'));
+await page.click('[data-tabp="rw"]'); await page.waitForTimeout(300);
+ok('the rework tab holds the part kept apart (not posted)', (await txt('main')).includes('chưa có trong bút toán FAST'));
+await page.click('[data-tabp="move"]'); await page.waitForTimeout(300);
 // v1.14.73: opening + increase (NRV approved) − decrease (release) = closing; NRV decision and carry-forward live in 5P
 ok('5P shows the movement: opening, increase (NRV), decrease (release), closing', body.includes('Số dư đầu kỳ') && body.includes('Tăng: NRV được duyệt') && body.includes('Giảm: hoàn nhập') && body.includes('Số dư cuối kỳ'));
 ok('5P has the carry-from-previous-period button', (await page.locator('#prov-carry').count()) === 1);
-ok('5P holds the NRV decision section', body.includes('Quyết định NRV trong kỳ'));
+ok('5P holds the NRV decision section', body.includes('2 · Tăng · NRV'));
+// the carry button reaches the previous period (no data for 2026-07 here: a clear message, no page error)
+await page.click('#prov-carry'); await page.waitForTimeout(1200);
+ok('carry from previous period answers with a message (no previous STEP 5 here)', (await txt('#toasts')).includes('chưa có số liệu STEP 5'));
 await page.goto(base + '#close'); await page.waitForSelector('.result');
 ok('5.3 no longer has the NRV decision form', (await page.locator('#f-nrv-decision').count()) === 0);
 await page.screenshot({ path: path.join(outDir, 'provision-5p-2.png') });
