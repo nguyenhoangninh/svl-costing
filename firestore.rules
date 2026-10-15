@@ -61,15 +61,16 @@ service cloud.firestore {
             && request.resource.data.summary.diff(resource.data.summary).affectedKeys().hasOnly(['closed', 'everClosed', 'step5'])
             && request.resource.data.summary.get('everClosed', false) == true)
         );
-      // A period that has ever been CLOSED is an accounting record and may not be hard-deleted.
-      allow delete: if isAdmin() && closedOf(resource.data) == null
-        && resource.data.get('summary', {}).get('everClosed', false) != true;
+      // DATA-02/03: immutable revision history is retained even for OPEN drafts.
+      // A Cloud period pointer must never be hard-deleted from a client.
+      allow delete: if false;
       match /chunks/{chunk} {
         allow read: if canRead();
         // Content-addressed accounting chunks are immutable: create while OPEN, never update in place.
         allow create: if canWrite() && periodOpen(period);
         allow update: if false;
-        allow delete: if isAdmin() && periodOpen(period);
+        // Old revision manifests may still reference this chunk after REOPEN.
+        allow delete: if false;
       }
       // Immutable manifest snapshot for every committed cloud revision.
       match /revisions/{revision} {
