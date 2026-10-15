@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { buildDataset } from '../src/engine/step1.js';
 import { runStep2, buildReworkRegister, recheckRegisterRow } from '../src/engine/step2.js';
-import { validateOpening, runStep3 } from '../src/engine/step3.js';
+import { validateOpening, runStep3, step3Stale, wipJournalAmounts } from '../src/engine/step3.js';
 import { deriveInput, runBuild, engineDynamic, applyControl, wipFinal, postedByLot, writeInput } from '../src/engine/step3b.js';
 import { importSales, validateSaveSales, updatePriceMaster, runStep4, finalLayer } from '../src/engine/step4.js';
 import * as F5 from '../src/engine/step5.js';
@@ -124,6 +124,14 @@ let fails = 0; const ok = (label, cond, info = '') => { if (!cond) { fails++; co
   try { s4c = runStep4({ period: P, step2: s2c, step3: s3c, pm, gl, directAdj: [] }); } catch (e) { err = e.message; }
   ok('consumption: STEP 4 RM bridge holds without adding consumption back', !!s4c && !err, err);
   ok('consumption: without a marked line STEP 3 has nothing left out', s3.consExcluded === true && s3.consumptionLinesExcluded === 0 && s3.checks.consVsStep2.status === 'PASS');
+  // v1.14.77: the journal follows what STEP 3 put in WIP (JE02 = Stock Out in WIP, JE02B = 632 / 152 consumption)
+  const J = wipJournalAmounts(s3c, s2c);
+  ok('journal: JE02 equals the Stock Out STEP 3 puts in WIP, JE02B = consumption', near(J.so, s3c.summary.soAmt) && near(J.cons, 175000), JSON.stringify(J));
+  ok('journal: 152 credit = full Stock Out (WIP + consumption) and 154 debit = MI + Stock Out in WIP', near(J.mi + J.so + J.cons, s3.summary.miAmt + s3.summary.soAmt) && near(J.mi + J.so, s3c.summary.miAmt + s3c.summary.soAmt));
+  const Jold = wipJournalAmounts({ ...s3, consExcluded: false }, s2c);
+  ok('journal: an older STEP 3 result (consumption still in its Stock Out) is taken off', near(Jold.so, s3.summary.soAmt - 175000) && near(Jold.cons, 175000));
+  // a STEP 3 result built before the consumption line was marked (or on an older STEP 2) is flagged, and the flag clears on a fresh run
+  ok('stale: STEP 3 built on an older STEP 2 is flagged; a fresh STEP 3 is not', step3Stale(s3, s2c) === true && step3Stale(s3c, s2c) === false && step3Stale(null, s2c) === false);
 }
 // v1.14.50: checkpoint 08 detail — every counted shortage is listed (none without a count, none with zero quantity)
 ok('shortList empty exactly when checkpoint 08 is 0 (MONTHLY and STRICT_DATE)', [M, St].every(({ res }) => (res.shortList.length === 0) === (res.stats.shortProducts === 0)), `M=${M.res.shortList.length}/${M.res.stats.shortProducts} St=${St.res.shortList.length}/${St.res.stats.shortProducts}`);

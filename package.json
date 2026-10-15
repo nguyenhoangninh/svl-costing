@@ -1,6 +1,6 @@
 {
   "name": "svl-costing",
-  "version": "1.14.76",
+  "version": "1.14.77",
   "description": "SVL Costing Master on the web",
   "scripts": {
     "test": "node test/unit.mjs && node test/nrv-decision.mjs && node test/synth.mjs && node test/rules-syntax.mjs && node test/rules-contract.mjs && node test/xlsxstyle.mjs && node test/export-form.mjs && node test/approvals-logic.mjs && node test/notifications.mjs && node test/notification-fallback.mjs && node test/matcost-logic.mjs && node test/r6-basis.mjs && node test/provision-logic.mjs && node test/i18n-vi.mjs",
@@ -11,7 +11,8 @@
     "test:e2e:step1c": "node test/e2e-step1-c.mjs http://127.0.0.1:8765/ ../fixtures/erp ../costing.xlsm",
     "test:layout": "node test/layout-audit.mjs http://127.0.0.1:8765/ ../costing.xlsm ../fixtures/erp /tmp/layout-audit",
     "test:e2e:i18n": "node test/e2e-i18n.mjs http://127.0.0.1:8765/ ../costing.xlsm",
-    "test:e2e:approvals": "node test/e2e-approvals.mjs http://127.0.0.1:8765/ ../costing.xlsm . ../fixtures/returns_2026_08.xlsx"
+    "test:e2e:approvals": "node test/e2e-approvals.mjs http://127.0.0.1:8765/ ../costing.xlsm . ../fixtures/returns_2026_08.xlsx",
+    "test:e2e:consumption": "node test/e2e-consumption.mjs http://127.0.0.1:8765/ ../fixtures/erp ../costing.xlsm"
   },
   "author": "",
   "license": "ISC",

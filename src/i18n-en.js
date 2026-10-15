@@ -1,6 +1,12 @@
 // v1.14.59: English UI strings. Keys are the Vietnamese text as rendered (trimmed, single spaces), numbers replaced by {#}.
 // Generated from a crawl of every screen and tab; values keep {#} in the same order.
 export const EN = {
+// v1.14.77: STEP 3 follows the consumption lines and the latest STEP 2 run
+"WIP chưa khớp STEP 2 hiện tại.": "WIP does not match the current STEP 2 yet.",
+"Danh sách tiêu hao hoặc STEP 2 đã đổi sau lần chạy STEP 3 gần nhất.": "The consumption list or STEP 2 changed after the latest STEP 3 run.",
+"Bấm Chạy STEP 2 để WIP khớp (STEP 3 tự tính lại).": "Click Run STEP 2 so WIP matches (STEP 3 recalculates automatically).",
+"STEP 3 đã tính lại theo STEP 2 mới.": "STEP 3 recalculated on the new STEP 2.",
+"chạy lại STEP 3.": "rerun STEP 3.",
 // v1.14.72: VI labels changed from English to Vietnamese (NRV form, Direct 632 table, provision notes)
 "Quyết định NRV": "NRV decision",
 "Tham chiếu kế toán": "Accounting reference",
@@ -1178,6 +1184,7 @@ export const EN = {
 
 // v1.14.59: toast / dialog messages. MSG_EXACT: whole message; MSG_PREFIX: 'prefix: <detail>'; MSG_WILD: text pieces around ${…} values, joined by {*}.
 export const MSG_EXACT = {
+"Danh sách tiêu hao đã đổi sau STEP 2 gần nhất. Bấm Chạy STEP 2 trước.": "The consumption list changed after the latest STEP 2 run. Click Run STEP 2 first.",
 "Bảng tổng hợp đã khớp STEP 4.3 và FIFO.": "The summary table matches STEP 4.3 and FIFO.",
 "CONTROL cũ hơn STEP 3. Chạy 1 BUILD / REFRESH trước.": "CONTROL is older than STEP 3. Run 1 BUILD / REFRESH first.",
 "Chưa BUILD.": "Not BUILT yet.",
@@ -1250,6 +1257,7 @@ export const MSG_EXACT = {
 "Đã xoá dữ liệu trên máy này.": "Data on this device cleared."
 };
 export const MSG_PREFIX = [
+["STEP 3 cũ đã bỏ (", "STEP 3 previous result removed ("],
 [
 "Lỗi lưu trên máy:",
 "Error saving on this device:"

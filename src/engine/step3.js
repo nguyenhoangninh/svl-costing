@@ -278,3 +278,20 @@ export function runStep3(datasets, opening, step2, period, latestImport) {
   };
   return { period, runAt: nowISO(), consExcluded: true, consumptionLinesExcluded: consSkipped, consumptionAmt: consAmt, fgStockOutLinesExcluded: fgSkipped, openingSource: opening.source || '', openingStatus: opening.status, openingAmt: opening.stats ? opening.stats.totalAmt : 0, rows, summary: S, checks, step2RunAt: step2.runAt };
 }
+
+/** v1.14.77: STEP 3 was built on an older STEP 2 run (STEP 2 re-run after the STEP 3 result was made). */
+export function step3Stale(s3, s2) {
+  return !!s3 && !!s2 && s3.step2RunAt !== s2.runAt;
+}
+
+/**
+ * v1.14.77: amounts of the WIP journal lines (154 / 632 / 152) from a STEP 3 result.
+ * From v1.14.75 STEP 3's Stock Out already leaves out the consumption lines, so JE02 is that Stock Out as it is
+ * and the consumption sits on its own line (632 / 152). Older results still include it in Stock Out: take it off there.
+ */
+export function wipJournalAmounts(s3, s2) {
+  const mi = num(s3.summary.miAmt), so = num(s3.summary.soAmt);
+  if (s3.consExcluded) return { mi, so, cons: num(s3.consumptionAmt) };
+  const cons = num(s2 && s2.total ? s2.total.cons : 0);
+  return { mi, so: so - cons, cons };
+}

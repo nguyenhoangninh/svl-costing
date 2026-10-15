@@ -3,7 +3,7 @@ import { ERPS, REPORTS, dsKey, isPeriod, nextPeriod, prevPeriod, num, txt, ttxt,
 import { buildDataset, planImport, step1Status } from './engine/step1.js';
 import * as SP from './engine/syncpolicy.js';
 import { runStep2, buildReworkRegister, step2Classification, recheckRegisterRow, stockOutLines, STEP2_RULES, STEP2_DETAIL_HEADERS, RW_FIELDS, RW_HEADERS, confirmConsFg, undoConsFg, consFgEligible, consFgConfirmed, consFgPendingCount } from './engine/step2.js';
-import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS } from './engine/step3.js';
+import { validateOpening, detectOpeningSource, openingFromSource, openingFromClosing, runStep3, WIP_HEADERS, step3Stale, wipJournalAmounts } from './engine/step3.js';
 import { step1Controls, step2Controls, step3Controls, accessLimitedCount, outOfPeriodRows, fallbackAlloc } from './engine/controls.js';
 import { mountTable, esc } from './ui/table.js';
 import { fmtCell, fmtNum, fmtTs, statusClass } from './ui/format.js';
@@ -682,10 +682,11 @@ function emptyNote(msg, href, cta) { return `<div class="empty"><p>${esc(msg)}</
 function journal(st) {
   const s3 = S.d.step3; if (!s3) return '';
   const S3 = s3.summary;
-  // v1.14.28: RM consumption (tiêu hao) is posted straight to 632, not through the WIP / PC lots
-  const consAmt = (S.d.step2 && num(S.d.step2.total.cons)) || 0;
-  const je = [['JE01', '154', '152', 'Xuất NVL vào WIP – MI', S3.miAmt], ['JE02', '154', '152', 'Xuất NVL vào WIP – Stock Out (không gồm tiêu hao)', S3.soAmt - consAmt]];
-  if (consAmt) je.push(['JE02B', '632', '152', 'Tiêu hao NVL – xuất thẳng vào 632', consAmt]);
+  // v1.14.28: RM consumption (tiêu hao) is posted straight to 632, not through the WIP / PC lots.
+  // v1.14.77: the amounts follow what STEP 3 put in WIP (consumption already out of its Stock Out), see wipJournalAmounts
+  const J = wipJournalAmounts(s3, S.d.step2);
+  const je = [['JE01', '154', '152', 'Xuất NVL vào WIP – MI', J.mi], ['JE02', '154', '152', 'Xuất NVL vào WIP – Stock Out (không gồm tiêu hao)', J.so]];
+  if (J.cons) je.push(['JE02B', '632', '152', 'Tiêu hao NVL – xuất thẳng vào 632', J.cons]);
   je.push(['JE05', '152', '154', 'Nhập lại NVL từ WIP – MR', S3.mrAmt]);
   const s4 = S.d.step4, fl = st && st.p2.d4 && st.p2.d4.fl;
   if (s4 && !s4.blocked) je.push(['JE03', '154', '622', 'Kết chuyển nhân công trực tiếp', s4.alloc622], ['JE04', '154', '627', 'Kết chuyển chi phí SX chung', s4.alloc627]);
@@ -1085,6 +1086,24 @@ VIEWS.step2 = (el) => {
   }
 };
 
+/** v1.14.77: STEP 3 keeps the result of the STEP 2 run it was built on. When STEP 2 runs again (e.g. after the consumption
+ *  lines changed), STEP 3 is rebuilt at once so WIP never keeps lines that are now marked as consumption. */
+function refreshStep3AfterStep2() {
+  if (!S.d.step3) return '';
+  try {
+    const latestImport = step1Status(datasetsMeta()).latestImport;
+    // same gate as doStep3: no STEP 3 while STEP 2 still has a BLOCK checkpoint
+    const c2 = step2Controls({ period: S.period, step2: S.d.step2, register: S.d.register, latestImport });
+    if (String(c2.status).startsWith('BLOCK')) throw new Error('STEP 2 còn checkpoint BLOCK');
+    S.d.step3 = runStep3(S.d.datasets, S.d.opening, S.d.step2, S.period, latestImport);
+    markDirty('step3');
+    return ' STEP 3 đã tính lại theo STEP 2 mới.';
+  } catch (e) {
+    S.d.step3 = null; markDirty('step3');
+    return ` STEP 3 cũ đã bỏ (${e.message}) – chạy lại STEP 3.`;
+  }
+}
+
 function doStep2() {
   const dq = DQ.erpAnomalies(S.d.datasets, S.period);
   if (DQ.anomalyStatus(dq, S.d.importAck) === 'BLOCK - CONFIRM') {
@@ -1108,8 +1127,9 @@ function doStep2() {
     S.d.register = buildReworkRegister(S.d.datasets, S.period, S.d.register ? S.d.register.rows : [], bf);
     if (bfSrc) S.d.register.bfSrc = bfSrc;
     audit('STEP 2 - STOCK OUT (RM / FG SPLIT)', `${s2.status} · NVL phân bổ ${fmtNum(s2.total.alloc)} · FG rework ${S.d.register.stats.rows} dòng`);
+    const s3note = refreshStep3AfterStep2();
     markDirty('step2', 'register', 'audit');
-    toast(`STEP 2 xong: ${s2.status}. Đã phân bổ ${fmtNum(s2.total.alloc)} VND.`, s2.status === 'PASS' ? 'pass' : 'review');
+    toast(`STEP 2 xong: ${s2.status}. Đã phân bổ ${fmtNum(s2.total.alloc)} VND.${s3note}`, s2.status === 'PASS' ? 'pass' : 'review');
   } catch (e) { toast('STEP 2 dừng: ' + e.message, 'block'); }
   render();
 }
@@ -1360,6 +1380,7 @@ VIEWS.step3 = (el) => {
     <div class="kpis">${kpiN('Vật tư', s3.rows.length)}${kpiN('Vật tư mới', s3.summary.newMat)}${kpiN('Ngoại lệ', s3.summary.exceptions)}${kpiN('WIP âm', s3.summary.negative)}${kpiN('Dòng MR SL = 0 có giá trị', s3.checks.mrQty.lines)}</div>
     ${s3.consExcluded && s3.consumptionLinesExcluded ? `<div class="alert info">Tiêu hao NVL không qua WIP: ${s3.consumptionLinesExcluded} dòng Stock Out đánh dấu tiêu hao ở STEP 2 (${fmtNum(s3.consumptionAmt)} VND) ghi thẳng Nợ 632 / Có 152, không tính vào Stock Out của WIP.</div>` : ''}
     ${!s3.consExcluded && S.d.step2 && Math.abs(num(S.d.step2.total.cons)) > 0.5 ? `<div class="alert review"><b>Kết quả STEP 3 cũ còn tính tiêu hao NVL vào WIP.</b> Chạy lại STEP 3 để tiêu hao (632 / 152) không đi qua TK 154.</div>` : ''}
+    ${step3Stale(s3, S.d.step2) || consStale(S.d.step2, new Set(consumeLineKeys())) ? `<div class="alert review"><b>WIP chưa khớp STEP 2 hiện tại.</b> Danh sách tiêu hao hoặc STEP 2 đã đổi sau lần chạy STEP 3 gần nhất. Bấm Chạy STEP 2 để WIP khớp (STEP 3 tự tính lại).</div>` : ''}
     ${s3.checks.mrQty.lines ? `<div class="alert review">MR-M: ${s3.checks.mrQty.lines} dòng có Quantity = 0 nhưng Total Cost = ${fmtNum(s3.checks.mrQty.cost)} VND. Kiểm tra file MR-M xuất từ ERP. (Nguồn SL: T, O = Quantity; S = Bad Quantity; không dùng Req. Qty.)</div>` : ''}
     <h2>Checkpoint</h2>${cpTable(st.s3c.rows)}
     <h2>WIP theo vật tư</h2><div id="t-wip"></div>` : `<h2>Checkpoint</h2>${cpTable(st.s3c.rows)}${emptyNote('Chưa chạy STEP 3. Cần STEP 2 = PASS và Opening WIP đã validate.')}`}
@@ -1375,6 +1396,8 @@ const flowBox = (l, x, strong) => `<div class="fb ${strong ? 'strong' : ''}"><sp
 function doStep3() {
   try {
     const s1 = step1Status(datasetsMeta());
+    // v1.14.77: STEP 3 must use the consumption lines as they are now; a change not yet run through STEP 2 is refused
+    if (consStale(S.d.step2, new Set(consumeLineKeys()))) throw new Error('Danh sách tiêu hao đã đổi sau STEP 2 gần nhất. Bấm Chạy STEP 2 trước.');
     const c2 = step2Controls({ period: S.period, step2: S.d.step2, register: S.d.register, latestImport: s1.latestImport });
     if (String(c2.status).startsWith('BLOCK')) throw new Error('STEP 2 còn checkpoint BLOCK. Xử lý/duyệt fallback trước khi chạy STEP 3.');
     const s3 = runStep3(S.d.datasets, S.d.opening, S.d.step2, S.period, s1.latestImport);
