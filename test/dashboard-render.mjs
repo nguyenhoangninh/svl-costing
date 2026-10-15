@@ -56,6 +56,8 @@ DB.install(A);
 DB.view(el);
 let html = el.innerHTML;
 ok('header, filter bar and export button', html.includes('Dashboard điều hành') && html.includes('id="dx-cust"') && html.includes('id="dx-prod"') && html.includes('id="dash-export"'));
+ok('ranking links can drill to invoice detail', html.includes('data-dx-cust="B"') && html.includes('data-dx-prod="P2"'));
+ok('comparative revenue source is transparently named', html.includes('Nguồn so sánh:') && html.includes('Sales Database kỳ trước'));
 ok('six KPI cards', (html.match(/class="dx-kpi /g) || []).length === 6);
 ok('monthly trend chart with the period month highlighted', html.includes('dx-trend') && html.includes('class="dx-ax cur">T8<'));
 ok('last year line drawn from the Sales Database', html.includes('class="dx-last"'));
