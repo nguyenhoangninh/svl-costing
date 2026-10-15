@@ -1008,14 +1008,38 @@ export async function doClose() {
     A.markDirty('closed', 'closedEver', 'rwArchive', 'audit');
     A.toast(doneMsg, 'pass'); A.render(); return;
   }
+  // v1.14.89 (audit AUD-01 / AUD-10): this CLOSE has its own transition id, committed with the close revision; the outcome
+  // is read back from the cloud pointer, so a lost reply, a failed write and a close made by another session are told apart
+  const trId = SP.newTransitionId('CLOSE', S.period);
+  d.closed.transitionId = trId;
+  if (A.setPendingTransition) A.setPendingTransition({ id: trId, kind: 'CLOSE', period: S.period, from: 'OPEN', to: 'CLOSED', at: d.closed.closedAt, reason: '' });
   A.markDirty('closed', 'closedEver', 'rwArchive');
   A.toast('Đang ghi trạng thái ĐÓNG KỲ lên cloud…', 'review');
   const r = await A.syncNow();
-  // the reply can be lost after the cloud has committed: the close timestamp confirms it, so nothing is applied twice
-  const committed = r.ok || SP.closeCommitted(await A.cloudMeta(S.period).catch(() => null), d.closed.closedAt);
-  if (!committed) {
-    d.fgProd = before.fgProd; d.closed = before.closed; d.closedEver = before.closedEver; d.rwArchive = before.rwArchive;
-    A.markDirty('closed', 'closedEver', 'rwArchive', 'fgProd');
+  let meta = null, metaError = false;
+  try { meta = await A.cloudMeta(S.period); } catch { metaError = true; }
+  let outcome = SP.transitionOutcome({ ok: r.ok, skipped: r.skipped, writtenId: r.writtenId, meta, metaError, id: trId, kind: 'CLOSE' });
+  // a pointer written before transition ids existed: the close timestamp still proves it was this close
+  if (outcome !== 'COMMITTED' && SP.closeCommitted(meta, d.closed.closedAt)) outcome = 'COMMITTED';
+  if (A.setPendingTransition) A.setPendingTransition(null);
+  const rollback = () => { d.fgProd = before.fgProd; d.closed = before.closed; d.closedEver = before.closedEver; d.rwArchive = before.rwArchive; A.markDirty('closed', 'closedEver', 'rwArchive', 'fgProd'); };
+  if (outcome === 'BY_OTHER') {
+    rollback();
+    const t = meta && meta.transition;
+    A.audit('STEP 5 - CLOSE MONTH NOT APPLIED', `Kỳ đã được đóng từ phiên khác${t ? ` (${t.actor || ''} · ${t.at || ''} · ${t.id || ''})` : ''}; yêu cầu ${trId} không ghi`);
+    A.toast(`Kỳ ${S.period} đã được ĐÓNG từ phiên khác${t && t.actor ? ` (${t.actor})` : ''}. Lần bấm này không ghi gì; hãy tải lại bản cloud.`, 'review');
+    A.render(); return;
+  }
+  if (outcome === 'UNKNOWN') {
+    // keep the local close: if the cloud did not commit, the next sync writes the same close revision again
+    A.audit('STEP 5 - CLOSE MONTH UNVERIFIED', `Chưa đọc được cloud để xác nhận ${trId}: ${r.error || ''}`);
+    A.toast(`Chưa xác minh được CLOSE trên cloud (${r.error || 'mất kết nối'}). Dữ liệu trên máy giữ trạng thái đóng; mở lại màn hình khi có kết nối để kiểm tra.`, 'review');
+    A.render(); return;
+  }
+  // confirmed by reading the cloud back (reply lost): this device now holds the cloud revision, so the next write does not conflict
+  if (outcome === 'COMMITTED' && !r.ok && meta && A.adoptCommit) await A.adoptCommit(S.period, meta);
+  if (outcome !== 'COMMITTED') {
+    rollback();
     A.audit('STEP 5 - CLOSE MONTH FAILED', `Cloud chưa xác nhận: ${r.error}`);
     A.toast(cloudTransitionMessage('CHƯA đóng kỳ', { message: r.error }), 'block');
     A.render(); return;
@@ -1058,12 +1082,33 @@ export async function doReopen() {
   S.d.closed = null;
   A.markDirty('closed');
   if (A.cloudOn()) {
+    // v1.14.89 (audit AUD-09 / AUD-10): the REOPEN carries its transition id and reason; the result is read back from the
+    // cloud. A lost reply after the commit must not put the device back to CLOSED (the next sync would close it again).
+    const trId = SP.newTransitionId('REOPEN', S.period);
+    if (A.setPendingTransition) A.setPendingTransition({ id: trId, kind: 'REOPEN', period: S.period, from: 'CLOSED', to: 'OPEN', at: nowISO(), reason });
     A.toast('Đang ghi revision MỞ LẠI KỲ lên cloud…', 'review');
     const r = await A.syncNow();
-    if (!r.ok) {
+    let meta = null, metaError = false;
+    try { meta = await A.cloudMeta(S.period); } catch { metaError = true; }
+    const outcome = SP.transitionOutcome({ ok: r.ok, skipped: r.skipped, writtenId: r.writtenId, meta, metaError, id: trId, kind: 'REOPEN' });
+    if (A.setPendingTransition) A.setPendingTransition(null);
+    if (outcome === 'NOT_COMMITTED') {
       S.d.closed = was;
       A.markDirty('closed');
       A.toast(cloudTransitionMessage('CHƯA mở lại kỳ', { message: r.error }), 'block');
+      A.render(); return;
+    }
+    if (outcome === 'COMMITTED' && !r.ok && meta && A.adoptCommit) await A.adoptCommit(S.period, meta);
+    if (outcome === 'BY_OTHER' && meta && A.adoptCommit) await A.adoptCommit(S.period, meta);
+    if (outcome === 'BY_OTHER') {
+      const t = meta && meta.transition;
+      A.audit('STEP 5 - REOPEN NOT APPLIED', `Kỳ đã được mở lại từ phiên khác${t ? ` (${t.actor || ''} · ${t.at || ''} · ${t.id || ''})` : ''}; yêu cầu ${trId} không ghi`);
+      A.toast(`Kỳ ${S.period} đã được MỞ LẠI từ phiên khác${t && t.actor ? ` (${t.actor})` : ''}. Máy này theo trạng thái cloud (OPEN).`, 'review');
+      A.render(); return;
+    }
+    if (outcome === 'UNKNOWN') {
+      A.audit('STEP 5 - REOPEN UNVERIFIED', `Chưa đọc được cloud để xác nhận ${trId}: ${r.error || ''} · lý do: ${reason}`);
+      A.toast(`Chưa xác minh được MỞ LẠI KỲ trên cloud (${r.error || 'mất kết nối'}). Máy này giữ trạng thái OPEN; mở lại màn hình khi có kết nối để kiểm tra.`, 'review');
       A.render(); return;
     }
   }

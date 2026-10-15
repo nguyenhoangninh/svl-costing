@@ -1240,6 +1240,19 @@ eq('read plan: never synced on this device → read the cloud', SP.periodReadPla
   eq('AUD-06: without # the line key follows the content, not the row order', [k1[0] === k2[1], k1[1] === k2[0], k1[0] !== k1[1]], [true, true, true]);
 }
 
+// ---- v1.14.89 (audit AUD-01 / 09 / 10): CLOSE / REOPEN outcome from the cloud pointer, not from the reply
+{
+  const id = 'CLOSE-2026-08-x';
+  eq('transition: the pointer carries this id → COMMITTED (even when the reply was lost)', SP.transitionOutcome({ ok: false, meta: { summary: { closed: 'T' }, transition: { id } }, id, kind: 'CLOSE' }), 'COMMITTED');
+  eq('transition: "skipped" because another session closed first → BY_OTHER, not a success (AUD-01)', SP.transitionOutcome({ ok: true, skipped: true, meta: { summary: { closed: 'T0' }, transition: { id: 'CLOSE-2026-08-other' } }, id, kind: 'CLOSE' }), 'BY_OTHER');
+  eq('transition: cloud still OPEN after a failed CLOSE → NOT_COMMITTED', SP.transitionOutcome({ ok: false, meta: { summary: { closed: null } }, id, kind: 'CLOSE' }), 'NOT_COMMITTED');
+  eq('transition: cloud unreadable and no confirmed write → UNKNOWN (no blind rollback)', SP.transitionOutcome({ ok: false, metaError: true, id, kind: 'CLOSE' }), 'UNKNOWN');
+  eq('transition: write returned this id, read-back failed → COMMITTED', SP.transitionOutcome({ ok: true, writtenId: id, metaError: true, id, kind: 'CLOSE' }), 'COMMITTED');
+  eq('transition: REOPEN reply lost but the cloud is OPEN with this id → COMMITTED (AUD-09)', SP.transitionOutcome({ ok: false, meta: { summary: { closed: null }, transition: { id: 'R1' } }, id: 'R1', kind: 'REOPEN' }), 'COMMITTED');
+  eq('transition: REOPEN while another session already reopened → BY_OTHER', SP.transitionOutcome({ ok: false, meta: { summary: { closed: null }, transition: { id: 'R0' } }, id: 'R1', kind: 'REOPEN' }), 'BY_OTHER');
+  eq('transition: ids are unique per request', SP.newTransitionId('CLOSE', '2026-08', 1, () => 0.1) !== SP.newTransitionId('CLOSE', '2026-08', 1, () => 0.2), true);
+}
+
 // ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);

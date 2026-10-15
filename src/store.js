@@ -239,12 +239,15 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
   const safeSummary = { ...(summary || {}) };
   if ((cur && cur.summary && (cur.summary.everClosed || cur.summary.closed)) || safeSummary.closed) safeSummary.everClosed = true;
   const meta = { period, rev: curRev + 1, blobs: manifest, manifestHash, summary: safeSummary, updatedAt: new Date().toISOString(), updatedBy: cloud.user.email };
+  // v1.14.89 (audit AUD-10): a CLOSE / REOPEN carries its transition (id, from → to, actor, reason, source revision) in the
+  // pointer and in the immutable revision document of the same commit
+  if (opts.transition) meta.transition = { ...opts.transition, rev: meta.rev, previousRev: curRev, actor: cloud.user.email.toLowerCase() };
   const revisionId = `${String(meta.rev).padStart(6, '0')}-${manifestHash}`;
   // Never announce a no-op manual sync; every announcement is atomically linked to a committed revision.
   const changed = Object.keys({ ...old, ...manifest }).some((name) => (old[name] && old[name].hash) !== (manifest[name] && manifest[name].hash))
     || JSON.stringify(cur && cur.summary || {}) !== JSON.stringify(safeSummary);
   // v1.14.81 (audit AUD-07): a sync that changes nothing (same manifest, same summary) writes no revision: NO_CHANGE.
-  if (cur && !changed && !opts.forceRevision) return { ...cur, noChange: true };
+  if (cur && !changed && !opts.forceRevision && !opts.transition) return { ...cur, noChange: true };
   const announcement = changed && opts.notice ? {
     ...opts.notice, period, rev: meta.rev, actor: cloud.user.email.toLowerCase(),
     actorUid: cloud.user.uid, clientAt: meta.updatedAt, createdAt: F.serverTimestamp(),
@@ -254,7 +257,7 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
     const r2 = s2.exists() ? s2.data().rev || 0 : 0;
     if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
     t.set(pdoc(period), meta);
-    t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt });
+    t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt , ...(meta.transition ? { transition: meta.transition } : {})});
     if (includeNotice) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
   });
   try {

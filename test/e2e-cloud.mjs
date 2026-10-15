@@ -126,6 +126,33 @@ ok('ENH-04/09 lost reply: every chunk the committed pointer references still exi
 const chunkKeysAfter = (await docKeys(`svl_costing_periods/${P8}/chunks/`)).length;
 ok('ENH-04/09 lost reply: committed revision keeps its chunks (none deleted by the failed-write cleanup)', chunkKeysAfter >= chunkKeysBefore, `${chunkKeysBefore} → ${chunkKeysAfter}`);
 
+// ---- v1.14.89 audit AUD-10: the close revision carries its transition (id, CLOSE, actor) in the pointer and the revision ----
+{
+  const ptr = await docVal(`svl_costing_periods/${P8}`);
+  const rid = `svl_costing_periods/${P8}/revisions/${String(ptr.rev).padStart(6, '0')}-${ptr.manifestHash}`;
+  const rev = await docVal(rid);
+  ok('AUD-10: the close pointer carries its transition (CLOSE, OPEN → CLOSED, actor)', ptr.transition && ptr.transition.kind === 'CLOSE' && ptr.transition.from === 'OPEN' && ptr.transition.to === 'CLOSED' && /admin\.test/.test(ptr.transition.actor || ''), JSON.stringify(ptr.transition || null));
+  ok('AUD-10: the immutable revision document holds the same transition', !!rev && rev.transition && rev.transition.id === ptr.transition.id, rid);
+}
+// ---- v1.14.89 audit AUD-09: REOPEN committed but the reply is lost → the device stays OPEN and nothing re-closes it ----
+{
+  await gotoTab('#close'); await page.waitForSelector('.result');
+  const reopenBefore = await countAudit('STEP 5 - REOPEN PERIOD');
+  await F(() => { window.__fake.dropReplyAfterCommit = 1; });
+  await page.evaluate(() => { const t = document.querySelector('#toasts'); if (t) t.innerHTML = ''; });
+  await page.click('[data-act=s5-reopen]'); await sleep(4000);
+  ok('AUD-09: REOPEN with a lost reply is confirmed from the cloud (device OPEN)', !(await docVal(`svl_costing_periods/${P8}`))?.summary?.closed && !/CLOSED/.test((await page.textContent('.result').catch(() => '')) || ''), (await toasts()).slice(-160));
+  ok('AUD-09: the REOPEN is recorded exactly once', (await waitAudit('STEP 5 - REOPEN PERIOD', reopenBefore + 1)) && (await countAudit('STEP 5 - REOPEN PERIOD')) === reopenBefore + 1);
+  const revs = await F((p) => [...window.__fake.docs.entries()].filter(([k]) => k.startsWith(p)).map(([, v]) => v.transition).filter(Boolean), `svl_costing_periods/${P8}/revisions/`);
+  ok('AUD-09/10: the reopen revision keeps its transition and reason (pointer keeps only the latest commit)', revs.some((t) => t.kind === 'REOPEN' && !!t.reason && t.from === 'CLOSED' && t.to === 'OPEN'), JSON.stringify(revs.map((t) => t.kind)));
+  await sleep(2500); await waitSynced();
+  ok('AUD-09: a later sync does not close the period again', !(await docVal(`svl_costing_periods/${P8}`))?.summary?.closed);
+  // close again for the remaining tests
+  await gotoTab('#close'); await page.waitForSelector('.result');
+  await page.click('[data-act=s5-close]');
+  ok('period closed again for the delete tests', await waitToast(/cloud đã xác nhận/));
+}
+
 // ---- ENH-04: refuse hard-delete of a period that was closed; two-phase delete of a never-closed one ----
 await gotoTab('#settings'); await sleep(500);
 await page.evaluate(() => {}); // settings list rendered below

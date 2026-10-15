@@ -232,8 +232,11 @@ async function pushCloudOnce() {
       actor: store.cloud.user.email, actorUid: store.cloud.user.uid, previous: meta0,
       summary, audit: data.audit, changed: true,
     });
+    // v1.14.89 (audit AUD-01 / 09 / 10): a pending CLOSE / REOPEN of this period is committed with its transition id
+    const tr = S.pendingTransition && S.pendingTransition.period === p ? S.pendingTransition : null;
     const meta = await store.cloudSave(p, blobs, summary, (m) => { S.syncMsg = m; renderSync(); }, baseRev,
-      reopen ? { keepAllExcept: ['closed'], notice } : { notice });
+      reopen ? { keepAllExcept: ['closed'], notice, transition: tr || undefined } : { notice, transition: tr || undefined });
+    if (tr && S.pendingTransition === tr) S.pendingTransition = null;
     await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
     if (meta.noticeDisabled && !S.noticeRuleWarned) {
       S.noticeRuleWarned = true;
@@ -243,7 +246,7 @@ async function pushCloudOnce() {
     S.sync = (S.editSeq || 0) === seq && !reopen ? 'synced' : 'pending'; S.syncMsg = '';
     renderSync();
     if (S.sync === 'pending') scheduleCloud();
-    return { ok: true, meta };
+    return { ok: true, meta, writtenId: meta && meta.transition ? meta.transition.id : null };
   } catch (e) {
     const conflict = e && e.name === 'ConflictError';
     S.sync = conflict ? 'conflict' : 'error'; S.syncMsg = e.message || String(e); renderSync();
@@ -2120,7 +2123,7 @@ P2.install({ S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, 
 TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, toast, render, derived: derivedNow, loadPeriodData });
 RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render });
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
-P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+P3.install({ adoptCommit: async (p, meta) => { if (!meta) return; await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt); if (p === S.period) { S.sync = 'synced'; S.syncMsg = ''; renderSync(); } }, setPendingTransition: (t) => { S.pendingTransition = t; }, refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 PV.install({ loadPeriodData, S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow });
 DBV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, toast, render, derived: derivedNow, exportHachToan: () => exportHachToan(), loadStep5: (p) => store.localGet(lk(p, 'step5')), loadPeriodData, readPeriod: (p, names) => readPeriodVerified(p, names), periods: () => S.allPeriods || S.periods || [], markDirty, audit, parseNum, guardEdit: guardMutate, closedGuard: () => P3.closedGuard(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này') });
 

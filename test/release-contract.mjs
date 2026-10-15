@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.88', v === '1.14.88');
+ok('package version = 1.14.89', v === '1.14.89');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -52,7 +52,7 @@ ok('AUD-02: unverified previous period blocks CLOSE', phase3.includes('S.prevVer
 ok('AUD-02: FG / provision opening compared with last closing', phase3.includes('export function fgOpenDrift(') && app.includes('P3.fgOpenDrift(S, prevD, p)'));
 ok('AUD-03: REOPEN reads the next period status from the cloud', phase3.includes('nm = await A.cloudMeta(np)'));
 ok('NEW-05: dashboard comparison uses the verified reader', app.includes('readPeriod: (p, names) => readPeriodVerified(p, names)') && fs.readFileSync(new URL('../src/views/dashboard.js', import.meta.url), 'utf8').includes('A.readPeriod(p, [\'step5\'])'));
-ok('audit report kept with the code', fs.existsSync(new URL('../docs/audit/SVL_Costing_Audit_v1.14.86.docx', import.meta.url)));
+ok('audit report kept with the code', fs.existsSync(new URL('../docs/audit/SVL_Costing_Audit_v1.14.89.docx', import.meta.url)));
 // v1.14.87 (audit NEW-01): a whole synthetic period runs in the browser in CI, and deploy / Rules publish wait for it
 ok('CI runs the synthetic browser period and gates deploy + rules on it', /\n  e2e:\n/.test(ci) && ci.includes('node test/e2e-synthetic.mjs') && (ci.match(/needs: \[checks, e2e\]/g) || []).length === 2);
 ok('synthetic data is shared by the engine and browser tests', fs.readFileSync(new URL('./synth.mjs', import.meta.url), 'utf8').includes("from './support/synth-data.mjs'") && fs.existsSync(new URL('./support/synth-files.mjs', import.meta.url)));
@@ -60,5 +60,9 @@ ok('synthetic data is shared by the engine and browser tests', fs.readFileSync(n
 const step2Src = fs.readFileSync(new URL('../src/engine/step2.js', import.meta.url), 'utf8');
 ok('AUD-06: marked consumption lines carry a snapshot and are reconciled before STEP 2', step2Src.includes('export function consumeReconcile(') && app.includes('snap: consSnapOf(set)') && app.includes("case 'cons-reconcile':") && /const rec = consRec\(\);\s*\n\s*if \(!rec\.ok\) \{ toast\(`STEP 2 bị chặn/.test(app));
 ok('AUD-06: without # the Stock Out line key is built from content, not row position', step2Src.includes("['@', txt(r[c.date]), num(r[c.qty]).toFixed(4), num(r[c.amt]).toFixed(0)]"));
+// v1.14.89 (audit AUD-01 / 09 / 10)
+const syncSrc = fs.readFileSync(new URL('../src/engine/syncpolicy.js', import.meta.url), 'utf8');
+ok('AUD-01/09: CLOSE and REOPEN decide their outcome from the cloud pointer (transition id)', syncSrc.includes('export function transitionOutcome(') && (phase3.match(/SP\.transitionOutcome\(/g) || []).length === 2 && !phase3.includes('const committed = r.ok ||'));
+ok('AUD-10: the transition is committed in the pointer and the revision document', storeSrc.includes('if (opts.transition) meta.transition =') && storeSrc.includes('...(meta.transition ? { transition: meta.transition } : {})'));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
