@@ -234,6 +234,14 @@ const CHUNK = 700000;
 /** Chunk id of blob `name` part k. New saves use content-addressed keys (name@hash) so a save never overwrites
  *  chunks that the committed manifest still points to; legacy manifests (no key) use name__k. */
 const chunkId = (name, m, k) => `${m.key || name}__${k}`;
+const neighborPeriod = (p, direction) => {
+  const m = /^(\\d{4})-(\\d{2})$/.exec(String(p || ''));
+  if (!m) throw new Error('Kỳ không hợp lệ.');
+  const year = Number(m[1]), month = Number(m[2]);
+  if (month < 1 || month > 12) throw new Error('Tháng không hợp lệ.');
+  const date = new Date(Date.UTC(year, month - 1 + direction, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+};
 
 export class ConflictError extends Error {
   constructor(meta) {
@@ -303,6 +311,23 @@ export async function cloudSave(period, blobs, summary, onProgress, baseRev, opt
     const s2 = await t.get(pdoc(period));
     const r2 = s2.exists() ? s2.data().rev || 0 : 0;
     if (s2.exists() !== !!cur || r2 !== curRev) throw new ConflictError(s2.data());
+    // DATA-04: read dependent periods IN THE SAME Firestore transaction.
+    // If another browser closes the next period or changes the previous period
+    // between preflight and commit, Firestore retries the transaction and this
+    // invariant is re-evaluated before any document is written.
+    if (opts.transition && opts.transition.kind === 'REOPEN') {
+      const nextPeriod = neighborPeriod(period, 1);
+      const nextSnap = await t.get(pdoc(nextPeriod));
+      if (nextSnap.exists() && nextSnap.data().summary && nextSnap.data().summary.closed)
+        throw new Error(`Không thể REOPEN kỳ ${period}: kỳ sau ${nextPeriod} đã CLOSED trên Cloud.`);
+    }
+    if (opts.transition && opts.transition.kind === 'CLOSE') {
+      const prevPeriod = neighborPeriod(period, -1);
+      const prevSnap = await t.get(pdoc(prevPeriod));
+      const actual = prevSnap.exists() ? prevSnap.data().rev || 0 : null;
+      if (actual !== opts.transition.sourceRev)
+        throw new Error(`Không thể CLOSE kỳ ${period}: kỳ trước ${prevPeriod} đã thay đổi revision trong lúc thực hiện. Vui lòng đối chiếu lại nguồn chuyển kỳ.`);
+    }
     t.set(pdoc(period), meta);
     t.set(rdoc(period, revisionId), { period, rev: meta.rev, previousRev: curRev, manifestHash, blobs: manifest, summary: meta.summary, by: cloud.user.email.toLowerCase(), role: cloud.role, at: F.serverTimestamp(), clientAt: meta.updatedAt , ...(meta.transition ? { transition: meta.transition } : {})});
     if (includeNotice) t.set(F.doc(fb.fs, 'svl_costing_notifications', `${period}_${meta.rev}`), announcement);
