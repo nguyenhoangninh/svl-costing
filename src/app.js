@@ -14,6 +14,7 @@ import * as NT from './engine/notifications.js';
 import { createNotificationUI } from './ui/notifications.js';
 import * as P2 from './views/phase2.js';
 import * as P3 from './views/phase3.js';
+import * as PV from './views/provision.js';
 import * as TRV from './views/trace.js';
 import * as FGP from './views/fgprod.js';
 import * as RWV from './views/rework.js';
@@ -480,6 +481,7 @@ const NAV = [
   { id: 'step5', no: '5.2', label: 'FIFO giá vốn', sub: 'COGS · rework 5B', key: 's5' },
   { id: 'rwflow', no: '5B', label: 'Xử lý Rework', sub: 'Treo · hoàn thành · chi phí', key: 'rwf' },
   { id: 'salesreturn', no: '5R', label: 'Hàng trả lại & giảm giá', sub: 'Sales Return 5212 · 5213', key: 's5r' },
+  { id: 'provision', no: '5P', label: 'Dự phòng FG', sub: 'TK 2294 · nạp đầu kỳ · FAST', key: 'prov' },
   { id: 'close', no: '5.3', label: 'FG History & đóng kỳ', sub: 'Đóng kỳ', key: 's5c' },
 ];
 const TOOLS = [
@@ -495,7 +497,7 @@ function railStatus(st) {
   return {
     s1: st.s1c.result, s2: st.s2c.status, rw: !S.d.register ? 'NOT RUN' : blocks ? 'BLOCK' : 'PASS',
     op: op === 'READY' ? 'PASS' : op === 'READY WITH WARNINGS' ? 'PASS WITH REVIEW' : op === 'NO DATA' ? 'NOT RUN' : 'BLOCK', s3: st.s3c.status,
-    s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5r: 'NOT RUN', s5c: 'NOT RUN' }),
+    s3b: st.s3bc.status, s4: st.s4c.status, ...(st.d5 ? P3.railStatus(S, st.d5) : { s5o: 'NOT RUN', s5: 'NOT RUN', s5r: 'NOT RUN', s5c: 'NOT RUN' }), prov: PV.railStatus(S, st.d5),
     pm: !S.d.pm ? 'NOT RUN' : S.d.pm.status !== 'CURRENT' ? S.d.pm.status : S.d.pm.rows.some((r) => r.status === 'MISSING PRICE') ? 'BLOCK' : 'PASS',
     gl: S.d.gl && S.d.gl.period === S.period && num(S.d.gl.fx) > 0 ? 'PASS' : 'NOT RUN',
     fgp: FGP.status(S, st.p2.d4),
@@ -531,7 +533,7 @@ function renderShell() {
 }
 
 // v1.14.55: each process stage has its own table-header hue (body[data-stage]); overview and tools stay slate
-const STAGE_OF = { step1: 's1', step2: 's2', rework: 's2', opening: 's3', step3: 's3', p3b: 's3', sales: 's4', gl: 's4', step4: 's4', fgprod: 's4', fgopen: 's5', step5: 's5', rwflow: 's5', salesreturn: 's5', close: 's5' };
+const STAGE_OF = { step1: 's1', step2: 's2', rework: 's2', opening: 's3', step3: 's3', p3b: 's3', sales: 's4', gl: 's4', step4: 's4', fgprod: 's4', fgopen: 's5', step5: 's5', rwflow: 's5', salesreturn: 's5', provision: 's5', close: 's5' };
 function render() {
   document.body.dataset.stage = STAGE_OF[S.view] || 's0';
   // v1.14.35 (audit ENH-05): no local accounting data is shown until a Firebase session is confirmed (no offline bypass)
@@ -586,6 +588,7 @@ VIEWS.rwflow = (el) => RWV.view(el);
 VIEWS.fgopen = (el) => P3.viewOpen(el);
 VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.salesreturn = (el) => P3.viewReturns(el);
+VIEWS.provision = (el) => PV.view(el);
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
@@ -2016,6 +2019,7 @@ TRV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exp
 RWV.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, markDirty, audit, toast, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render });
 FGP.install({ S, esc, pill, fmtNum, fmtTs, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
 P3.install({ refreshPrevDrift: () => checkPrevDrift(), approvals: () => S.approvals || {}, approvalWrite, cloudOn: () => !!store.cloud.user, cloudMeta: (p) => store.cloudMeta(p), syncNow, S, esc, pill, fmtNum, fmtTs, cpVal, cpTable, kpi, kpiN, emptyNote, mountTable, exportTable, exportBook, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, parseNum, isAdmin: () => store.isAdmin(), who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow, loadPeriodData });
+PV.install({ S, esc, pill, fmtNum, fmtTs, kpi, emptyNote, mountTable, exportTable, markDirty, audit, toast, busy, parseFile, guardEdit: guardMutate, canEdit: canEditPeriod, who: () => (store.cloud.user ? store.cloud.user.email : 'thiết bị này'), render, derived: derivedNow });
 
 // ======================= boot =======================
 (async function boot() {

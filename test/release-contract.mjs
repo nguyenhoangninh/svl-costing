@@ -12,11 +12,15 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.70', v === '1.14.70');
+ok('package version = 1.14.71', v === '1.14.71');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
 ok('STEP 5R module is precached', sw.includes("'./src/engine/return.js'"));
+ok('STEP 5P (Dự phòng FG) is a visible process navigation item', app.includes("{ id: 'provision', no: '5P'") && app.includes("import * as PV from './views/provision.js'"));
+ok('STEP 5P has a dedicated route/view', app.includes('VIEWS.provision = (el) => PV.view(el)'));
+ok('STEP 5P module is precached', sw.includes("'./src/views/provision.js'"));
+ok('STEP 5P is documented in scope', readme.includes('| STEP 5P |'));
 ok('STEP 5R is documented in scope', readme.includes('| STEP 5R |'));
 ok('STEP 5R is a visible process navigation item', app.includes("{ id: 'salesreturn', no: '5R'"));
 ok('STEP 5R has a dedicated route/view', app.includes('VIEWS.salesreturn') && phase3.includes('export function viewReturns'));

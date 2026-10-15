@@ -330,16 +330,14 @@ export function viewOpen(el) {
     <div class="row">
       <button class="btn" data-act="s5-roll" type="button">Roll forward từ ${esc(prevPeriod(S.period))}</button>
       <label class="btn ghost">Import file FG đầu kỳ…<input type="file" id="f-fgopen" accept=".xlsx,.xlsm,.xls" hidden></label>
-      <label class="btn ghost">Nạp dự phòng đầu kỳ…<input type="file" id="f-provopen" accept=".xlsx,.xlsm,.xls" hidden></label>
       <button class="btn ghost" data-act="s5-template" type="button">Tải template</button>
       <button class="btn" data-act="s5-validate" type="button" ${op ? '' : 'disabled'}>Validate FG đầu kỳ</button>
     </div>
     ${op ? `<p class="muted">Nguồn: ${esc(op.source || '')} · nạp ${A.fmtTs(op.loadedAt)}</p>` : ''}
-    ${op && op.provSource ? `<p class="muted">Dự phòng đầu kỳ: ${esc(op.provSource.file)} · ${op.provSource.count} dòng · tổng ${A.fmtNum(op.provSource.sum)} VND = sổ cái ${A.fmtNum(op.provSource.glBalance)} · nạp ${A.fmtTs(op.provSource.at)}</p>` : `<p class="muted">Chưa nạp dự phòng đầu kỳ (template PROVISION_OPENING). Nạp sau khi đã nạp FG đầu kỳ, rồi Validate.</p>`}
+    <p class="muted">Dự phòng đầu kỳ (TK 2294) nạp ở tab <a href="#provision">5P · Dự phòng FG</a>.</p>
     <div class="kpis">${A.kpiN('Số lớp', st.layers)}${A.kpiN('Số lượng', st.qty)}${A.kpi('Giá trị FG đầu kỳ', st.amt ?? null, true)}${A.kpiN('BLOCK', st.block)}${A.kpiN('REVIEW', st.review)}</div>
     <div id="t-op"></div></section>`;
   el.querySelector('#f-fgopen').addEventListener('change', (e) => importOpenFile(e.target.files[0]));
-  el.querySelector('#f-provopen').addEventListener('change', (e) => importProvFile(e.target.files[0]));
   if (!op) { el.querySelector('#t-op').innerHTML = A.emptyNote('Chưa có FG đầu kỳ.'); return; }
   const cols = colsOf(F5.LAYER_FIELDS, F5.LAYER_HEADERS, LAYER_T, LAYER_W);
   A.mountTable(el.querySelector('#t-op'), { columns: cols, rows: op.rows, filterKey: 'status', height: 520, totals: ['qty', 'rm', 'a622', 'a627', 'tot'], onExport: A.exportTable('05_FG_OPENING', cols) });
@@ -360,28 +358,7 @@ async function importOpenFile(file) {
   });
   A.render();
 }
-/** Provision on the opening FG (v1.14.70): the PROVISION_OPENING file is the source of truth; FG must be validated again. */
-async function importProvFile(file) {
-  if (!file || !A.guardEdit() || closedGuard()) return;
-  const S = A.S;
-  if (!S.d.fgOpen || !S.d.fgOpen.rows.length) { A.toast('Nạp FG đầu kỳ trước (5.1), rồi nạp dự phòng.', 'block'); return; }
-  await A.busy(`Đang đọc ${file.name}…`, async () => {
-    try {
-      const res = await A.parseFile(await file.arrayBuffer(), 'all');
-      const parsed = PROV.parseOpeningProvision(res.grids, file.name, S.period);
-      if (!parsed.ok) { A.toast('Chưa nạp dự phòng: ' + parsed.errors.slice(0, 3).join(' · '), 'block'); return; }
-      const app = PROV.applyOpeningProvision(S.d.fgOpen, parsed);
-      if (!app.ok) { A.toast('Chưa nạp dự phòng: ' + app.errors.slice(0, 3).join(' · '), 'block'); return; }
-      S.d.fgOpen.provSource = { file: file.name, glBalance: parsed.glBalance, sum: parsed.sum, count: parsed.rows.length, matched: app.matched, zeroLayers: app.zeroLayers, by: A.who(), at: nowISO() };
-      S.d.fgOpen.status = 'LOADED - NOT VALIDATED'; S.d.fgOpen.validatedAt = '';
-      A.audit('STEP 5 - IMPORT OPENING PROVISION', `Lớp=${app.matched}; Dự phòng=${A.fmtNum(parsed.sum)}; Sổ cái=${A.fmtNum(parsed.glBalance)}; File=${file.name}`);
-      A.markDirty('fgOpen', 'audit');
-      A.toast(`Đã nạp dự phòng cho ${app.matched} lớp. Bước tiếp: Validate FG đầu kỳ.`, 'pass');
-    } catch (e) { A.toast('Nạp dự phòng lỗi: ' + e.message, 'block'); }
-  });
-  A.render();
-}
-function closedGuard() {
+export function closedGuard() {
   const S = A.S;
   if (S.d.closed && S.d.closed.period === S.period) { A.toast(`Kỳ ${S.period} đã đóng. Mở lại kỳ (quản trị viên) nếu cần sửa.`, 'review'); return true; }
   return false;
@@ -434,7 +411,7 @@ export async function doTemplate() {
 // ======================= 5.2 FIFO COGS =======================
 export function viewFIFO(el) {
   const S = A.S; const d = S.d; const D = A.derived(); const D5 = D.d5; const res = D5.res; const c = D5.controls;
-  const conf = cfg(S); const tab = S.tab5 || 'sales'; const edit = A.canEdit();
+  const conf = cfg(S); const tab = S.tab5 && S.tab5 !== 'prov' ? S.tab5 : 'sales'; const edit = A.canEdit(); // 'prov' moved to 5P (v1.14.71)
   const T = res ? res.totals : null;
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 5.2 · FIFO giá vốn &amp; FIFO rework</h1><p class="lead">FG đầu kỳ + nhập kho từ STEP 4 → xuất bán theo FIFO từng sản phẩm (lớp cũ nhất trước: ngày lô, đầu kỳ trước sản xuất). Sau đó FG xuất đi rework lấy tiếp theo FIFO từ lớp còn lại (5B).</p></div>
@@ -454,7 +431,7 @@ export function viewFIFO(el) {
     ${res && D5.fresh === 'CURRENT' && D5.retStale ? `<div class="alert review"><b>Bước tiếp: STEP 5R.</b> Kết quả 5.2 chỉ gồm bán hàng. Kỳ có ${salesReturnsInPeriod(S).length} dòng hàng bán bị trả lại – chạy riêng ở <a href="#salesreturn">màn hình 5R</a> (${esc(D5.retStale)}).</div>` : ''}
     <p class="muted">Việc tiếp theo: <b>${esc(c.next)}</b></p>
     <details ${String(c.status).startsWith('PASS') ? '' : 'open'}><summary>Checkpoint STEP 5 (${esc(c.okText)})</summary>${A.cpTable(c.rows)}${step5Detail(res, c.rows, S)}</details>
-    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['prov', 'Dự phòng FG'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
+    ${res ? tabsHTML(tab, [['sales', 'Giá vốn theo dòng bán'], ['detail', 'FIFO detail'], ['ledger', 'FG ledger'], ['closing', 'FG cuối kỳ'], ['sum', 'Tổng hợp theo SP'], ['rw', 'FIFO rework'], ['xnt', 'Nhập – xuất – tồn'], ['rec', 'Đối chiếu']], 'data-tab5') : ''}
     <div id="t5"></div></section>`;
   const modeSel = el.querySelector('#s5-mode');
   const rateIn = el.querySelector('#s5-rate');
@@ -501,22 +478,6 @@ export function viewFIFO(el) {
     const cols = colsOf(F5.XNT_FIELDS, F5.XNT_HEADERS, t, { name: 260 });
     box.innerHTML = '<p class="muted">Tồn kho thành phẩm theo mã (đầu kỳ / nhập / xuất bán / tồn). Cột “check vs lots” = phần chênh với tồn theo lô – khác 0 khi có FG xuất rework.</p><div id="t5x"></div>';
     A.mountTable(box.querySelector('#t5x'), { columns: cols, rows: rf.rows, height: 520, totals: ['openQ', 'openA', 'inQ', 'inA', 'outQ', 'outA', 'balQ', 'balA', 'chkQ', 'chkA'], onExport: A.exportTable('05_FG_ROLLFORWARD', cols) });
-  } else if (tab === 'prov') {
-    // provision on FG (v1.14.70): roll-forward per layer and the FAST entries
-    const trk = PROV.provisionTrack(res), jr = PROV.provisionJournal(trk, nrvRecordedAmount(S, res)), tt = trk.totals;
-    const cols = [{ key: 'lid', label: 'Layer ID', width: 220 }, { key: 'source', label: 'Nguồn', width: 110 }, { key: 'pc', label: 'PC No.', width: 120 }, { key: 'prod', label: 'Mã SP', width: 130 }, { key: 'loc', label: 'Location', width: 90 },
-      { key: 'date', label: 'Ngày lô', type: 'date', width: 95 }, { key: 'qtyIn', label: 'SL vào', type: 'qty', width: 100 }, { key: 'qtyRem', label: 'SL còn', type: 'qty', width: 100 },
-      { key: 'open', label: 'DP đầu kỳ', type: 'num', width: 130 }, { key: 'restore', label: 'Hoàn lại (trả hàng)', type: 'num', width: 150 }, { key: 'relSale', label: 'Hoàn nhập khi bán', type: 'num', width: 150 },
-      { key: 'relCons', label: 'Hoàn nhập tiêu dùng', type: 'num', width: 150 }, { key: 'relRw', label: 'Chuyển rework (chờ)', type: 'num', width: 150 }, { key: 'closePre', label: 'DP trước NRV', type: 'num', width: 130 },
-      { key: 'nrvAdj', label: 'NRV (+ trích / − hoàn)', type: 'num', width: 160 }, { key: 'close', label: 'DP cuối kỳ', type: 'num', width: 130 }];
-    const je = jr.lines.map((l) => `<tr><td>${esc(l.code)}</td><td>${esc(l.desc)}</td><td>${esc(l.dr)}</td><td>${esc(l.cr)}</td><td class="r">${A.fmtNum(l.amount)}</td></tr>`).join('')
-      + `<tr class="muted"><td>${esc(jr.pending.code)}</td><td>${esc(jr.pending.desc)}</td><td></td><td></td><td class="r">${A.fmtNum(jr.pending.amount)}</td></tr>`;
-    box.innerHTML = `<p class="muted">Dự phòng là số dư Có của TK ${PROV.PROV_ACC} theo lớp FIFO. Hoàn nhập = giảm dự phòng theo số lượng bán (Nợ ${PROV.PROV_ACC} / Có ${PROV.PROV_COST_ACC}). Hàng bán trả lại khôi phục dự phòng của hoá đơn gốc. Chuyển sang rework chưa ghi sổ.</p>
-      ${trk.ok ? '' : `<div class="alert review"><b>Dự phòng chưa khớp:</b> chênh lệch ${A.fmtNum(trk.check)} VND giữa đầu kỳ + biến động và số dư theo lớp.</div>`}
-      <div class="kpis">${A.kpi('DP đầu kỳ', tt.open, true)}${A.kpi('Hoàn lại (trả hàng)', tt.restore, true)}${A.kpi('Hoàn nhập khi bán', tt.relSale, true)}${A.kpi('Hoàn nhập tiêu dùng', tt.relCons, true)}${A.kpi('Chuyển rework (chờ)', tt.relRw, true)}${A.kpi('NRV đề xuất', tt.nrvAdj, true)}${A.kpi('DP cuối kỳ', tt.close, true)}</div>
-      <h2>Bút toán FAST (TK ${PROV.PROV_ACC} / ${PROV.PROV_COST_ACC})</h2><table class="cp"><thead><tr><th>Mã</th><th>Diễn giải</th><th>Nợ</th><th>Có</th><th class="r">Số tiền (VND)</th></tr></thead><tbody>${je}</tbody></table>
-      <h2>Theo dõi theo lớp</h2><div id="t5p"></div>`;
-    A.mountTable(box.querySelector('#t5p'), { columns: cols, rows: trk.rows, filterKey: 'source', height: 520, totals: ['qtyIn', 'qtyRem', 'open', 'restore', 'relSale', 'relCons', 'relRw', 'closePre', 'nrvAdj', 'close'], onExport: A.exportTable('06_PROVISION_TRACK', cols) });
   } else if (tab === 'rec') {
     box.innerHTML = recTable(res.rec, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], REC_LABELS) + `<p class="muted">Run snapshot: chế độ ${esc(res.mode)} · ${res.openLayers} lớp đầu kỳ · override dùng ${res.overridesUsed} · kết quả ${esc(res.runResult)}</p>`;
   }
