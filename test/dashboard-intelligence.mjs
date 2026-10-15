@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { invoiceDetail, gpBridge, profitSignals } from '../src/engine/dashboard-intelligence.js';
+const before={sales:[{acc:'511',cust:'A',prod:'P1',inv:'I1',vnd:120,tot:70,fq:1,fin:'FIFO COGS',status:'PASS'}],totals:{consA:5}};
+const after={sales:[{acc:'511',cust:'a',prod:'P1',inv:'I2',vnd:140,tot:90,fq:1,fin:'FIFO COGS',status:'PASS'}],totals:{consA:0}};
+const lines=invoiceDetail(after,{cust:'A'});assert.equal(lines.length,1);assert.equal(lines[0].invoice,'I2');
+assert.equal(invoiceDetail(after,{prod:'P2'}).length,0);
+const b=gpBridge(after,before);
+assert.equal(b.oldGP,45); assert.equal(b.newGP,50);assert.equal(b.revenueEffect,20);
+assert.equal(b.cogsEffect,-15); assert.equal(b.change,5); assert.ok(b.reconciles);
+assert.equal(gpBridge(after,null),null);
+assert.deepEqual(profitSignals(after),[]);
+const bad={sales:[{acc:'511',cust:'A',prod:'P1',inv:'I3',vnd:100,tot:0,fq:1,fin:'FIFO COGS'}]};
+assert.equal(profitSignals(bad)[0].signal,'MISSING_COGS');
+console.log('PASS: Dashboard V3 invoice drilldown and reconciled gross profit bridge');
