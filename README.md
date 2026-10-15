@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.66 (15/10/2026):** Tiêu đề thẻ D đổi thành **D · Đơn giá thành phẩm theo lô PC bất thường (PC-P)** để đồng nhất với thẻ C.
+>
 > **v1.14.65 (15/10/2026):** Thẻ **C · Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường** lại **chặn STEP 2** cho tới khi xác nhận: gồm số âm / ô chữ và các dòng xuất NVL (MI-M) có đơn giá lệch khỏi trung vị. Tiêu đề cập nhật để nêu đủ hai nhóm.
 >
 > **v1.14.64 (15/10/2026):** Thẻ **D · Đơn giá thành phẩm theo lô PC (PC-P)** ở STEP 1: lô có đơn giá lệch khỏi trung vị cùng mã sản phẩm, SL ≤ 0 có cost, hoặc SL > 0 nhưng Total Cost = 0 phải được **xác nhận trước khi chạy STEP 2** (như thẻ C). Bảng có bộ lọc Hệ / Trạng thái và xuất Excel theo dữ liệu đang lọc. Đơn giá MI-M vẫn chỉ tham khảo.
