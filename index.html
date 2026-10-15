@@ -68,6 +68,10 @@ header.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px;
 .who { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .sync { font-size: 12px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .theme-t { background: none; border: 1px solid #44565f; color: #dfe8e4; border-radius: 6px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px; }
+/* v1.14.59: language switch (shows the language you switch TO) */
+.lang-t { background: none; border: 1px solid #44565f; color: #dfe8e4; border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .5px; }
+.lang-t:hover, .theme-t:hover { border-color: #7f97a3; }
+.auth-screen header.top .lang-t { position: absolute; right: calc(60px + env(safe-area-inset-right)); top: calc(14px + env(safe-area-inset-top)); }
 
 #rail { background: var(--panel); border-right: 1px solid var(--rule); padding: 18px 16px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; overflow: auto; }
 .period-box label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
@@ -737,6 +741,7 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
     <div class="grow"></div>
     <span id="sync" class="sync pill s-info">Chỉ lưu trên máy này</span>
     <div id="notice-root" hidden></div>
+    <button class="lang-t" id="lang" type="button" data-no-i18n>EN</button>
     <button class="theme-t" id="theme" type="button" aria-label="Đổi giao diện sáng/tối">◐</button>
     <div id="account"></div>
   </header>
