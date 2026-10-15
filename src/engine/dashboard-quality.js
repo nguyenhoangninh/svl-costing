@@ -9,10 +9,12 @@ export function dashboardQuality(res, freshness = 'CURRENT') {
   const pl = customerPL(res);
   if (freshness !== 'CURRENT') issues.push({ id: 'step5-stale', severity: 'critical', title: 'Dữ liệu giá vốn chưa CURRENT', detail: 'Chạy lại STEP 5 và xác minh đối chiếu trước khi sử dụng số liệu GP.', target: 'step5' });
   const names = new Map();
-  for (const row of pl.rows) {
-    const k = key(row.cust);
-    if (k && !names.has(k)) names.set(k, new Set());
-    if (k) names.get(k).add(row.cust);
+  for (const row of res.sales) {
+    if (row.acc !== '511') continue;
+    const name = ttxt(row.cust), k = key(name);
+    if (!k) continue;
+    if (!names.has(k)) names.set(k, new Set());
+    names.get(k).add(name);
   }
   const alias = [...names.values()].filter((set) => set.size > 1).flatMap((set) => [...set]);
   if (alias.length) issues.push({ id: 'customer-alias', severity: 'review', title: 'Khách hàng có tên viết khác nhau', detail: `${alias.length} tên có thể trùng: ${alias.slice(0, 4).join(' / ')}. Chỉ gộp sau khi xác minh mã khách hàng.`, target: 'dashboard' });
