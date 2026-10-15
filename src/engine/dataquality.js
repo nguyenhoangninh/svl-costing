@@ -3,7 +3,7 @@
 // lists every abnormal material line and must be CONFIRMED by a user before STEP 2 can run. Any re-import that changes the
 // list (fingerprint) needs a new confirmation.
 //
-// Abnormal lines (PC-M / MI-M / MR-M – the material reports that feed the WIP / 3B engine; footer rows without a Material Code are ignored):
+// Abnormal lines (PC-M / MI-M / MR-M of systems T, S, O; footer rows without a Material Code are ignored):
 //   ZERO COST  – quantity ≠ 0 but Total Cost = 0 / blank  (3B cannot value the material; e.g. customer-supplied items)
 //   NEGATIVE   – negative quantity or Total Cost
 //   TEXT       – quantity / Total Cost is text, not a number
@@ -11,10 +11,11 @@ import { ttxt, headerCol, headerColAny, fpRows } from './util.js';
 import { pcBasisScan, PCB_TOL } from './pcbasis.js';
 import { materialIssueCosts } from './matcost.js';
 
-// The material reports STEP 3A uses for WIP (src/engine/step3.js MOVES). PC-M-S is not used (system S has no PC lots).
+// The material reports checked at STEP 1: every system (T, S, O) – PC-M and MI-M of system S included (v1.14.61),
+// MR-M uses Quantity (T, O) / Bad Quantity (S). The WIP movements of step3.js MOVES are the subset that feeds costing.
 export const DQ_REPORTS = [
-  ['PC-M-T', 'PC No.', ['Quantity']], ['PC-M-O', 'PC No.', ['Quantity']],
-  ['MI-M-T', 'MI No.', ['Current Issue Qty', 'Quantity']], ['MI-M-O', 'MI No.', ['Current Issue Qty', 'Base Qty', 'Quantity']],
+  ['PC-M-T', 'PC No.', ['Quantity']], ['PC-M-O', 'PC No.', ['Quantity']], ['PC-M-S', 'PC No.', ['Quantity']],
+  ['MI-M-T', 'MI No.', ['Current Issue Qty', 'Quantity']], ['MI-M-O', 'MI No.', ['Current Issue Qty', 'Base Qty', 'Quantity']], ['MI-M-S', 'MI No.', ['Current Issue Qty', 'Base Qty', 'Quantity']],
   ['MR-M-T', 'Code', ['Quantity']], ['MR-M-O', 'Code', ['Quantity']], ['MR-M-S', 'Code', ['Bad Quantity']],
 ];
 export const DQ_TYPES = { 'ZERO COST': 'SL ≠ 0 nhưng Total Cost = 0', NEGATIVE: 'Số âm (SL hoặc Total Cost)', TEXT: 'SL / Total Cost là chữ, không phải số' };

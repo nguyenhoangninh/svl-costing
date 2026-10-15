@@ -19,7 +19,7 @@ export function mountTable(el, cfg) {
   el.innerHTML = `
     <div class="vt-tools">
       <input type="search" class="vt-search" placeholder="Tìm trong ${cfg.rows.length.toLocaleString('vi-VN')} dòng…" aria-label="Tìm kiếm">
-      ${statuses.length ? `<select class="vt-filter" aria-label="Lọc trạng thái"><option value="">Tất cả trạng thái</option>${statuses.map((s) => `<option>${esc(s)}</option>`).join('')}</select>` : ''}
+      ${statuses.length ? `<select class="vt-filter" aria-label="${esc(cfg.filterAria || 'Lọc trạng thái')}"><option value="">${esc(cfg.filterLabel || 'Tất cả trạng thái')}</option>${statuses.map((s) => `<option>${esc(s)}</option>`).join('')}</select>` : ''}
       <span class="vt-count"></span>
       <span class="vt-spacer"></span>
       ${cfg.onExport ? '<button class="btn ghost vt-export" type="button">Xuất Excel</button>' : ''}

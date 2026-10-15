@@ -1,6 +1,8 @@
 # SVL Costing Web
 
 > **v1.14.10 (12/10/2026):** STEP 2 · JOB CODE SVL-VE được xử lý như VE*: chia cho lô PC-P-O có location VE*.
+> **v1.14.61 (15/10/2026):** Kiểm tra dữ liệu ERP ở STEP 1 nay quét cả **hệ S** (PC-M-S, MI-M-S) cùng hệ T và O – các dòng SL ≠ 0 nhưng Total Cost = 0 hoặc số âm / sai kiểu của S cần được xác nhận trước khi chạy STEP 2. Bảng dòng bất thường có bộ lọc **theo Báo cáo**.
+>
 > **v1.14.60 (15/10/2026):** Rà soát tiếng Việt toàn hệ thống cho chế độ **English**: dịch thêm ~1.250 câu lấy trực tiếp từ mã nguồn (toast, hộp thoại xác nhận, cảnh báo OUTDATED, trạng thái xác nhận "Đã xác nhận bởi … lúc …", "Xóa xác nhận", chip "B · ĐÃ XÁC NHẬN", thông báo, truy xuất lô). Câu ghép được tách theo dấu câu để dịch từng phần; hộp thoại nhiều dòng dịch từng dòng. Ghi chú do người dùng nhập và dữ liệu (tên vật tư, sản phẩm) giữ nguyên.
 >
 > **v1.14.59 (15/10/2026):** Chọn ngôn ngữ **Tiếng Việt / English**: nút **EN / VI** trên thanh trên cùng (cạnh nút sáng/tối), lựa chọn được nhớ trên máy. Chế độ English dịch toàn bộ chữ trên màn hình — menu, tiêu đề, diễn giải, nút, tiêu đề cột, checkpoint, ô số liệu, ô tìm kiếm — cùng thông báo và hộp thoại xác nhận (`src/i18n.js`, từ điển `src/i18n-en.js` lập từ việc quét mọi màn hình và tab). Dữ liệu (tên vật tư, khách hàng, mã) giữ nguyên; số vẫn định dạng 1.234,56; file Excel xuất ra chưa đổi ngôn ngữ. Sửa kèm: import ERP không còn báo lỗi khi rời STEP 1 trong lúc đang đọc file. Kiểm thử: `npm run test:e2e:i18n`.
