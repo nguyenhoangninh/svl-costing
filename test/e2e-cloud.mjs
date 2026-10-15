@@ -153,32 +153,28 @@ ok('ENH-04/09 lost reply: committed revision keeps its chunks (none deleted by t
   ok('period closed again for the delete tests', await waitToast(/cloud đã xác nhận/));
 }
 
-// ---- ENH-04: refuse hard-delete of a period that was closed; two-phase delete of a never-closed one ----
+// ---- Wave 1 DATA-02/03: every committed period, OPEN or CLOSED, is retained.
 await gotoTab('#settings'); await sleep(500);
-await page.evaluate(() => {}); // settings list rendered below
 await page.selectOption('#period-sel', P8).catch(() => {});
-await page.click(`[data-act=delete-period][data-p="${P8}"]`).catch(() => {});
-ok('ENH-04 closed period has no hard-delete action in the UI', (await page.locator(`[data-act=delete-period][data-p="${P8}"]`).count()) === 0);
-ok('ENH-04 closed period still present in the cloud', !!(await docVal(`svl_costing_periods/${P8}`)));
-
-// new never-closed period 2026-09 via roll-forward (creates cloud data)
+ok('DATA-03 CLOSED period cannot be permanently deleted', (await page.locator(`[data-act=delete-period][data-p="${P8}"]`).count()) === 0);
+ok('DATA-03 CLOSED period retains its Cloud pointer', !!(await docVal(`svl_costing_periods/${P8}`)));
 await page.click('[data-act=new-period]'); await sleep(2500);
 const P9 = '2026-09';
-ok('2026-09 created and pushed (never closed)', (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length > 0);
-await gotoTab('#settings'); await sleep(400);
-await setFail('deleteDoc', 1, 'injected: sweep interrupted');
-await page.click(`[data-act=delete-period][data-p="${P9}"]`).catch(() => {});
-await waitToast(/Không xoá được trên cloud/, 20000);
-ok('ENH-04 interrupted delete: pointer removed first (no pointer to missing data)', !(await docVal(`svl_costing_periods/${P9}`)));
-const orphans = (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length;
-ok('ENH-04 interrupted delete: local copy kept after the failure', (await page.$$eval('#period-sel option', (o) => o.map((x) => x.value))).includes(P9), `orphan chunks left: ${orphans}`);
-await gotoTab('#settings'); await sleep(400);
-await page.click(`[data-act=delete-period][data-p="${P9}"]`).catch(() => {});
-ok('ENH-04 retry finishes the sweep', await waitToast(/Đã xoá kỳ 2026-09/, 30000), (await toasts()).slice(-120));
-ok('ENH-04 retry: no chunks of 2026-09 remain in the cloud (revision history is kept)', (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length === 0);
+ok('2026-09 never-closed draft has Cloud revisions', (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length > 0);
+await gotoTab('#settings'); await sleep(500);
+ok('DATA-03 OPEN committed period cannot be permanently deleted', (await page.locator(`[data-act=delete-period][data-p="${P9}"]`).count()) === 0);
+ok('DATA-03 OPEN committed period exposes non-destructive Hide action', (await page.locator(`[data-act=hide-period][data-p="${P9}"]`).count()) === 1);
+const draftChunks = (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length;
+await page.click(`[data-act=hide-period][data-p="${P9}"]`); await sleep(600);
+ok('DATA-03 hide preserves all chunks and Cloud pointer',
+  !!(await docVal(`svl_costing_periods/${P9}`)) && (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length === draftChunks);
+// The period stays active even if hidden; make it visible again before testing sync.
+if (await page.locator('#show-hidden').count()) await page.check('#show-hidden');
+if (await page.locator(`[data-act=unhide-period][data-p="${P9}"]`).count()) await page.click(`[data-act=unhide-period][data-p="${P9}"]`);
+await sleep(500);
 
 // ---- ENH-07: outbox per period, backoff retry, switch confirmation, pending pill ----
-await page.click('[data-act=new-period]'); await sleep(2500); // 2026-09 again (roll-forward from the closed 2026-08)
+await page.selectOption('#period-sel', P9); await sleep(1300); // return to the retained OPEN period
 await setFail('runTransaction', 100, 'injected: cloud down');
 await gotoTab('#gl'); await page.waitForSelector('input[name=gl627]');
 const gl = await page.inputValue('input[name=gl627]');
