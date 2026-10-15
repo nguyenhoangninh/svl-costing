@@ -95,7 +95,7 @@ ok('Notifications: listeners query committed stream not uncommitted audit log',
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const firebaseJson = JSON.parse(fs.readFileSync(new URL('../firebase.json', import.meta.url), 'utf8'));
 ok('firebase.json deploys firestore.rules only', firebaseJson.firestore && firebaseJson.firestore.rules === 'firestore.rules');
-ok('rules job runs only on push to main, after checks', /rules:\s*\n\s*needs: checks\s*\n\s*if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/.test(ci));
+ok('rules job runs only on push to main, after checks and the synthetic browser period (v1.14.87)', /rules:\s*\n\s*needs: \[checks, e2e\]\s*\n\s*if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/.test(ci));
 ok('rules job pins firebase-tools (no floating version)', /firebase-tools@\d+\.\d+\.\d+ deploy --only firestore:rules --project svl-costing/.test(ci));
 ok('rules job refuses to publish while the placeholder is present', ci.includes('Placeholder vẫn còn trong firestore.rules') && ci.includes('grep -q "YOUR_EMAIL@gmail.com" firestore.rules'));
 ok('rules job never commits the owner email (runner copy only)', !/git (add|commit|push)/.test(ci.slice(ci.indexOf('  rules:'))));
