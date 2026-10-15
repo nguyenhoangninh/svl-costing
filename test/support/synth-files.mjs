@@ -8,7 +8,8 @@ export function writeSynthErp(dir, opts = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const { reports } = synthErp(opts);
   const files = [];
-  for (const r of reports) {
+  for (const r0 of reports) {
+    const r = opts.patch ? opts.patch(r0) : r0;
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([r.header, ...r.rows]), 'Sheet1');
     const f = path.join(dir, `${r.name}-202608${r.rows.length ? '' : '-NO DATA'}.xlsx`);

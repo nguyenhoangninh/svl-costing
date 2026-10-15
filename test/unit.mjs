@@ -1221,6 +1221,25 @@ eq('read plan: local holds the latest revision → local', SP.periodReadPlan({ s
 eq('read plan: local older than the cloud → read the cloud', SP.periodReadPlan({ signedIn: true, meta: { rev: 8 }, localRev: 7 }), 'CLOUD');
 eq('read plan: never synced on this device → read the cloud', SP.periodReadPlan({ signedIn: true, meta: { rev: 3 }, localRev: null }), 'CLOUD');
 
+// ---- v1.14.88 (audit AUD-06): marked Stock Out lines survive a re-import or are reported
+{
+  const S2 = await import('../src/engine/step2.js');
+  const lines = [{ key: 'T|SO1|1|M1', doc: 'SO1', item: 'M1', date: '46239', qty: 50, amt: 175000 }, { key: 'T|SO2|1|M2', doc: 'SO2', item: 'M2', date: '46240', qty: 10, amt: 8000 }];
+  const cfg = { lines: ['T|SO1|1|M1', 'T|SO2|1|M2'], snap: Object.fromEntries(lines.map((c) => [c.key, S2.consSnap(c)])) };
+  eq('AUD-06: unchanged reports → marked lines reconcile', S2.consumeReconcile(lines, cfg).ok, true);
+  const r1 = S2.consumeReconcile([lines[0]], cfg);
+  eq('AUD-06: a marked line gone from the re-import is UNMAPPED (not silently dropped)', [r1.ok, r1.missing.map((m) => m.key)], [false, ['T|SO2|1|M2']]);
+  const r2 = S2.consumeReconcile([{ ...lines[0], amt: 185000 }, lines[1]], cfg);
+  eq('AUD-06: a marked line with another amount after the re-import is CHANGED', [r2.ok, r2.changed.map((c) => [c.key, c.was.amt, c.now.amt])], [false, [['T|SO1|1|M1', 175000, 185000]]]);
+  eq('AUD-06: lines marked before v1.14.88 (no snapshot) can only be missing, not changed', S2.consumeReconcile([{ ...lines[0], amt: 1 }, lines[1]], { lines: cfg.lines }).ok, true);
+  // without the ERP line number (#) the key comes from the content, so another row order gives the same keys
+  const H = ['Code', 'Document Type', 'Group', 'Status', 'Date', 'Sub-Ledger', 'Item Code', 'Item Name(English)', 'Item Type', 'Location', 'Unit', 'Quantity', 'Total Cost', 'Customer', 'MO No.'];
+  const rA = ['SO1', 'Stock Out', 'G', 'Completed', 46239, null, 'M1', 'x', 'RM', 'RM', 'PCS', -50, -175000, 'C', null];
+  const rB = ['SO1', 'Stock Out', 'G', 'Completed', 46239, null, 'M1', 'x', 'RM', 'RM', 'PCS', -10, -35000, 'C', null];
+  const k1 = S2.soLineKeys({ header: H, rows: [rA, rB] }, 'T'), k2 = S2.soLineKeys({ header: H, rows: [rB, rA] }, 'T');
+  eq('AUD-06: without # the line key follows the content, not the row order', [k1[0] === k2[1], k1[1] === k2[0], k1[0] !== k1[1]], [true, true, true]);
+}
+
 // ---- cloud delete two-phase (ENH-04) and audit rule source checks live in test/rules-contract.mjs
 
 console.log(`\n${n - fail}/${n} unit checks passed${fail ? `, ${fail} FAILED` : ''}`);
