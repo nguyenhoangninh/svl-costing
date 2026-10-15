@@ -3,7 +3,7 @@
 // is looked up in EN (src/i18n-en.js) after it reaches the page (render + MutationObserver), so tables, tabs and
 // re-renders are covered without touching each view. Numbers are matched as {#} and put back in order.
 // Text that is not in the dictionary (data, rare messages) stays as it is.
-import { EN, MSG_EXACT, MSG_PREFIX, MSG_WILD } from './i18n-en.js';
+import { EN, MSG_EXACT, MSG_PREFIX, MSG_WILD, SRC_EXACT, SRC_WILD } from './i18n-en.js';
 
 const KEY = 'svl.lang';
 const VI = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸ]/;
@@ -14,9 +14,17 @@ export const getLang = () => lang;
 const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // messages with values inside: compiled once; the values are kept as they are
 const WILD = MSG_WILD.map((w) => ({ re: new RegExp('^' + w.vi.map((p) => esc(p.replace(/\s+/g, ' '))).join('([\\s\\S]*?)') + (w.prefix ? '([\\s\\S]*)$' : '$')), en: w.en, prefix: w.prefix }));
+// source segments with values: most specific first; each pattern is only tried when its longest literal piece is present
+const SRC = SRC_WILD.map(([vi, en]) => {
+  const parts = vi.split('{*}');
+  const lit = parts.map((p) => p.trim()).sort((a, b) => b.length - a.length)[0] || '';
+  return { re: new RegExp('^' + parts.map((p) => esc(p)).join('([\\s\\S]*?)') + '$'), en, lit, size: parts.join('').length };
+}).filter((x) => x.lit).sort((a, b) => b.size - a.size);
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 function lookup(core) {
-  if (Object.prototype.hasOwnProperty.call(EN, core)) return EN[core];
-  if (Object.prototype.hasOwnProperty.call(MSG_EXACT, core)) return MSG_EXACT[core];
+  if (has(EN, core)) return EN[core];
+  if (has(MSG_EXACT, core)) return MSG_EXACT[core];
+  if (has(SRC_EXACT, core)) return SRC_EXACT[core];
   const nums = core.match(NUM);
   if (!nums) return null;
   const k = core.replace(NUM, '{#}');
@@ -40,27 +48,66 @@ const RULES = [
   // navigation tooltips: "<no> · <label> – <STATUS>"
   [/^(.*?)\s*·\s*(.+?) – (.+)$/, (m) => { const r = tr(m[2]); if (r === null) return null; return `${m[1]} · ${r} – ${tr(m[3]) ?? m[3]}`; }],
   [/^Đang lưu (.+)…$/, (m) => `Saving ${m[1]}…`],
+  [/^Cập nhật (\d.*)$/, (m) => `Updated ${m[1]}`],
+  [/^(.+?) (đã thay đổi trạng thái sau khi dữ liệu được cập nhật\.?)$/, (m) => `${m[1]} ${tr(m[2])}`],
+  // leading bullet / dash and a trailing full stop around a known phrase
+  [/^([•—–\-]\s*)(.+)$/, (m) => { const r = tr(m[2]); return r === null ? null : m[1] + r; }],
+  [/^(.+?)([.:?])$/, (m) => { const r = tr(m[1]); return r === null ? null : r + m[2]; }],
   [/^Đã import (\S+) báo cáo \(mới (\S+), thay thế (\S+)\)\.(.*)$/, (m) => `Imported ${m[1]} reports (new ${m[2]}, replaced ${m[3]}).` + m[4].replace('Cảnh báo (đã import):', 'Warnings (imported):').replace('Trùng:', 'Duplicates:').replace('Bỏ qua:', 'Skipped:')],
 ];
 /** Translate one string; null when there is no translation. */
 // Vietnamese labels written without diacritics (the detector cannot see them)
 const PLAIN = { 'Doanh thu & Price Master': 'Revenue & Price Master', 'Doanh thu VND': 'Revenue VND', 'Doanh thu': 'Revenue', 'WIP ra (PC + MR + Stock Out)': 'WIP out (PC + MR + Stock Out)' };
+const CACHE = new Map();
+// a captured piece keeps its own leading / trailing spaces
+const piece = (v) => { const r = tr(v); return r === null ? v : v.match(/^\s*/)[0] + r + v.match(/\s*$/)[0]; };
+const viCount = (x) => (x.match(new RegExp(VI.source, 'g')) || []).length;
 export function tr(s) {
   if (s === null || s === undefined) return null;
   const core = String(s).replace(/\s+/g, ' ').trim();
   if (!core) return null;
+  if (CACHE.has(core)) return CACHE.get(core);
+  const r = trCore(core);
+  if (CACHE.size > 20000) CACHE.clear();
+  CACHE.set(core, r);
+  return r;
+}
+function trCore(core) {
   if (Object.prototype.hasOwnProperty.call(PLAIN, core)) return PLAIN[core];
   if (!VI.test(core)) return null;
   const hit = lookup(core);
   if (hit !== null) return hit;
-  for (const [re, fn] of RULES) { const m = re.exec(core); if (m) { const r = fn(m); if (r !== null && r !== undefined) return r; } }
-  for (const [vi, en] of MSG_PREFIX) if (core.startsWith(vi)) { const rest = core.slice(vi.length).trim(); return `${en} ${tr(rest) ?? rest}`.trim(); }
+  // try every stage; the first clean English result wins, else the one with the least Vietnamese left
+  let best = null, bestN = Infinity;
+  const take = (r) => { if (r === null || r === undefined) return false; const n = viCount(r); if (n < bestN) { best = r; bestN = n; } return n === 0; };
+  for (const [re, fn] of RULES) { const m = re.exec(core); if (m && take(fn(m, core))) return best; }
+  for (const [vi, en] of MSG_PREFIX) if (core.startsWith(vi)) { const rest = core.slice(vi.length).trim(); if (take(`${en} ${tr(rest) ?? rest}`.trim())) return best; break; }
   for (const w of WILD) {
     const m = w.re.exec(core); if (!m) continue;
     let i = 1; const vals = m.slice(1);
-    let out = w.en.replace(/\{\*\}/g, () => { const v = m[i++]; return v === undefined ? '' : (tr(v) ?? v); });
-    if (w.prefix && vals.length) out += ' ' + (vals[vals.length - 1] || '');
-    return out.trim();
+    let out = w.en.replace(/\{\*\}/g, () => { const v = m[i++]; return v === undefined ? '' : piece(v); });
+    if (w.prefix && vals.length) { const last = vals[vals.length - 1] || ''; out += ' ' + (tr(last) ?? last); }
+    if (take(out.trim())) return best; break;
+  }
+  for (const w of SRC) {
+    if (!core.includes(w.lit)) continue;
+    const m = w.re.exec(core); if (!m) continue;
+    let i = 1;
+    if (take(w.en.replace(/\{\*\}/g, () => { const v = m[i++]; return v === undefined ? '' : piece(v); }).replace(/\s+/g, ' ').trim())) return best;
+    break;
+  }
+  take(split(core));
+  return best;
+}
+// last resort: cut a composite message at its separators and translate the pieces (data pieces stay as they are)
+const SEPS = [/(?<=[.!?])\s+/, / – /, / · /, /; /, /: /, /, /];
+function split(core) {
+  for (const re of SEPS) {
+    const sep = core.match(re); if (!sep) continue;
+    const parts = core.split(re); if (parts.length < 2) continue;
+    let hit = false;
+    const out = parts.map((p) => { const r = tr(p); if (r !== null) { hit = true; return r; } return p; });
+    if (hit) return out.join(re.source.startsWith('(?<=') ? ' ' : sep[0]);
   }
   return null;
 }
@@ -136,11 +183,16 @@ function syncButton() {
   b.title = lang === 'en' ? 'Tiếng Việt' : 'English';
   b.dataset.noI18n = '';
 }
+/** Multi-line messages keep their line breaks: whole message first, else line by line. */
+function trLines(msg) {
+  if (!msg.includes('\n')) return tr(msg) ?? msg;
+  return msg.split('\n').map((l) => { const r = tr(l); return r === null ? l : l.match(/^\s*/)[0] + r; }).join('\n');
+}
 /** Native dialogs (confirm / prompt / alert) show the English message in English mode. */
 function wrapDialogs() {
   for (const name of ['confirm', 'prompt', 'alert']) {
     const orig = window[name]; if (typeof orig !== 'function' || orig.__i18n) continue;
-    const f = function (msg, ...rest) { return orig.call(window, lang === 'en' && typeof msg === 'string' ? (tr(msg) ?? msg) : msg, ...rest); };
+    const f = function (msg, ...rest) { return orig.call(window, lang === 'en' && typeof msg === 'string' ? trLines(msg) : msg, ...rest); };
     f.__i18n = true; window[name] = f;
   }
 }
