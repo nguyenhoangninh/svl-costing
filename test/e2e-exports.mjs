@@ -1,14 +1,18 @@
 // Browser check: every Excel export button that works after STEP 2 writes a styled, valid workbook.
-// Usage: node test/e2e-exports.mjs http://localhost:8765/ ../fixtures/erp $OUTDIR
+// Usage: node test/e2e-exports.mjs http://localhost:8765/ [ERP folder] [outDir]
+// v1.14.92 (audit TST-01): without an ERP folder the synthetic ERP reports are generated (runs in CI).
 import { chromium } from 'playwright';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { writeSynthErp } from './support/synth-files.mjs';
 import XLSX from '../lib/xlsx.mjs'; // same SheetJS build as the app (v1.14.20)
 import * as __fsForXlsx from 'node:fs'; XLSX.set_fs(__fsForXlsx); // the ESM build needs fs injected for readFile / writeFile in Node
 
-const [, , base = 'http://localhost:8765/', fixDir, outDir] = process.argv;
+const [, , base = 'http://localhost:8765/', fixDir0, outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'svl-e2e-exp-'))] = process.argv;
+const fixDir = fixDir0 || (writeSynthErp(path.join(outDir, 'erp'), { rework: false, negative: false }), path.join(outDir, 'erp'));
 const root = base + (base.includes('?') ? '&' : '?') + 'sandbox=1';
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch(fs.existsSync('/opt/pw-browsers/chromium') ? { executablePath: '/opt/pw-browsers/chromium' } : {});
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
 const page = await ctx.newPage();
 const errors = []; let fails = 0;

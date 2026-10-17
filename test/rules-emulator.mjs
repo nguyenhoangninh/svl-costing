@@ -119,4 +119,5 @@ await check('a user cannot read another user\'s notification read state', assert
 
 await env.cleanup();
 console.log(`\n${total - fail}/${total} Firestore Emulator rules checks passed${fail ? `, ${fail} FAILED` : ''}`);
+if (process.env.GITHUB_ACTIONS) console.log(`::notice title=Firestore Emulator rules::${total - fail}/${total} checks passed`);
 process.exit(fail ? 1 : 0);

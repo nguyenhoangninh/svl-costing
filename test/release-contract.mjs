@@ -76,5 +76,7 @@ ok('ACC-03: STEP 4 and STEP 5 results carry the calculation revision and go OUTD
 ok('SEC-05: Firestore Rules and backup restore run on the Emulator inside the required e2e job', /\n  e2e:\n[\s\S]*emulators:exec --only firestore[^\n]*node test\/rules-emulator\.mjs && node test\/backup-roundtrip\.mjs[\s\S]*\n  deploy:/.test(ci));
 const bk = fs.existsSync(new URL('../.github/workflows/backup.yml', import.meta.url)) ? fs.readFileSync(new URL('../.github/workflows/backup.yml', import.meta.url), 'utf8') : '';
 ok('SEC-02: weekly backup is encrypted and skipped without a passphrase', bk.includes('schedule:') && bk.includes('openssl enc -aes-256-cbc -pbkdf2') && bk.includes('BACKUP_PASSPHRASE') && !/upload-artifact[\s\S]*\.ndjson\.gz\n/.test(bk));
+ok('TST-01: cloud, language and export browser tests run in CI on synthetic data', ['e2e-cloud.mjs', 'e2e-i18n.mjs', 'e2e-exports.mjs'].every((t) => ci.includes(`node test/${t} http://127.0.0.1:8765/`)) && !fs.readFileSync(new URL('./e2e-cloud.mjs', import.meta.url), 'utf8').includes('costing.xlsm'));
+ok('own in-flight save is not taken for a remote change (false conflict)', app.includes('S.inflight[period] > 0') && app.includes('} finally { S.inflight[p]--; }'));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

@@ -44,6 +44,10 @@ jobs:
           node test/e2e-synthetic.mjs http://127.0.0.1:8765/
           node test/e2e-local-atomic.mjs http://127.0.0.1:8765/
           node test/e2e-period-guard.mjs http://127.0.0.1:8765/
+          # v1.14.92 (audit TST-01): cloud CLOSE / REOPEN (fake Firebase), language switch and exports on synthetic data
+          node test/e2e-cloud.mjs http://127.0.0.1:8765/
+          node test/e2e-i18n.mjs http://127.0.0.1:8765/
+          node test/e2e-exports.mjs http://127.0.0.1:8765/
       # v1.14.92 (audit SEC-05 / NEW-06): Firestore Rules proved by real reads / writes on the Firestore Emulator
       # (viewer read-only, CLOSE / REOPEN admin only, nothing deleted, chunks and revisions immutable, maker–checker).
       - uses: actions/setup-java@v4

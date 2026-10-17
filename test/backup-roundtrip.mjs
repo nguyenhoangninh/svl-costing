@@ -37,4 +37,5 @@ const rv = (await db.doc('svl_costing_periods/2026-08/revisions/3').get()).data(
 ok('restored timestamp is a Firestore Timestamp', rv.at instanceof A.Timestamp && rv.at.isEqual(ts));
 
 console.log(`\n${total - fail}/${total} backup / restore checks passed${fail ? `, ${fail} FAILED` : ''}`);
+if (process.env.GITHUB_ACTIONS) console.log(`::notice title=backup / restore::${total - fail}/${total} checks passed`);
 process.exit(fail ? 1 : 0);
