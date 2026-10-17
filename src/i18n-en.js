@@ -238,6 +238,10 @@ export const EN = {
 "B · CHƯA XÁC NHẬN": "B · NOT CONFIRMED",
 "B · Vật tư SL ≠ {#} nhưng Total Cost = {#}": "B · Materials with qty ≠ {#} but Total Cost = {#}",
 "BLOCK - XÁC NHẬN DỮ LIỆU BẤT THƯỜNG": "BLOCK - CONFIRM DATA ANOMALIES",
+"BLOCK - SỬA DỮ LIỆU ERP": "BLOCK - FIX ERP DATA",
+"Ô số không đọc được – phải sửa file ERP": "Unreadable number cells – fix the ERP file",
+"Số lượng (ô gốc)": "Quantity (original cell)",
+"Total Cost (ô gốc)": "Total Cost (original cell)",
 "Batch {#} – giá thành → FIFO": "Batch {#} – cost → FIFO",
 "Batch {#} – Điều chỉnh WIP trực tiếp": "Batch {#} – Direct WIP adjustment",
 "Batch {#}B – Rework chuyển vào": "Batch {#}B – Rework transferred in",
@@ -3381,6 +3385,10 @@ export const SRC_WILD = [
 [
 "{*} dòng số âm / sai kiểu",
 "{*} negative / wrong-type lines"
+],
+[
+"{*} dòng ô số không đọc được",
+"{*} lines with unreadable number cells"
 ],
 [
 "{*} dòng xuất NVL đơn giá bất thường",

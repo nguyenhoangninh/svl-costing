@@ -171,6 +171,14 @@ try {
 } catch (e) {
   ok('flow completed without an exception', false, e.message.split('\n')[0]);
 }
+// v1.14.91 (audit SEC-03): the theme toggle runs from src/theme.js under a CSP without 'unsafe-inline'
+{
+  const csp = await page.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]').content);
+  const before = await page.evaluate(() => document.documentElement.dataset.theme || '');
+  await page.click('#theme'); await sleep(100);
+  const after = await page.evaluate(() => document.documentElement.dataset.theme || '');
+  ok('SEC-03: CSP has no \'unsafe-inline\' for scripts and the theme toggle still works', !/script-src[^;]*'unsafe-inline'/.test(csp) && after && after !== before, `${before} → ${after}`);
+}
 ok('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await browser.close();
 fs.rmSync(dir, { recursive: true, force: true });

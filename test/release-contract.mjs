@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.90', v === '1.14.90');
+ok('package version = 1.14.91', v === '1.14.91');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -64,5 +64,11 @@ ok('AUD-06: without # the Stock Out line key is built from content, not row posi
 const syncSrc = fs.readFileSync(new URL('../src/engine/syncpolicy.js', import.meta.url), 'utf8');
 ok('AUD-01/09: CLOSE and REOPEN decide their outcome from the cloud pointer (transition id)', syncSrc.includes('export function transitionOutcome(') && (phase3.match(/SP\.transitionOutcome\(/g) || []).length === 2 && !phase3.includes('const committed = r.ok ||'));
 ok('AUD-10: the transition is committed in the pointer and the revision document', storeSrc.includes('if (opts.transition) meta.transition =') && storeSrc.includes('...(meta.transition ? { transition: meta.transition } : {})'));
+// v1.14.91 (audit wave A: ACC-01, ACC-02 / 05, SEC-03)
+const dqSrc = fs.readFileSync(new URL('../src/engine/dataquality.js', import.meta.url), 'utf8');
+const jSrc = fs.readFileSync(new URL('../src/engine/journal.js', import.meta.url), 'utf8');
+ok('ACC-02: unreadable text numbers block STEP 2 and cannot be confirmed', dqSrc.includes('export function textReadable(') && dqSrc.includes("return 'BLOCK - FIX DATA'") && app.includes("if (dqSt === 'BLOCK - FIX DATA')"));
+ok('ACC-01: journal lines in whole VND, JE07 by customer adds up to JE07 rounded', jSrc.includes('export function roundToTotal(') && jSrc.includes('export function journalRoundCheck(') && app.includes('journalRoundCheck(ctx)'));
+ok('SEC-03: no inline script and no \'unsafe-inline\' in script-src', !/<script>(?!<\/script>)/.test(html) && !/script-src[^;]*'unsafe-inline'/.test(html) && html.includes('<script src="src/theme.js"></script>') && sw.includes("'./src/theme.js'"));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

@@ -37,7 +37,7 @@ import { pcBasisScan, applyPcBasis, undoPcBasis, pcBasisIntact } from './engine/
 import { costAllocationSheet, fgLayerSheet, provisionTrackSheet, provisionJournalSheet } from './engine/exportform.js';
 import { provisionTrack, provisionJournal } from './engine/provision.js';
 import { customerPL, plSheetRows, PL_HEADERS, productPL, prodSheetRows, PROD_HEADERS } from './engine/custpl.js';
-import { journalWithCustomers, journalCheck } from './engine/journal.js';
+import { journalWithCustomers, journalCheck, journalRoundCheck } from './engine/journal.js';
 import * as DBV from './views/dashboard.js';
 
 // ======================= state =======================
@@ -710,14 +710,15 @@ function dqSection(dq) {
   const rc = dq.recon || { bySys: [], issues: [] };
   const nL = dq.lines.length, nR = rc.issues.length;
   if (!nL && !nR && !(dq.mcAll || []).length && !(dq.pcLots || []).length) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
-  const zeroLines = dq.lines.filter((l) => l.type === 'ZERO COST'), negLines = dq.lines.filter((l) => l.type !== 'ZERO COST');
+  const zeroLines = dq.lines.filter((l) => l.type === 'ZERO COST'), negLines = dq.lines.filter((l) => l.type !== 'ZERO COST' && l.type !== 'UNREADABLE');
+  const unr = dq.unreadable || [];
   const mcLines = dq.mcLines || [], mcAll = dq.mcAll || [];
   const pcAll = dq.pcLots || [], pcFlagged = dq.pcFlagged || [];
-  const zeroSum = dq.summary.filter((g) => g.type === 'ZERO COST'), negSum = dq.summary.filter((g) => g.type !== 'ZERO COST');
+  const zeroSum = dq.summary.filter((g) => g.type === 'ZERO COST'), negSum = dq.summary.filter((g) => g.type !== 'ZERO COST' && g.type !== 'UNREADABLE');
   const ack = S.d.importAck; const ok = DQ.anomalyStatus(dq, ack) === 'REVIEW - CONFIRMED';
   const parts = DQ.ackParts(ack, dq);
   const st = (k) => DQ.partStatus(dq, ack, k);
-  const head = [nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', mcLines.length ? `${fmtNum(mcLines.length)} dòng xuất NVL đơn giá bất thường` : '', pcFlagged.length ? `${fmtNum(pcFlagged.length)} lô PC bất thường (PC-P)` : ''].filter(Boolean).join(' · ') || 'không có dòng cần xác nhận';
+  const head = [unr.length ? `${fmtNum(unr.length)} dòng ô số không đọc được` : '', nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', mcLines.length ? `${fmtNum(mcLines.length)} dòng xuất NVL đơn giá bất thường` : '', pcFlagged.length ? `${fmtNum(pcFlagged.length)} lô PC bất thường (PC-P)` : ''].filter(Boolean).join(' · ') || 'không có dòng cần xác nhận';
   // confirmation bar of one part: status, who confirmed / what changed, confirm and clear buttons
   const bar = (k) => {
     const s = st(k);
@@ -761,6 +762,15 @@ function dqSection(dq) {
       <p class="muted">Đơn giá dòng = Thành tiền ÷ SL xuất. Đơn giá chuẩn = trung vị đơn giá các dòng cùng hệ, mã VT và ĐVT trong kỳ.</p>
       <div id="t-dq-mc"></div>` : ''}
   </section>` : '';
+  // v1.14.91 (audit ACC-02 / ACC-05): ô số dạng chữ mà engine đọc khác người đọc – không xác nhận được, phải sửa file
+  const cell = (v) => typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : v === null || v === undefined ? '' : String(v);
+  const cardE = unr.length ? `<section class="dq-card dq-block" id="dq-unreadable">
+    <h3>Ô số không đọc được – phải sửa file ERP ${pill('BLOCK - FIX DATA')}</h3>
+    <p class="muted">Ô số lượng / Total Cost là chữ mà hệ thống sẽ đọc thành số khác (ví dụ "1.234.567" thành 0, "1.234,5" thành 1,2345, TRUE thành −1), hoặc không rõ nghĩa ("1.234"). Không xác nhận bỏ qua được: sửa thành ô số trên ERP / Excel rồi import lại báo cáo.</p>
+    <table class="cp"><thead><tr><th>Báo cáo</th><th class="r">Dòng Excel</th><th>Chứng từ</th><th>Mã vật tư</th><th>Số lượng (ô gốc)</th><th>Total Cost (ô gốc)</th></tr></thead><tbody>
+      ${unr.slice(0, 200).map((l) => `<tr><td>${esc(l.report)}</td><td class="r">${fmtNum(l.row)}</td><td>${esc(l.doc)}</td><td>${esc(l.mat)}</td><td>${esc(cell(l.qty))}</td><td>${esc(cell(l.amt))}</td></tr>`).join('')}
+    </tbody></table>${unr.length > 200 ? `<p class="muted">Hiện 200 / ${fmtNum(unr.length)} dòng.</p>` : ''}
+  </section>` : '';
   // D: đơn giá thành phẩm theo lô PC (PC-P) – như thẻ C: bất thường phải được xác nhận trước khi chạy STEP 2
   const pcKinds = [['DEV', 'Đơn giá lệch so với chuẩn'], ['QTY0', 'SL ≤ 0 nhưng có Total Cost'], ['COST0', 'SL > 0 nhưng Total Cost = 0']];
   const pcSum = pcKinds.map(([k, label]) => { const L = pcFlagged.filter((l) => l.kind === k); return L.length ? { erp: [...new Set(L.map((l) => l.erp))].join(', '), label, lots: L.length, prods: new Set(L.map((l) => `${l.erp}|${l.prod}`)).size, sample: [...new Set(L.map((l) => l.prod))].slice(0, 12).join(', ') } : null; }).filter(Boolean);
@@ -774,11 +784,12 @@ function dqSection(dq) {
     <h4 class="dq-sub">Đơn giá lô PC (PC-P) · ${fmtNum(pcAll.length)} lô · ${fmtNum(pcFlagged.length)} bất thường</h4>
     <div id="t-dq-pc"></div>
   </section>` : '';
-  return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Kiểm tra dữ liệu ERP: ${head} ${pill(ok ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h2>
+  return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Kiểm tra dữ liệu ERP: ${head} ${pill(ok ? 'REVIEW - CONFIRMED' : unr.length ? 'BLOCK - FIX DATA' : 'BLOCK - CONFIRM')}</h2>
     <p><b>STEP 2 chỉ chạy được khi mọi phần có bất thường đã được xác nhận.</b> Xác nhận từng phần trong thẻ bên dưới; có thể xóa xác nhận của từng phần để làm lại.</p>
+    ${unr.length ? `<p><b>Có ${fmtNum(unr.length)} dòng ô số không đọc được: phải sửa file ERP rồi import lại, xác nhận không bỏ qua được.</b></p>` : ''}
     ${summaryLine ? `<div class="dq-chips">${summaryLine}</div>` : ''}
   </div>
-  <div class="dq-cards">${cardA}${cardB}${cardC}${cardD}</div>`;
+  <div class="dq-cards">${cardE}${cardA}${cardB}${cardC}${cardD}</div>`;
 }
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
@@ -1122,7 +1133,12 @@ function refreshStep3AfterStep2() {
 
 function doStep2() {
   const dq = DQ.erpAnomalies(S.d.datasets, S.period);
-  if (DQ.anomalyStatus(dq, S.d.importAck) === 'BLOCK - CONFIRM') {
+  const dqSt = DQ.anomalyStatus(dq, S.d.importAck);
+  if (dqSt === 'BLOCK - FIX DATA') {
+    toast(`STEP 2 bị chặn: file ERP có ${fmtNum(dq.unreadable.length)} dòng vật tư với ô số lượng / Total Cost là chữ không đọc chắc chắn được (vd "1.234.567"). Sửa file trên ERP / Excel rồi import lại ở STEP 1 – phần này không xác nhận bỏ qua được.`, 'block');
+    location.hash = '#step1'; return;
+  }
+  if (dqSt === 'BLOCK - CONFIRM') {
     toast(`STEP 2 bị chặn: STEP 1 có kết quả kiểm tra dữ liệu ERP chưa được xác nhận – ${DQ.blockingSummary(DQ.blockingParts(dq, S.d.importAck))}. Mở STEP 1 → "Kiểm tra dữ liệu ERP", rà soát rồi bấm Xác nhận.`, 'block');
     location.hash = '#step1'; return;
   }
@@ -1723,7 +1739,9 @@ async function exportHachToan() {
   const pl = customerPL(r5);
   const lines = journalWithCustomers(ctx);
   const jc = journalCheck(ctx);
-  const checks = [...pl.checks, { label: 'JE07 theo khách hàng = JE07 (giá vốn bán hàng)', expected: jc.expected, actual: jc.actual, status: jc.status }];
+  const jr = journalRoundCheck(ctx);
+  const checks = [...pl.checks, { label: 'JE07 theo khách hàng = JE07 (giá vốn bán hàng)', expected: jc.expected, actual: jc.actual, status: jc.status },
+    ...(jr ? [{ label: 'Bút toán JE07 theo khách (làm tròn đồng) = JE07 làm tròn', expected: jr.expected, actual: jr.actual, status: jr.status }] : [])];
   await exportBook(`SVL_Bang_Tong_Hop_Hach_Toan_${S.period}.xlsx`, [
     { name: '1_TongHop_KhachHang', aoa: [PL_HEADERS, ...plSheetRows(pl)] },
     { name: '2_ButToan_KhachHang', aoa: [['JE', 'Nợ', 'Có', 'Khách hàng', 'Diễn giải', 'Số tiền (VND)'], ...lines.map((j) => [j.je, j.dr, j.cr, j.cust || '—', j.desc, j.amount])] },

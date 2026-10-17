@@ -7,7 +7,7 @@
 //   ZERO COST  – quantity ≠ 0 but Total Cost = 0 / blank  (3B cannot value the material; e.g. customer-supplied items)
 //   NEGATIVE   – negative quantity or Total Cost
 //   TEXT       – quantity / Total Cost is text, not a number
-import { ttxt, headerCol, headerColAny, fpRows } from './util.js';
+import { ttxt, headerCol, headerColAny, fpRows, num, parseUserNumber } from './util.js';
 import { pcBasisScan, PCB_TOL } from './pcbasis.js';
 import { materialIssueCosts } from './matcost.js';
 import { pcUnitCosts } from './pccost.js';
@@ -19,12 +19,22 @@ export const DQ_REPORTS = [
   ['MI-M-T', 'MI No.', ['Current Issue Qty', 'Quantity']], ['MI-M-O', 'MI No.', ['Current Issue Qty', 'Base Qty', 'Quantity']], ['MI-M-S', 'MI No.', ['Current Issue Qty', 'Base Qty', 'Quantity']],
   ['MR-M-T', 'Code', ['Quantity']], ['MR-M-O', 'Code', ['Quantity']], ['MR-M-S', 'Code', ['Bad Quantity']],
 ];
-export const DQ_TYPES = { 'ZERO COST': 'SL ≠ 0 nhưng Total Cost = 0', NEGATIVE: 'Số âm (SL hoặc Total Cost)', TEXT: 'SL / Total Cost là chữ, không phải số' };
+export const DQ_TYPES = { 'ZERO COST': 'SL ≠ 0 nhưng Total Cost = 0', NEGATIVE: 'Số âm (SL hoặc Total Cost)', TEXT: 'SL / Total Cost là chữ, không phải số',
+  UNREADABLE: 'SL / Total Cost là chữ không đọc chắc chắn được (vd "1.234.567", "1.234,5", TRUE) – phải sửa file ERP' };
 export const DQ_FIELDS = ['report', 'type', 'row', 'doc', 'mat', 'name', 'qty', 'amt'];
 export const DQ_HEADERS = ['Báo cáo', 'Loại bất thường', 'Dòng Excel', 'Chứng từ (PC / MI / MR No.)', 'Mã vật tư', 'Tên vật tư', 'Số lượng', 'Total Cost'];
 
 const cache = new WeakMap();
 const blank = (v) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+// v1.14.91 (audit ACC-02 / ACC-05): a text cell is only confirmable when the costing engine (num, VBA rules) reads it as
+// the same number a person reads ("1234", "1,234.5"). "1.234.567" (num → 0), "1.234,5" (num → 1,2345), "1,5" (num → 15),
+// "1.234" (ambiguous) and TRUE / FALSE (num → −1 / 0) would be costed with a wrong value: they block until the file is fixed.
+const isText = (v) => !blank(v) && typeof v !== 'number';
+export function textReadable(v) {
+  if (typeof v !== 'string') return false;
+  const p = parseUserNumber(v);
+  return p.ok && p.value !== null && Math.abs(p.value - num(v)) < 1e-9;
+}
 function scan(report, ds, docName, qtyNames) {
   const hit = cache.get(ds); if (hit) return hit;
   const h = ds.header || [];
@@ -36,7 +46,7 @@ function scan(report, ds, docName, qtyNames) {
       if (blank(r[cMat])) return;
       const q = r[cQty], a = r[cAmt];
       const base = { report, row: (ds.headerRow || 1) + i + 1, doc: cDoc >= 0 ? ttxt(r[cDoc]) : '', mat: ttxt(r[cMat]), name: cName >= 0 ? ttxt(r[cName]) : '', qty: q, amt: a };
-      if ((!blank(q) && typeof q !== 'number') || (!blank(a) && typeof a !== 'number')) { out.push({ ...base, type: 'TEXT' }); return; }
+      if (isText(q) || isText(a)) { out.push({ ...base, type: [q, a].some((v) => isText(v) && !textReadable(v)) ? 'UNREADABLE' : 'TEXT' }); return; }
       const qn = blank(q) ? 0 : q, an = blank(a) ? 0 : a;
       if (qn < 0 || an < 0) out.push({ ...base, type: 'NEGATIVE' });
       else if (qn !== 0 && an === 0) out.push({ ...base, type: 'ZERO COST' });
@@ -91,7 +101,8 @@ export function erpAnomalies(datasets, period = '') {
   const summary = [...groups.values()].map((g) => ({ report: g.report, type: g.type, label: g.label, lines: g.lines, materials: g.mats.size, sample: [...g.mats].slice(0, 12).join(', ') }));
   const recon = pcpPcmRecon(datasets || {});
   const fpLines = lines.length ? fpRows(lines, lineFp) : '';
-  const zero = lines.filter((l) => l.type === 'ZERO COST'), neg = lines.filter((l) => l.type !== 'ZERO COST');
+  const zero = lines.filter((l) => l.type === 'ZERO COST'), neg = lines.filter((l) => l.type !== 'ZERO COST' && l.type !== 'UNREADABLE');
+  const unreadable = lines.filter((l) => l.type === 'UNREADABLE');
   // MI-M unit-cost lines (đơn giá lệch so với trung vị) are part C with the negative / text lines (v1.14.65: blocking again)
   const mc = period ? materialIssueCosts(datasets || {}, period) : { lines: [], allLines: [] };
   const mcLines = mc.lines, mcAll = mc.allLines;
@@ -104,7 +115,7 @@ export function erpAnomalies(datasets, period = '') {
     D: { count: pc.flagged.length, fp: pc.flagged.length ? fpRows(pc.flagged, pcFp) : '' },
   };
   return { lines, summary, materials: new Set(lines.map((l) => `${l.report.slice(-1)}|${l.mat}`)).size, recon, issues: lines.length + recon.issues.length,
-    mcLines, mcAll, pcLots: pc.lots, pcFlagged: pc.flagged, fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
+    unreadable, mcLines, mcAll, pcLots: pc.lots, pcFlagged: pc.flagged, fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
 }
 
 /**
@@ -131,9 +142,11 @@ export function partStatus(an, ack, key) {
   return c.fp === p.fp ? 'CONFIRMED' : 'CHANGED';
 }
 
-/** PASS (no abnormal line and PC-P = PC-M) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since). */
+/** PASS (no abnormal line and PC-P = PC-M) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since)
+ *  · BLOCK - FIX DATA (v1.14.91: a number cell the engine cannot read reliably – no confirmation lifts it, the file must be fixed). */
 export function anomalyStatus(an, ack) {
   if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length) && !(an.mcLines && an.mcLines.length) && !(an.pcFlagged && an.pcFlagged.length))) return 'PASS';
+  if (an.unreadable && an.unreadable.length) return 'BLOCK - FIX DATA';
   return Object.keys(DQ_PARTS).every((k) => ['NONE', 'CONFIRMED'].includes(partStatus(an, ack, k))) ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
 }
 
@@ -143,13 +156,15 @@ export const DQ_PART_UNIT = {
   B: 'dòng SL ≠ 0 nhưng Total Cost = 0',
   C: 'dòng vật tư số âm, sai kiểu hoặc đơn giá xuất NVL bất thường',
   D: 'lô PC bất thường (PC-P)',
+  E: 'dòng vật tư có ô số không đọc được – sửa file ERP rồi import lại',
 };
 /** Parts that still block STEP 2: not confirmed, or changed since the last confirmation. */
 export function blockingParts(an, ack) {
-  return Object.keys(DQ_PARTS).map((k) => ({ key: k, status: partStatus(an, ack, k), count: an && an.parts && an.parts[k] ? an.parts[k].count : 0 }))
-    .filter((p) => p.status !== 'NONE' && p.status !== 'CONFIRMED');
+  const fix = an && an.unreadable && an.unreadable.length ? [{ key: 'E', status: 'FIX', count: an.unreadable.length }] : [];
+  return fix.concat(Object.keys(DQ_PARTS).map((k) => ({ key: k, status: partStatus(an, ack, k), count: an && an.parts && an.parts[k] ? an.parts[k].count : 0 }))
+    .filter((p) => p.status !== 'NONE' && p.status !== 'CONFIRMED'));
 }
 /** One line per blocking part, e.g. "A: 12 PC lệch PC-P / PC-M (chưa xác nhận); D: 43 lô PC bất thường (PC-P) (thay đổi sau lần xác nhận)". */
 export function blockingSummary(list) {
-  return (list || []).map((p) => `${p.key}: ${p.count} ${DQ_PART_UNIT[p.key]} (${p.status === 'CHANGED' ? 'thay đổi sau lần xác nhận' : 'chưa xác nhận'})`).join('; ');
+  return (list || []).map((p) => `${p.key}: ${p.count} ${DQ_PART_UNIT[p.key]} (${p.status === 'FIX' ? 'không xác nhận được' : p.status === 'CHANGED' ? 'thay đổi sau lần xác nhận' : 'chưa xác nhận'})`).join('; ');
 }
