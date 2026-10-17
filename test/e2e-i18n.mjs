@@ -1,12 +1,17 @@
 // Browser check of the VI / EN switch (v1.14.59): header button, page text, re-render, switch back, persistence.
-// Usage: node test/e2e-i18n.mjs http://127.0.0.1:8765/ /path/to/costing.xlsm
+// v1.14.92 (audit TST-01): the period is built from synthetic data (test/support/synth-flow.mjs), so it runs in CI.
+// Usage: node test/e2e-i18n.mjs [http://127.0.0.1:8765/]
 import { chromium } from 'playwright';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { installFakeFirebase } from './support/fake-firebase.mjs';
+import { prepareClosablePeriod } from './support/synth-flow.mjs';
 
-const [, , base = 'http://127.0.0.1:8765/', wbPath = '../costing.xlsm'] = process.argv;
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const [, , base = 'http://127.0.0.1:8765/'] = process.argv;
+const browser = await chromium.launch(fs.existsSync('/opt/pw-browsers/chromium') ? { executablePath: '/opt/pw-browsers/chromium' } : {});
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
-context.on('dialog', (d) => d.accept());
+context.on('dialog', (d) => d.accept(d.type() === 'prompt' ? (d.message().startsWith('Kỳ mới') ? '2026-08' : 'Kiểm thử e2e ngôn ngữ') : undefined));
 const errors = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let n = 0, fail = 0;
@@ -17,9 +22,7 @@ const text = (p) => p.evaluate(() => document.body.innerText);
 let page = await open();
 await page.goto(base + '#settings');
 await page.waitForFunction(() => document.querySelector('#account')?.textContent?.includes('admin.test'), null, { timeout: 30000 });
-await page.setInputFiles('#f-xlsm', wbPath);
-await page.waitForSelector('#mig table', { timeout: 240000 });
-await sleep(4000);
+await prepareClosablePeriod(page, { root: base, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'svl-e2e-i18n-')), ok });
 await page.goto(base + '#cc'); await sleep(1000);
 ok('starts in Vietnamese', (await text(page)).includes('Tổng quan kỳ') && (await page.textContent('#lang')).trim() === 'EN');
 

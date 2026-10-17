@@ -156,7 +156,18 @@ const snap = {
 }
 
 const file = new URL('./synth.snapshot.json', import.meta.url);
-if (process.argv.includes('--update') || !fs.existsSync(file)) { fs.writeFileSync(file, JSON.stringify(snap, null, 1) + '\n'); console.log('snapshot written'); }
+// v1.14.92 (audit ACC-03): numbers saved with a period carry the calculation revision (src/engine/calcrev.js).
+// A snapshot rewrite with changed STEP 2–4 or STEP 5 numbers needs that revision bumped, so saved results go OUTDATED.
+const { CALC_REV } = await import('../src/engine/calcrev.js');
+snap.calcRev = CALC_REV;
+if (process.argv.includes('--update') || !fs.existsSync(file)) {
+  const old = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  const same = (keys) => keys.every((k) => JSON.stringify(old[k]) === JSON.stringify(snap[k]));
+  const oldRev = (old && old.calcRev) || { step4: 1, step5: 1 };
+  const need = old ? [['step4', ['step2', 'step3', 'b3', 'step4']], ['step5', ['strict', 'revenue']]].filter(([st, keys]) => !same(keys) && oldRev[st] === CALC_REV[st]).map(([st]) => st) : [];
+  if (need.length && !process.argv.includes('--calc-unchanged')) { console.log(`✗ snapshot not written: numbers of ${need.join(', ')} changed but CALC_REV.${need.join(' / CALC_REV.')} in src/engine/calcrev.js did not. Bump it (results saved with older numbers then show OUTDATED), or pass --calc-unchanged if the old results stay correct.`); process.exit(1); }
+  fs.writeFileSync(file, JSON.stringify(snap, null, 1) + '\n'); console.log('snapshot written');
+}
 else {
   const want = JSON.parse(fs.readFileSync(file, 'utf8'));
   const diff = (a, b, path) => { if (typeof a !== 'object' || a === null) { if (JSON.stringify(a) !== JSON.stringify(b)) { fails++; if (fails < 30) console.log(`✗ snapshot ${path}: got ${JSON.stringify(a)} want ${JSON.stringify(b)}`); } return; } for (const k of new Set([...Object.keys(a), ...Object.keys(b || {})])) diff(a[k], b ? b[k] : undefined, `${path}.${k}`); };

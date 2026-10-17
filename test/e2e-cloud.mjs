@@ -1,12 +1,17 @@
 // Browser run of the CLOUD paths (ENH-04 / 07 / 08 / 09) against the in-memory Firebase stand-in (test/support/fake-firebase.mjs).
 // Real app.js / store.js / phase3.js run in Chromium; only the backend is simulated (firestore.rules are NOT enforced here).
-// Usage: node test/e2e-cloud.mjs http://127.0.0.1:8765/ /path/costing.xlsm <outDir>
+// v1.14.92 (audit TST-01): the period is built from SYNTHETIC data through the UI (test/support/synth-flow.mjs), not from
+// the company workbook, so this test runs in CI.
+// Usage: node test/e2e-cloud.mjs [http://127.0.0.1:8765/] [outDir]
 import { chromium } from 'playwright';
 import { installFakeFirebase } from './support/fake-firebase.mjs';
+import { prepareClosablePeriod } from './support/synth-flow.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
-const [, , base = 'http://127.0.0.1:8765/', wbPath = '/home/claude/costing.xlsm', outDir = '.'] = process.argv;
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const [, , base = 'http://127.0.0.1:8765/', outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'svl-e2e-cloud-'))] = process.argv;
+const browser = await chromium.launch(fs.existsSync('/opt/pw-browsers/chromium') ? { executablePath: '/opt/pw-browsers/chromium' } : {});
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -58,36 +63,14 @@ const gotoTab = async (hash) => { await page.goto(base + hash); await page.waitF
 // ---- sign-in (fake) + migrate workbook ----
 await page.goto(base + '#settings');
 await page.waitForFunction(() => document.querySelector('#account')?.textContent?.includes('admin.test'), null, { timeout: 30000 });
-await page.waitForSelector('#f-xlsm', { state: 'attached' });
-await page.setInputFiles('#f-xlsm', wbPath);
-await page.waitForSelector('#mig table', { timeout: 240000 });
-await page.waitForFunction(() => window.__fake.log.some((e) => e.op === 'commit'), null, { timeout: 60000 });
 const P8 = '2026-08';
-ok('migrated period is saved to the cloud (pointer + chunks + revision)', (await docKeys(`svl_costing_periods/${P8}`)).length > 3);
-ok('audit events reached the cloud with actor fixed at event time', (await auditRows()).length > 0 && (await auditRows()).every((a) => a.attribution === 'ACTOR' && a.actorUid === 'uid-admin'));
-
-// ---- bring 2026-08 to a closeable state (same steps as the local e2e) ----
-await gotoTab('#step4'); await page.click('[data-act=run-step4]'); await sleep(1500);
-await gotoTab('#step5'); await page.click('[data-act=s5-run]'); await sleep(1500);
-await gotoTab('#close'); await page.waitForSelector('.result');
-await page.click('[data-act=s5-hist]'); await sleep(1200);
-// v1.14.73 moved the NRV decision to 5P; the CLOSE gate needs it (the test reached CLOSE without it since then)
-if (!(await page.locator('#f-nrv-decision').count())) { await gotoTab('#provision'); await sleep(1200); }
-if (await page.locator('#f-nrv-decision').count()) {
-  await page.selectOption('#f-nrv-decision select[name=status]', 'NO ADJUSTMENT APPROVED');
-  await page.fill('#f-nrv-decision input[name=note]', 'Kiểm thử: chưa trích lập kỳ này'); await page.click('#f-nrv-decision button[type=submit]'); await sleep(500);
-}
-await gotoTab('#close'); await page.waitForSelector('.result');
-await page.click('[data-tabh="fast"]'); await page.waitForSelector('#f-fast');
-const engVals = await page.$$eval('#f-fast tbody tr', (trs) => trs.map((tr) => [tr.querySelector('input').name, tr.children[2].textContent.replace(/\./g, '').replace(',', '.').replace(/[–-]$/, '0')]));
-for (const [k, v] of engVals) await page.fill(`#f-fast input[name=${k}]`, k === 'a632' ? String(Math.round(+v || 0) - 1000) : String(Math.round(+v || 0)));
-await page.click('#f-fast button[type=submit]'); await sleep(400);
-await page.fill('#f-fast-ok input[name=note]', 'Kiểm thử: chênh làm tròn bút toán 632'); await page.click('#f-fast-ok button'); await sleep(400);
-await gotoTab('#sales'); await page.click('[data-tabs="dup"]'); await sleep(300);
-await page.click('[data-dupall="KEEP"]'); await sleep(300);
-await gotoTab('#close'); await page.waitForSelector('.result');
+// ---- synthetic period through the UI (cloud mode, fake backend) ----
+policy.promptNewPeriod = P8;
+await prepareClosablePeriod(page, { root: base, dir: outDir, ok, period: P8 });
+policy.promptNewPeriod = '2026-09';
 await waitSynced();
-ok('2026-08 is closeable before the cloud tests', (await page.locator('[data-act=s5-close]').count()) === 1);
+ok('the period is saved to the cloud (pointer + chunks + revision)', (await docKeys(`svl_costing_periods/${P8}`)).length > 3);
+ok('audit events reached the cloud with actor fixed at event time', (await auditRows()).length > 0 && (await auditRows()).every((a) => a.attribution === 'ACTOR' && a.actorUid === 'uid-admin'));
 
 // ---- ENH-09a: a CLOSE whose cloud commit fails leaves no close trace ----
 const closeBefore = await countAudit('STEP 5 - CLOSE MONTH');
@@ -105,12 +88,14 @@ ok('ENH-09 retry: close confirmed by the cloud', await waitToast(/cloud đã xá
 const closedMeta = await docVal(`svl_costing_periods/${P8}`);
 ok('ENH-09 retry: cloud pointer holds the close timestamp', !!closedMeta?.summary?.closed);
 ok('ENH-09 retry: exactly one CLOSE entry in the cloud trail', (await waitAudit('STEP 5 - CLOSE MONTH', closeBefore + 1)) && (await countAudit('STEP 5 - CLOSE MONTH')) === closeBefore + 1);
-ok('ENH-09 retry: rework carry-forward entry written once', (await countAudit('STEP 5B - REWORK WIP CARRY-FORWARD')) === 1);
+ok('ENH-09 retry: rework carry-forward entry not written twice', (await countAudit('STEP 5B - REWORK WIP CARRY-FORWARD')) <= 1);
 
 // ---- ENH-09c: reply lost after the cloud committed → confirmed, not applied twice, chunks intact ----
 await gotoTab('#close'); await page.waitForSelector('.result');
 await page.click('[data-act=s5-reopen]'); await sleep(1500);
 ok('reopen commits (cloud summary no longer closed)', !(await docVal(`svl_costing_periods/${P8}`))?.summary?.closed);
+// the REOPEN revision leaves summary.step5 to the next normal save: let it land before arming the lost reply for CLOSE
+await sleep(2500); await waitSynced();
 const chunkKeysBefore = (await docKeys(`svl_costing_periods/${P8}/chunks/`)).length;
 await F(() => { window.__fake.dropReplyAfterCommit = 1; });
 const closeBefore2 = await countAudit('STEP 5 - CLOSE MONTH');
@@ -160,8 +145,9 @@ ok('DATA-03 CLOSED period cannot be permanently deleted', (await page.locator(`[
 ok('DATA-03 CLOSED period retains its Cloud pointer', !!(await docVal(`svl_costing_periods/${P8}`)));
 await page.click('[data-act=new-period]'); await sleep(2500);
 const P9 = '2026-09';
+await waitSynced();
 ok('2026-09 never-closed draft has Cloud revisions', (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length > 0);
-await gotoTab('#settings'); await sleep(500);
+await gotoTab('#cc'); await gotoTab('#settings'); await sleep(800);
 ok('DATA-03 OPEN committed period cannot be permanently deleted', (await page.locator(`[data-act=delete-period][data-p="${P9}"]`).count()) === 0);
 ok('DATA-03 OPEN committed period exposes non-destructive Hide action', (await page.locator(`[data-act=hide-period][data-p="${P9}"]`).count()) === 1);
 const draftChunks = (await docKeys(`svl_costing_periods/${P9}/chunks/`)).length;

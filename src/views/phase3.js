@@ -1,5 +1,6 @@
 // Phase 3 views: STEP 5 — Opening FG, FIFO COGS + FG Rework FIFO (5B), FG History & month close.
 import * as F5 from '../engine/step5.js';
+import { CALC_REV, calcRevReason } from '../engine/calcrev.js';
 import * as SP from '../engine/syncpolicy.js';
 import { ACTION_MANUAL_COST, approvalDocId, canonicalManualCost, isApprovedFor } from '../engine/approvals.js';
 import * as TPL from '../engine/templates.js';
@@ -118,7 +119,7 @@ export function engineBalances(S, p2, res) {
 function snap(S, D4) {
   const d = S.d; const fl = D4 && D4.fl;
   return { period: S.period, step4RunAt: d.step4 ? d.step4.runAt : '', finalCost: fl ? fl.totals.totalCost : 0, dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', openValidatedAt: d.fgOpen ? d.fgOpen.validatedAt : '', mode: cfg(S).mode, dupKey: dupKey(S),
-    flKey: flKey(fl), ovKey: ovKey(S), rate: sellRate(S), rwKey: rwKey(S) };
+    flKey: flKey(fl), ovKey: ovKey(S), rate: sellRate(S), rwKey: rwKey(S), calcRev: CALC_REV.step5 };
 }
 /** Rework dispositions entered by the user (status / scrap / expense account / completion) – a change needs RUN FIFO again. */
 export const rwKey = (S) => fpRows((S.d.register && S.d.register.rows) || [], (r) => [ttxt(r.rid), utxt(r.rwType), utxt(r.rwStatus), ttxt(r.pcNo), num(r.compQty), num(r.scrapQty), utxt(r.scrapTreat), ttxt(r.woAccount), ttxt(r.dispNote).length >= 5 ? 1 : 0].join('|'));
@@ -167,6 +168,7 @@ function staleReason(S, D4, d3b) {
   if (c.dbSavedAt !== p.dbSavedAt) return 'Sales Database đã lưu lại';
   if (c.openValidatedAt !== p.openValidatedAt) return 'FG đầu kỳ đã validate lại';
   if (c.mode !== p.mode) return 'Đổi chế độ FIFO';
+  const cr = S.d.closed && S.d.closed.period === S.period ? '' : calcRevReason('step5', p.calcRev, 'STEP 5.2 (RUN FIFO COGS)'); if (cr) return cr;
   if (dupKey(S) !== (p.dupKey || '')) return 'Quyết định dòng nghi trùng đã đổi';
   if (p.flKey !== undefined && c.flKey !== p.flKey) return 'Giá thành từng lô ở STEP 4 đã đổi (điều chỉnh 3B / rework chuyển giữa các lô)';
   if (p.ovKey !== undefined && c.ovKey !== p.ovKey) return 'Lựa chọn xử lý FIFO (override) đã đổi';

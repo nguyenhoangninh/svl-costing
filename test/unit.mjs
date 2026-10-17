@@ -1193,6 +1193,13 @@ eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP
   eq('ACC-01: 2.000 random periods – rounded customer lines always add up to JE07 rounded, all whole VND', [bad, nonInt], [0, 0]);
 }
 
+// ---- v1.14.92 (audit ACC-03): a result computed with another calculation revision is OUTDATED
+{
+  const { CALC_REV, calcRevReason } = await import('../src/engine/calcrev.js');
+  eq('ACC-03: same revision → current; result saved before revisions existed counts as revision 1', [calcRevReason('step4', CALC_REV.step4, 'STEP 4'), calcRevReason('step5', undefined, 'STEP 5')], ['', CALC_REV.step5 === 1 ? '' : calcRevReason('step5', 1, 'STEP 5')]);
+  eq('ACC-03: older revision → reason names the step and both revisions', calcRevReason('step4', CALC_REV.step4 - 1, 'STEP 4'), `Cách tính STEP 4 đã đổi (phiên bản tính ${CALC_REV.step4 - 1} → ${CALC_REV.step4}) – chạy lại STEP 4`);
+}
+
 // ---- v1.14.79 revenue · COGS · GP by customer (engine/custpl.js): hand-made STEP 5 lines
 {
   const { customerPL, customerJournal, plSheetRows } = await import('../src/engine/custpl.js');

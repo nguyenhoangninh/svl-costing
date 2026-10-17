@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.92 (17/10/2026):** **Audit đợt B (phần 1).** (1) **ACC-03 / AUD-14 – phiên bản cách tính:** kết quả STEP 4 và STEP 5.2 lưu số phiên bản tính (`src/engine/calcrev.js`); khi một bản nâng cấp đổi cách tính, kết quả cũ chuyển **OUTDATED** với lý do "Cách tính … đã đổi (phiên bản tính a → b)" thay vì vẫn hiện CURRENT. Kỳ đã CLOSED giữ nguyên số đã đóng. `test/synth.mjs` từ chối ghi snapshot mới khi số STEP 2–5 đổi mà phiên bản tính không tăng. (2) **SEC-05 / NEW-06 – Rules kiểm bằng lần ghi thật:** `test/rules-emulator.mjs` chạy trên Firestore Emulator trong CI (job `e2e`, đã là check bắt buộc): viewer chỉ đọc, chỉ admin CLOSE / REOPEN, REOPEN không sửa được blob kế toán, everClosed không hạ được, không xóa được kỳ / chunk, chunk và revision bất biến, revision phải khớp con trỏ kỳ, nhật ký audit chỉ thêm, người yêu cầu không tự duyệt. (3) **SEC-02 – sao lưu độc lập:** workflow hằng tuần sao lưu toàn bộ Firestore, mã hóa AES-256, giữ 90 ngày; `tools/firestore-backup.mjs` khôi phục; CI thử sao lưu → xóa → khôi phục trên Emulator. **Cần thêm secret `BACKUP_PASSPHRASE` và role Cloud Datastore Viewer** (mục "Sao lưu và khôi phục Firestore"). (4) **TST-01 – test trình duyệt vào CI:** `test/e2e-cloud.mjs` (37 kiểm tra CLOSE / REOPEN, mất phản hồi, outbox, ghi nhận người thao tác), `test/e2e-i18n.mjs` và `test/e2e-exports.mjs` dựng kỳ từ dữ liệu giả lập (`test/support/synth-flow.mjs`) thay vì file công ty, chạy trong job `e2e`. Còn 4 bộ cần dữ liệu riêng (duyệt đơn giá, tiêu hao, đơn giá NVL, thẻ C). (5) **Sửa lỗi phát hiện khi chuyển test:** sửa nhanh trong lúc một lần lưu cloud đang chạy từng báo nhầm "Cloud có revision mới" (chính lần lưu của mình) và khóa màn hình; nay phân biệt bằng bộ đếm lần lưu đang chạy. Kỳ vừa lưu cloud lần đầu không còn hiện nút "Xoá bản nháp…".
+>
 > **v1.14.91 (17/10/2026):** **Audit đợt A (báo cáo audit toàn diện v1.14.90).** (1) **ACC-02 / ACC-05 – ô số dạng chữ:** ô số lượng / Total Cost của PC-M, MI-M, MR-M là chữ mà engine đọc ra số khác người đọc ("1.234.567" → 0, "1.234,5" → 1,2345, "1,5" → 15, "1.234" không rõ nghĩa, TRUE → −1) nay là **BLOCK - FIX DATA**: STEP 1 liệt kê từng dòng (báo cáo, dòng Excel, chứng từ, mã vật tư, ô gốc), STEP 2 bị chặn và **không xác nhận bỏ qua được** – sửa file rồi import lại. Ô chữ đọc đúng ("15", "1,234.5") vẫn ở thẻ C như cũ. (2) **ACC-01 – làm tròn bút toán:** bút toán đề xuất và sheet `2_ButToan_KhachHang` ghi số nguyên VND; các dòng JE07 theo khách được làm tròn rồi dồn phần dư (vài đồng) vào dòng lớn nhất, nên tổng luôn **bằng đúng** JE07 làm tròn (sheet `4_KiemTra` có thêm dòng kiểm tra không dung sai). (3) **SEC-03 – CSP:** đoạn đổi giao diện sáng / tối chuyển sang `src/theme.js`; `script-src` bỏ `'unsafe-inline'`. Test: unit +9 (gồm 2.000 kỳ ngẫu nhiên cho làm tròn), synthetic +2, e2e-synthetic +1.
 >
 > **v1.14.90 (15/10/2026):** Wave 1 – Data Integrity & Period Safety: Pull Cloud ghi đè local theo một IndexedDB transaction để giữ snapshot cũ nếu quota/browser lỗi; các chunk và con trỏ kỳ có revision bất biến không thể bị xoá trực tiếp bởi client, kỳ đã lưu Cloud chỉ được Ẩn/Hiện; CLOSE kiểm revision kỳ trước và REOPEN kiểm kỳ sau bên trong transaction Cloud. Kiểm thử `test/e2e-local-atomic.mjs`, rules-contract và synthetic E2E. **Để bảo vệ xoá Cloud ở phía server phải publish firestore.rules mới qua CI hoặc Firebase Console**.
@@ -224,6 +226,28 @@ Sau khi merge vào `main`, job `rules` publish `firestore.rules` lên project `s
    - `OWNER_EMAIL`: email Google của chủ sở hữu (chữ thường).
 5. Xoá file JSON trên máy sau khi lưu secret. Không dán khoá vào chat, issue hay commit.
 6. Vào **Actions** → lần chạy gần nhất trên `main` → **Re-run jobs** để job `rules` chạy với secret mới.
+
+### Sao lưu và khôi phục Firestore (v1.14.92)
+
+Workflow **Firestore backup** (`.github/workflows/backup.yml`) chạy mỗi thứ Hai 02:17 giờ Việt Nam (và chạy tay được ở **Actions → Firestore backup → Run workflow**). Nó đọc toàn bộ cơ sở dữ liệu (con trỏ kỳ, chunk, revision, phiếu duyệt, phân quyền, nhật ký audit, thông báo), nén, **mã hóa** rồi lưu làm artifact của lần chạy trong 90 ngày. Repo đang để public, nên không có passphrase thì workflow không ghi gì.
+
+Cần một lần:
+
+1. Google Cloud Console → **IAM** → service account đang dùng cho `FIREBASE_SA_JSON` → thêm role **Cloud Datastore Viewer** (`roles/datastore.viewer`) để đọc dữ liệu.
+2. GitHub → **Settings → Secrets and variables → Actions → New repository secret** `BACKUP_PASSPHRASE`: một chuỗi dài, lưu bản giấy / trình quản lý mật khẩu ở nơi khác. **Mất passphrase là không giải mã được bản sao lưu.**
+3. **Actions → Firestore backup → Run workflow** để chạy thử; tải artifact `firestore-backup` về.
+
+Mỗi lần sao lưu đọc mọi tài liệu một lần (gói Spark: 50.000 lượt đọc / ngày), nên chỉ chạy hằng tuần.
+
+Khôi phục (nên thử mỗi quý vào một project thử hoặc Emulator, không vào `svl-costing`):
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in svl-costing-firestore-<ngày>.ndjson.gz.enc -out backup.ndjson.gz   # nhập passphrase
+npm i --no-save firebase-admin@12
+GOOGLE_APPLICATION_CREDENTIALS=sa-project-thu.json FIREBASE_PROJECT=<project-thu> node tools/firestore-backup.mjs restore backup.ndjson.gz
+```
+
+Công cụ từ chối ghi vào project `svl-costing` nếu không có `--to-production`. CI (job `e2e`) chạy `test/backup-roundtrip.mjs` trên Firestore Emulator mỗi lần: sao lưu → xóa sạch → khôi phục → dữ liệu giống hệt (timestamp, dữ liệu nhị phân của chunk, tham chiếu).
 
 Kiểm tra: job `rules` phải hiện "Publish Firestore rules" thành công. Nếu thất bại, Firebase giữ nguyên rules cũ; xem log để biết lý do.
 

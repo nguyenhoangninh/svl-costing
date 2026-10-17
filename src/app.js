@@ -81,7 +81,9 @@ function startPeriodWatch(period) {
     // Firestore may publish OUR commit while compression/upload + localRev persistence is
     // still in flight. Wait until the writer has finished; a fixed 900-ms delay is unsafe
     // for large costing periods and creates a false conflict against our own committed save.
-    if (S.sync === 'saving') {
+    // v1.14.92: S.sync can turn 'pending' while a save is still in flight (an edit during the upload), so the in-flight
+    // counter is what tells our own commit from someone else's (before, a quick edit raised a false "Cloud có revision mới").
+    if (S.sync === 'saving' || (S.inflight && S.inflight[period] > 0)) {
       setTimeout(() => { if (S.period === period) onMeta(meta, metadata).catch((e) => console.warn('Live sync check', e)); }, 1100);
       return;
     }
@@ -216,6 +218,7 @@ async function pushCloudOnce() {
     return { ok: true, skipped: true };
   }
   const reopen = cloudClosed && !localClosed;
+  S.inflight = S.inflight || {}; S.inflight[p] = (S.inflight[p] || 0) + 1;
   try {
     S.sync = 'saving'; renderSync();
     await saveChain;
@@ -238,6 +241,8 @@ async function pushCloudOnce() {
       reopen ? { keepAllExcept: ['closed'], notice, transition: tr || undefined } : { notice, transition: tr || undefined });
     if (tr && S.pendingTransition === tr) S.pendingTransition = null;
     await store.localSet(lk(p, 'cloudRev'), meta.rev); await store.localSet(lk(p, 'cloudAt'), meta.updatedAt);
+    // v1.14.92: the period now has a Cloud revision – the period list must stop offering "Xoá bản nháp" right away
+    S.periodInfo = S.periodInfo || {}; S.periodInfo[p] = { ...(S.periodInfo[p] || {}), cloud: true, updatedAt: meta.updatedAt };
     if (meta.noticeDisabled && !S.noticeRuleWarned) {
       S.noticeRuleWarned = true;
       toast('Dữ liệu đã lên Cloud, nhưng chức năng chuông đang chờ cập nhật Firestore Rules. Đề nghị Admin kiểm tra việc publish rules.', 'review');
@@ -251,7 +256,7 @@ async function pushCloudOnce() {
     const conflict = e && e.name === 'ConflictError';
     S.sync = conflict ? 'conflict' : 'error'; S.syncMsg = e.message || String(e); renderSync();
     return { ok: false, error: S.syncMsg, conflict };
-  }
+  } finally { S.inflight[p]--; }
 }
 function summaryForCloud() {
   const st = statusAll();
