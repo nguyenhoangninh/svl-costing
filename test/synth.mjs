@@ -146,8 +146,9 @@ const snap = {
     ok(`customers ${label}: all checks PASS`, pl.checks.every((c) => c.status === 'PASS'), JSON.stringify(pl.checks.map((c) => c.status)));
     const lines = journalWithCustomers({ s3, s2, s4, fl, r5: X.res });
     const je07 = lines.filter((l) => l.je === 'JE07').reduce((a, l) => a + l.amount, 0);
-    ok(`journal ${label}: JE07 lines by customer add up to JE07`, near(je07, T.cogsA - T.consA), `${je07}`);
+    ok(`journal ${label}: JE07 lines by customer add up to JE07 (within the 0,5 VND of rounding)`, Math.abs(je07 - (T.cogsA - T.consA)) <= 0.5, `${je07}`);
     ok(`journal ${label}: JE07 check PASS`, journalCheck({ r5: X.res }).status === 'PASS');
+    ok(`journal ${label}: every amount is whole VND and JE07 by customer = JE07 rounded exactly (ACC-01)`, lines.every((l) => Number.isInteger(l.amount)) && je07 === Math.round(T.cogsA - T.consA), `${je07} vs ${T.cogsA - T.consA}`);
     ok(`journal ${label}: customer COGS lines are posted Nợ 632 / Có 155`, lines.filter((l) => l.je === 'JE07').every((l) => l.dr === '632' && l.cr === '155'));
   }
   const plS = customerPL(St.res);

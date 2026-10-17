@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1c2b36">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://www.gstatic.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://accounts.google.com wss://*.firebaseio.com; img-src 'self' data: blob: https://*.googleusercontent.com; frame-src https://accounts.google.com https://*.firebaseapp.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://www.gstatic.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://accounts.google.com wss://*.firebaseio.com; img-src 'self' data: blob: https://*.googleusercontent.com; frame-src https://accounts.google.com https://*.firebaseapp.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -962,16 +962,7 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
 <div id="busy" hidden><div class="busy-box" role="status" aria-live="polite"><div class="spin"></div><div id="busy-msg">Đang xử lý…</div></div></div>
 <div id="toasts" aria-live="polite"></div>
 <noscript>Ứng dụng cần bật JavaScript.</noscript>
-<script>
-(function () {
-  try { var t = localStorage.getItem('svl.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
-  document.getElementById('theme').addEventListener('click', function () {
-    var cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    var nx = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = nx;
-    try { localStorage.setItem('svl.theme', nx); } catch (e) {}
-  });
-})();
-</script>
+<script src="src/theme.js"></script>
 <script type="module" src="src/app.js"></script>
 </body>
 </html>

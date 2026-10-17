@@ -6,6 +6,21 @@ import { num } from './util.js';
 
 const TOL = 1;
 
+/**
+ * v1.14.91 (audit ACC-01): amounts rounded to whole VND so that the lines add up to the rounded total exactly.
+ * Each line is rounded; the difference left (a few VND at most) goes to the line with the largest absolute amount.
+ */
+export function roundToTotal(values, total) {
+  const r = values.map((v) => Math.round(num(v)));
+  if (!r.length) return r;
+  const diff = Math.round(num(total)) - r.reduce((a, b) => a + b, 0);
+  if (diff) {
+    let k = 0; for (let i = 1; i < values.length; i++) if (Math.abs(num(values[i])) > Math.abs(num(values[k]))) k = i;
+    r[k] += diff;
+  }
+  return r;
+}
+
 /** The period's journal lines before the customer split. JE07 is marked split: it is replaced by its customer lines. */
 export function journalLines({ s3, s2, s4, fl, r5 }) {
   if (!s3) return [];
@@ -42,12 +57,15 @@ export function journalWithCustomers(ctx) {
   const out = [];
   for (const l of lines) {
     if (l.split) {
-      for (const c of cj.filter((x) => x.je === 'JE07')) out.push({ ...c, cust: c.cust });
+      // v1.14.91: whole VND; the customer lines add up to JE07 rounded, to the đồng
+      const cl = cj.filter((x) => x.je === 'JE07');
+      const amt = roundToTotal(cl.map((c) => c.amount), l.amount);
+      cl.forEach((c, i) => { if (amt[i]) out.push({ ...c, cust: c.cust, amount: amt[i] }); });
       continue;
     }
-    out.push({ ...l, cust: '' });
+    out.push({ ...l, cust: '', amount: Math.round(num(l.amount)) });
   }
-  for (const c of cj.filter((x) => x.je !== 'JE07')) out.push({ ...c });
+  for (const c of cj.filter((x) => x.je !== 'JE07')) out.push({ ...c, amount: Math.round(num(c.amount)) });
   return out;
 }
 
@@ -57,4 +75,13 @@ export function journalCheck(ctx) {
   const je07 = ctx.r5 ? num(ctx.r5.totals.cogsA) - num(ctx.r5.totals.consA) : 0;
   const sum = pl ? pl.rows.reduce((a, r) => a + num(r.cogs), 0) : 0;
   return { expected: je07, actual: sum, status: Math.abs(sum - je07) <= TOL ? 'PASS' : 'CHECK' };
+}
+
+/** v1.14.91: after rounding, the JE07 customer lines equal JE07 rounded exactly (no tolerance). */
+export function journalRoundCheck(ctx) {
+  const je07 = journalLines(ctx).find((l) => l.split);
+  if (!je07) return null;
+  const expected = Math.round(num(je07.amount));
+  const actual = journalWithCustomers(ctx).filter((l) => l.je === 'JE07').reduce((a, l) => a + l.amount, 0);
+  return { expected, actual, status: actual === expected ? 'PASS' : 'CHECK' };
 }

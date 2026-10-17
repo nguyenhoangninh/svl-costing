@@ -943,7 +943,7 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   const HM = ['PC No.', 'Product Code', 'Product Name', 'Material Code', 'Material Name', 'Quantity', 'Total Cost'];
   const pcmT = buildDataset([['x'], HM, ['PC-1', 'A', 'a', '50728557', 'Tape', 1.145, 0], ['PC-2', 'A', 'a', '50728557', 'Tape', 2, 0], ['PC-1', 'A', 'a', 'OK1', 'ok', 5, 100], [null, null, null, null, null, 9, 0]], 'PC-M-T-202608.xlsx', P2);
   // dataset imported by an older version (no import gate): a negative and a text value are still found
-  const pcmO = { key: 'PC-M-O', headerRow: 1, header: HM, rows: [['PC-9', 'B', 'b', '326551', 'PE board', 1018.08, 0], ['PC-9', 'B', 'b', 'NEG1', 'n', -3, 10], ['PC-9', 'B', 'b', 'TXT1', 't', '1,5', 5]] };
+  const pcmO = { key: 'PC-M-O', headerRow: 1, header: HM, rows: [['PC-9', 'B', 'b', '326551', 'PE board', 1018.08, 0], ['PC-9', 'B', 'b', 'NEG1', 'n', -3, 10], ['PC-9', 'B', 'b', 'TXT1', 't', '15', 5]] };
   const HI = ['MI No.', 'Material Code', 'Material Name', 'Current Issue Qty', 'Total Cost'];
   const mimT = { key: 'MI-M-T', headerRow: 1, header: HI, rows: [['MI-1', '50661189', 'Liki', 700, 0], ['MI-2', 'OK2', 'ok', 3, 30]] };
   const ds = { 'PC-M-T': pcmT, 'PC-M-O': pcmO, 'MI-M-T': mimT };
@@ -956,6 +956,16 @@ for (const ic of man.icons) eq(`manifest icon ${ic.src} exists`, fs.existsSync(p
   const an2 = DQ.erpAnomalies({ ...ds, 'MI-M-T': { ...mimT, rows: [...mimT.rows, ['MI-3', 'NEW', 'new', 1, 0]] } });
   eq('DQ: list changed by a re-import → confirmation needed again', DQ.anomalyStatus(an2, ack), 'BLOCK - CONFIRM');
   eq('DQ: clean data → PASS', DQ.anomalyStatus(DQ.erpAnomalies({ 'MI-M-T': { ...mimT, rows: [mimT.rows[1]] } }), null), 'PASS');
+  // v1.14.91 (audit ACC-02 / ACC-05): a text number the engine would read differently blocks STEP 2 and cannot be confirmed
+  eq('ACC-02: text numbers read the same by the engine and a person are confirmable', ['15', '1,234.5', '1234,5', '-3', '(12)'].map(DQ.textReadable), [true, true, false, true, true]);
+  eq('ACC-02: "1.234.567", "1.234,5", "1,5", "1.234", "abc", TRUE are not', ['1.234.567', '1.234,5', '1,5', '1.234', 'abc', true, false].map(DQ.textReadable), [false, false, false, false, false, false, false]);
+  const bad = DQ.erpAnomalies({ 'PC-M-O': { ...pcmO, rows: [...pcmO.rows, ['PC-9', 'B', 'b', 'TXT2', 't', 2, '1.234.567'], ['PC-9', 'B', 'b', 'TXT3', 't', true, 10]] } });
+  eq('ACC-02: unreadable lines listed apart from part C', [bad.unreadable.map((l) => l.mat), bad.parts.C.count], [['TXT2', 'TXT3'], 2]);
+  const ackAllBad = { parts: Object.fromEntries(['A', 'B', 'C', 'D'].filter((k) => bad.parts[k].count).map((k) => [k, { fp: bad.parts[k].fp, count: bad.parts[k].count, by: 'a', at: 't', note: 'xác nhận' }])) };
+  eq('ACC-02: even with every part confirmed, unreadable cells keep STEP 2 blocked (BLOCK - FIX DATA)', [DQ.anomalyStatus(bad, null), DQ.anomalyStatus(bad, ackAllBad)], ['BLOCK - FIX DATA', 'BLOCK - FIX DATA']);
+  eq('ACC-02: blocking list names the unreadable lines first', [DQ.blockingParts(bad, ackAllBad).map((p) => [p.key, p.status, p.count]), /^E: 2 dòng vật tư có ô số không đọc được.*\(không xác nhận được\)$/.test(DQ.blockingSummary(DQ.blockingParts(bad, ackAllBad)))], [[['E', 'FIX', 2]], true]);
+  const cF = step1Controls({ checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } }, 0, [], { ...bad, status: DQ.anomalyStatus(bad, ackAllBad), blocking: DQ.blockingParts(bad, ackAllBad) });
+  eq('ACC-02: STEP 1 result asks to fix the ERP file', [cF.status, cF.result, /^Sửa file ERP có ô số không đọc được/.test(cF.next)], ['BLOCK', 'BLOCK - SỬA DỮ LIỆU ERP', true]);
   const s1 = { checklist: Array.from({ length: 21 }, () => ({ status: 'IMPORTED', dataRows: 1 })), bySys: { T: { status: 'READY' }, S: { status: 'READY' }, O: { status: 'READY' } } };
   const c1 = step1Controls(s1, 0, [], { ...an, status: DQ.anomalyStatus(an, null), blocking: DQ.blockingParts(an, null) });
   eq('STEP 1: unconfirmed anomalies block STEP 1 (status / result / next lists the blocking parts)', [c1.status, c1.result, /^Rà soát và xác nhận dữ liệu ERP bất thường \(STEP 1\) trước khi chạy STEP 2: A: \d+ .*\(chưa xác nhận\); B: \d+ .*\(chưa xác nhận\); C: \d+ .*\(chưa xác nhận\)$/.test(c1.next)], ['BLOCK', 'BLOCK - XÁC NHẬN DỮ LIỆU BẤT THƯỜNG', true]);
@@ -1166,6 +1176,22 @@ eq('ENH-07 retry delays 2s,4s,8s … capped at 60s', [1, 2, 3, 4, 5, 6, 9].map((
 eq('ENH-07 retry stops after the limit', [SP.shouldRetry(0), SP.shouldRetry(1), SP.shouldRetry(SP.RETRY_LIMIT), SP.shouldRetry(SP.RETRY_LIMIT + 1)], [false, true, true, false]);
 eq('ENH-07 outbox lists other periods only, sorted, unique', SP.outboxOthers(['2026-10', '2026-08', '2026-08', '', '2026-09'], '2026-10'), ['2026-08', '2026-09']);
 eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP.closeCommitted({ summary: { closed: 'T1' } }, 'T1'), SP.closeCommitted({ summary: { closed: 'T0' } }, 'T1'), SP.closeCommitted(null, 'T1'), SP.closeCommitted({ summary: { closed: null } }, 'T1')], [true, false, false, false]);
+
+// ---- v1.14.91 (audit ACC-01): journal amounts in whole VND, customer lines add up to the rounded total exactly
+{
+  const { roundToTotal } = await import('../src/engine/journal.js');
+  eq('ACC-01: the 1 VND left by rounding goes to the largest line', roundToTotal([100.4, 200.4, 300.4], 601.2), [100, 200, 301]);
+  eq('ACC-01: negative line (returns) and empty list', [roundToTotal([-50.6, 120.7], 70.1), roundToTotal([], 5)], [[-51, 121], []]);
+  let seed = 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  let bad = 0, nonInt = 0;
+  for (let p = 0; p < 2000; p++) {
+    const n = 3 + Math.floor(rnd() * 20), v = Array.from({ length: n }, () => rnd() * 5e8 + rnd());
+    const total = v.reduce((a, b) => a + b, 0), r = roundToTotal(v, total);
+    if (r.reduce((a, b) => a + b, 0) !== Math.round(total)) bad++;
+    if (r.some((x) => !Number.isInteger(x))) nonInt++;
+  }
+  eq('ACC-01: 2.000 random periods – rounded customer lines always add up to JE07 rounded, all whole VND', [bad, nonInt], [0, 0]);
+}
 
 // ---- v1.14.79 revenue · COGS · GP by customer (engine/custpl.js): hand-made STEP 5 lines
 {
