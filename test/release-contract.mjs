@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.91', v === '1.14.91');
+ok('package version = 1.14.92', v === '1.14.92');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -70,5 +70,11 @@ const jSrc = fs.readFileSync(new URL('../src/engine/journal.js', import.meta.url
 ok('ACC-02: unreadable text numbers block STEP 2 and cannot be confirmed', dqSrc.includes('export function textReadable(') && dqSrc.includes("return 'BLOCK - FIX DATA'") && app.includes("if (dqSt === 'BLOCK - FIX DATA')"));
 ok('ACC-01: journal lines in whole VND, JE07 by customer adds up to JE07 rounded', jSrc.includes('export function roundToTotal(') && jSrc.includes('export function journalRoundCheck(') && app.includes('journalRoundCheck(ctx)'));
 ok('SEC-03: no inline script and no \'unsafe-inline\' in script-src', !/<script>(?!<\/script>)/.test(html) && !/script-src[^;]*'unsafe-inline'/.test(html) && html.includes('<script src="src/theme.js"></script>') && sw.includes("'./src/theme.js'"));
+// v1.14.92 (audit wave B: ACC-03, SEC-05, SEC-02)
+const p2Src = fs.readFileSync(new URL('../src/views/phase2.js', import.meta.url), 'utf8');
+ok('ACC-03: STEP 4 and STEP 5 results carry the calculation revision and go OUTDATED when it changes', fs.existsSync(new URL('../src/engine/calcrev.js', import.meta.url)) && p2Src.includes('calcRev: CALC_REV.step4') && p2Src.includes("calcRevReason('step4'") && phase3.includes('calcRev: CALC_REV.step5') && phase3.includes("calcRevReason('step5'") && sw.includes("'./src/engine/calcrev.js'"));
+ok('SEC-05: Firestore Rules and backup restore run on the Emulator inside the required e2e job', /\n  e2e:\n[\s\S]*emulators:exec --only firestore[^\n]*node test\/rules-emulator\.mjs && node test\/backup-roundtrip\.mjs[\s\S]*\n  deploy:/.test(ci));
+const bk = fs.existsSync(new URL('../.github/workflows/backup.yml', import.meta.url)) ? fs.readFileSync(new URL('../.github/workflows/backup.yml', import.meta.url), 'utf8') : '';
+ok('SEC-02: weekly backup is encrypted and skipped without a passphrase', bk.includes('schedule:') && bk.includes('openssl enc -aes-256-cbc -pbkdf2') && bk.includes('BACKUP_PASSPHRASE') && !/upload-artifact[\s\S]*\.ndjson\.gz\n/.test(bk));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

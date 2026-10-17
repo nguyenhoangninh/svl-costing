@@ -1,0 +1,51 @@
+# v1.14.92 (audit SEC-02): weekly independent backup of the whole Firestore database (periods, chunks, revisions,
+# approvals, access list, audit trail, notifications), kept as an ENCRYPTED workflow artifact for 90 days.
+# Needs two repository secrets: FIREBASE_SA_JSON (already used to publish Rules; the service account also needs the
+# "Cloud Datastore Viewer" role to read data) and BACKUP_PASSPHRASE (any long passphrase, stored somewhere safe offline).
+# The repository is public: without BACKUP_PASSPHRASE nothing is written. Restore: see README "Sao lưu và khôi phục".
+name: Firestore backup
+on:
+  schedule:
+    - cron: '17 19 * * 0'   # every Sunday 19:17 UTC = Monday 02:17 Vietnam time
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check secrets
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SA_JSON }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$SA_JSON" ] || [ -z "$PASS" ]; then
+            echo "::warning::Chưa có secret FIREBASE_SA_JSON / BACKUP_PASSPHRASE: không sao lưu."
+            echo "SKIP=1" >> "$GITHUB_ENV"; exit 0
+          fi
+          printf '%s' "$SA_JSON" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - name: Back up and encrypt
+        if: env.SKIP != '1'
+        env:
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          npm i --no-save firebase-admin@12
+          STAMP=$(date -u +%Y%m%dT%H%MZ)
+          node tools/firestore-backup.mjs backup "$RUNNER_TEMP/svl.ndjson.gz"
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:PASS -in "$RUNNER_TEMP/svl.ndjson.gz" -out "svl-costing-firestore-$STAMP.ndjson.gz.enc"
+          rm -f "$RUNNER_TEMP/svl.ndjson.gz"
+          sha256sum svl-costing-firestore-*.enc
+      - uses: actions/upload-artifact@v4
+        if: env.SKIP != '1'
+        with:
+          name: firestore-backup
+          path: svl-costing-firestore-*.enc
+          retention-days: 90
+      - name: Remove service account file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"

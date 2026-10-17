@@ -4,6 +4,7 @@ import * as F from '../engine/step4.js';
 import { step2Controls, step3Controls, step3bControls, step4Controls } from '../engine/controls.js';
 import { num, ttxt, txt, utxt, serialToISO, nowISO, isoToSerial, fpRows } from '../engine/util.js';
 import { RW_FIELDS } from '../engine/step2.js';
+import { CALC_REV, calcRevReason } from '../engine/calcrev.js';
 import { splitBooks } from '../engine/revenue.js';
 import { revenueBooks } from '../engine/step5.js';
 
@@ -51,12 +52,14 @@ function currentSnap(S, d3b) {
     period: S.period, latestImport: A.latestImport(), step2RunAt: d.step2 ? d.step2.runAt : '', step3RunAt: d.step3 ? d.step3.runAt : '',
     dbSavedAt: d.salesDB ? d.salesDB.savedAt : '', pmUpdatedAt: d.pm ? d.pm.updatedAt : '', glPeriod: d.gl ? d.gl.period : '',
     fx: d.gl ? num(d.gl.fx) : 0, gl622: d.gl ? num(d.gl.gl622) : 0, gl627: d.gl ? num(d.gl.gl627) : 0, direct622: dt.d622, direct627: dt.d627, activeDirect: dt.n, posted3B: d3b ? d3b.engPosted : 0,
-    directKey: directKey(d.directAdj), posted3BKey: d3b ? postedKey(d3b.posted) : '',
+    directKey: directKey(d.directAdj), posted3BKey: d3b ? postedKey(d3b.posted) : '', calcRev: CALC_REV.step4,
   };
 }
 /** Why STEP 4 must be rerun, or '' (F-01: covers the whole upstream chain, not only Step 4's own snapshot). */
 export function step4StaleReason(S, d3b) {
   const d = S.d; const s4 = d.step4; if (!s4 || !s4.snap) return '';
+  // a CLOSED period keeps the numbers it was closed with: a later change of the calculation does not reopen the question
+  const cr = d.closed && d.closed.period === S.period ? '' : calcRevReason('step4', s4.snap.calcRev, 'STEP 4'); if (cr) return cr;
   const ctx = { period: S.period, step2: d.step2, register: d.register, latestImport: A.latestImport(), opening: d.opening, step3: d.step3 };
   const s2 = step2Controls(ctx).status, s3 = step3Controls(ctx).status;
   if (String(s2).startsWith('RERUN') || String(s2).startsWith('BLOCK')) return `STEP 2 = ${s2}`;
