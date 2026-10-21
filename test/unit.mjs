@@ -1200,6 +1200,26 @@ eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP
   eq('ACC-03: older revision → reason names the step and both revisions', calcRevReason('step4', CALC_REV.step4 - 1, 'STEP 4'), `Cách tính STEP 4 đã đổi (phiên bản tính ${CALC_REV.step4 - 1} → ${CALC_REV.step4}) – chạy lại STEP 4`);
 }
 
+// ---- v1.14.93 Xưởng giá thành: what each station is doing, from the rail statuses
+{
+  const WS = await import('../src/engine/workshop.js');
+  const { statusClass } = await import('../src/ui/format.js');
+  const all = (v) => Object.fromEntries(WS.STATIONS.flatMap((s) => s.keys).map((k) => [k, v]));
+  const m0 = WS.workshopModel({ rail: {}, audit: [], closed: false, cls: statusClass });
+  eq('workshop: new period → first station is up next, the rest wait', m0.stations.map((s) => s.state), ['turn', ...Array(8).fill('waiting')]);
+  const rail = { ...all('NOT RUN'), s1: 'PASS', s2: 'PASS', rw: 'PASS', op: 'PASS', s3: 'PASS', s3b: 'BLOCK', pm: 'PASS', gl: 'PASS' };
+  const m1 = WS.workshopModel({ rail, audit: [{ action: 'STEP 2 - STOCK OUT (RM / FG SPLIT)', user: 'a@svl', at: 't2' }, { action: 'STEP 2 FALLBACK APPROVAL', user: 'b@svl', at: 't1' }], closed: false, cls: statusClass });
+  eq('workshop: a blocked step raises its hand and later steps wait (done steps stay done)', m1.stations.map((s) => s.state), ['done', 'done', 'blocked', 'done', 'waiting', 'waiting', 'waiting', 'waiting', 'waiting']);
+  eq('workshop: latest audit event of the station (newest first)', m1.stations[1].last, { by: 'a@svl', at: 't2', action: 'STEP 2 - STOCK OUT (RM / FG SPLIT)' });
+  eq('workshop: summary counts', [m1.summary.done, m1.summary.blocked, m1.summary.turn], [3, 1, '']);
+  const m2 = WS.workshopModel({ rail: { ...all('PASS'), s4: 'RERUN REQUIRED', s5: 'PASS WITH REVIEW' }, audit: [], closed: false, cls: statusClass });
+  eq('workshop: rerun and review states', [m2.stations[4].state, m2.stations[5].state], ['rerun', 'review']);
+  const m4 = WS.workshopModel({ rail: { ...all('NOT RUN'), s1: 'PASS', s4: 'BLOCK' }, audit: [], closed: false, cls: statusClass });
+  eq('workshop: a BLOCK further down waits while earlier steps are not done', [m4.stations[1].state, m4.stations[4].state], ['turn', 'waiting']);
+  const m3 = WS.workshopModel({ rail: all('PASS'), audit: [], closed: true, cls: statusClass });
+  eq('workshop: closed period → every station closed', [...new Set(m3.stations.map((s) => s.state))], ['closed']);
+}
+
 // ---- v1.14.79 revenue · COGS · GP by customer (engine/custpl.js): hand-made STEP 5 lines
 {
   const { customerPL, customerJournal, plSheetRows } = await import('../src/engine/custpl.js');
