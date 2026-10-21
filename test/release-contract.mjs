@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.94', v === '1.14.94');
+ok('package version = 1.14.95', v === '1.14.95');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -79,7 +79,7 @@ ok('SEC-02: weekly backup is encrypted and skipped without a passphrase', bk.inc
 ok('TST-01: cloud, language and export browser tests run in CI on synthetic data', ['e2e-cloud.mjs', 'e2e-i18n.mjs', 'e2e-exports.mjs'].every((t) => ci.includes(`node test/${t} http://127.0.0.1:8765/`)) && !fs.readFileSync(new URL('./e2e-cloud.mjs', import.meta.url), 'utf8').includes('costing.xlsm'));
 ok('own in-flight save is not taken for a remote change (false conflict)', app.includes('S.inflight[period] > 0') && app.includes('} finally { S.inflight[p]--; }'));
 // v1.14.93 Xưởng giá thành
-ok('Xưởng giá thành has its navigation item, route, modules precached and a browser check', app.includes("{ id: 'workshop'") && app.includes('VIEWS.workshop = (el) =>') && ["'./src/views/workshop.js'", "'./src/engine/workshop.js'"].every((f) => sw.includes(f)) && fs.readFileSync(new URL('./e2e-synthetic.mjs', import.meta.url), 'utf8').includes('#ws-canvas'));
-ok('Xưởng giá thành staff are the cats', fs.readFileSync(new URL('../src/views/workshop.js', import.meta.url), 'utf8').includes('function catSprite('));
+ok('Xưởng giá thành has its navigation item, route, modules precached and a browser check', app.includes("{ id: 'workshop'") && app.includes('VIEWS.workshop = (el) =>') && ["'./src/views/workshop.js'", "'./src/engine/workshop.js'"].every((f) => sw.includes(f)) && fs.readFileSync(new URL('./e2e-synthetic.mjs', import.meta.url), 'utf8').includes('.ws-svg'));
+ok('Xưởng giá thành staff are the cats', fs.readFileSync(new URL('../src/views/workshop.js', import.meta.url), 'utf8').includes('function catBody(') && html.includes('body[data-view="workshop"] #rail'));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);
