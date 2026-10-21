@@ -262,7 +262,7 @@ export const EN = {
 "FG đầu kỳ · giá vốn · rework": "FG opening · COGS · rework",
 "Hàng trả lại 5212 · giảm giá 5213": "Returns 5212 · discounts 5213",
 "FG History · FAST · đóng kỳ": "FG History · FAST · close",
-"Mỗi nhân vật là một trạm của quy trình đóng kỳ; trạng thái lấy từ dữ liệu thật của kỳ (cùng nguồn với thanh quy trình bên trái). Bấm vào nhân vật hoặc tên trạm để xem chi tiết. Ý tưởng từ Habblaud (MIT).": "Each character is a station of the month close; its state comes from the period's real data (the same source as the process rail on the left). Click a character or a station name for details. Idea from Habblaud (MIT).",
+"Mỗi chú mèo là một trạm của quy trình đóng kỳ; trạng thái lấy từ dữ liệu thật của kỳ (cùng nguồn với thanh quy trình bên trái). Bấm vào mèo hoặc tên trạm để xem chi tiết. Ý tưởng từ Habblaud (MIT).": "Each cat is a station of the month close; its state comes from the period's real data (the same source as the process rail on the left). Click a cat or a station name for details. Idea from Habblaud (MIT).",
 "Ô số không đọc được – phải sửa file ERP": "Unreadable number cells – fix the ERP file",
 "Số lượng (ô gốc)": "Quantity (original cell)",
 "Total Cost (ô gốc)": "Total Cost (original cell)",

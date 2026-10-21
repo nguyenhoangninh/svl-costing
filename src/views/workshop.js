@@ -4,12 +4,9 @@
 // The state of each station comes from engine/workshop.js (the same statuses as the process rail); this view only draws.
 import { STATE_LABEL } from '../engine/workshop.js';
 
-const W = 384, H = 290;          // logical pixels; drawn at ×SC so the pixels stay square and the name tags crisp
+const W = 384, H = 312;          // logical pixels; drawn at ×SC so the pixels stay square and the name tags crisp
 const SC = 3;
-const COLS = [70, 192, 314], ROWS = [106, 180, 254]; // desk centres
-const SHIRT = ['#3f6cc0', '#2f8f6b', '#d9702a', '#8e5bc0', '#c0465a', '#2a8fb0', '#b58a1d', '#5d9b3a', '#334155'];
-const HAIR = ['#3b2a20', '#1f1a17', '#6b4423', '#2b2b2b', '#8a5a2b', '#191919', '#4a3020', '#5a3a1a', '#222'];
-const SKIN = ['#f1c9a5', '#e8b48f', '#d9a27a', '#f3d2b3', '#e0ac85', '#c98f68', '#f0c4a0', '#e6b38c', '#dba27c'];
+const COLS = [70, 192, 314], ROWS = [114, 194, 274]; // desk centres
 const BADGE = { done: '#2e7d4f', review: '#9a6412', turn: '#1f6f5c', rerun: '#5b4f9a', blocked: '#b4402f', waiting: '#7d8a90', closed: '#2e7d4f' };
 
 let timer = null;
@@ -33,7 +30,7 @@ export function view(el, x) {
         <div class="ws-detail" id="ws-detail"></div>
       </aside>
     </div>
-    <p class="muted ws-note">Mỗi nhân vật là một trạm của quy trình đóng kỳ; trạng thái lấy từ dữ liệu thật của kỳ (cùng nguồn với thanh quy trình bên trái). Bấm vào nhân vật hoặc tên trạm để xem chi tiết. Ý tưởng từ Habblaud (MIT).</p>
+    <p class="muted ws-note">Mỗi chú mèo là một trạm của quy trình đóng kỳ; trạng thái lấy từ dữ liệu thật của kỳ (cùng nguồn với thanh quy trình bên trái). Bấm vào mèo hoặc tên trạm để xem chi tiết. Ý tưởng từ Habblaud (MIT).</p>
   </section>`;
   const detail = () => {
     const s = model.stations.find((t) => t.id === selected);
@@ -52,7 +49,7 @@ export function view(el, x) {
   ctx.setTransform(SC, 0, 0, SC, 0, 0); ctx.imageSmoothingEnabled = false;
   cv.addEventListener('click', (e) => {
     const r = cv.getBoundingClientRect(); const px = (e.clientX - r.left) * W / r.width, py = (e.clientY - r.top) * H / r.height;
-    const i = model.stations.findIndex((_, k) => Math.abs(px - COLS[k % 3]) < 52 && py > ROWS[Math.floor(k / 3)] - 34 && py < ROWS[Math.floor(k / 3)] + 18);
+    const i = model.stations.findIndex((_, k) => Math.abs(px - COLS[k % 3]) < 52 && py > ROWS[Math.floor(k / 3)] - 48 && py < ROWS[Math.floor(k / 3)] + 18);
     if (i >= 0) { selected = model.stations[i].id; detail(); paint(); }
   });
   const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -108,38 +105,73 @@ function plant(c, x, y) {
 function desk(c, cx, cy, glow) {
   rect(c, cx - 24, cy - 2, 48, 10, '#9b6b43'); rect(c, cx - 24, cy - 2, 48, 2, '#b8845a'); rect(c, cx - 22, cy + 8, 3, 8, '#7a5233'); rect(c, cx + 19, cy + 8, 3, 8, '#7a5233');
   // laptop (lid towards us) with screen glow
-  rect(c, cx - 8, cy - 9, 16, 8, '#5a6570'); rect(c, cx - 7, cy - 8, 14, 6, '#6f7b86');
-  if (glow) { c.globalAlpha = 0.35; rect(c, cx - 10, cy - 12, 20, 3, glow); c.globalAlpha = 1; }
-  rect(c, cx - 10, cy - 1, 20, 2, '#3d454d');
+  rect(c, cx + 6, cy - 10, 16, 9, '#5a6570'); rect(c, cx + 7, cy - 9, 14, 7, '#6f7b86');
+  if (glow) { c.globalAlpha = 0.4; rect(c, cx + 4, cy - 13, 20, 3, glow); c.globalAlpha = 1; }
+  rect(c, cx + 4, cy - 1, 20, 2, '#3d454d');
   // mug
-  rect(c, cx + 13, cy - 5, 4, 4, '#f5f5f5'); rect(c, cx + 17, cy - 4, 1, 2, '#f5f5f5');
+  rect(c, cx - 21, cy - 5, 4, 4, '#f5f5f5'); rect(c, cx - 17, cy - 4, 1, 2, '#f5f5f5');
 }
 
-// a seated (head + torso) or standing character, 12 px wide
-function person(c, x, y, i, pose, t) {
-  const pal = { h: HAIR[i], s: SKIN[i], e: '#1d1d1d', b: SHIRT[i], d: shade(SHIRT[i]), l: '#2f3b4a', w: '#ffffff' };
+// v1.14.94: the staff are cats – 9 coats, a seated (head + chest above the desk) or standing cat, 12 px wide
+const CATS = [
+  { name: 'cam vằn', f: '#e8913a', d: '#b8611b', w: '#fbe3c4', k: '#3fae5a', mark: 'tabby' },
+  { name: 'mun', f: '#2e2e36', d: '#1b1b20', w: '#4b4b57', k: '#e5c33a', o: '#111114' },
+  { name: 'trắng', f: '#f6f3ec', d: '#ddd5c6', w: '#ffffff', k: '#4aa3df' },
+  { name: 'xám', f: '#8d949c', d: '#6a7078', w: '#cdd2d6', k: '#e5c33a' },
+  { name: 'tam thể', f: '#f6f3ec', d: '#2e2e36', w: '#ffffff', k: '#3fae5a', mark: 'calico', p2: '#e8913a' },
+  { name: 'Xiêm', f: '#efe0c8', d: '#5a4232', w: '#f8efe0', k: '#4aa3df', mark: 'points' },
+  { name: 'mướp xám', f: '#7d8fa3', d: '#56677a', w: '#c9d3dd', k: '#e5c33a', mark: 'tabby' },
+  { name: 'kem', f: '#f2d8a7', d: '#d6b077', w: '#fbefd8', k: '#3fae5a', mark: 'tabby' },
+  { name: 'mèo mặc vest', f: '#2e2e36', d: '#1b1b20', w: '#ffffff', k: '#3fae5a', o: '#111114', mark: 'tuxedo' },
+];
+/** A cat drawn at ×2 (its own pixels stay square). */
+function cat(c, x, y, i, pose, t) { c.save(); c.translate(Math.round(x), Math.round(y)); c.scale(2, 2); catSprite(c, 0, 0, i, pose, t); c.restore(); }
+function catSprite(c, x, y, i, pose, t) {
+  const C = CATS[i % CATS.length];
+  const pal = { o: C.o || '#3b2f2a', f: C.f, d: C.d, w: C.w, p: '#f2a1ac', k: C.k, n: '#d86b7a', b: '#111' };
   const sleep = pose === 'sleep';
   const hy = y + (sleep ? 4 : 0);
+  const blink = sleep || t % 23 === 0;
+  // tail behind the body, swaying (up for the standing poses)
+  const sway = [0, 1, 2, 1][t % 4];
+  if (pose === 'raise' || pose === 'cheer') { for (let k = 0; k < 7; k++) rect(c, x + 12 + (k > 4 ? sway : 0), y + 14 - k, 2, 1, C.f); rect(c, x + 12 + sway, y + 7, 2, 1, C.d); }
+  else if (!sleep) { rect(c, x + 12, hy + 12, 3, 2, C.f); rect(c, x + 14, hy + 10 - sway, 2, 3, C.f); rect(c, x + 14, hy + 9 - sway, 2, 1, C.d); }
   // head
-  px(c, x + 2, hy, ['.hhhhhh.', 'hhhhhhhh', 'hssssssh', 'ssssssss', 'ssssssss', '.ssssss.', '..ssss..'], pal);
-  if (!sleep) { rect(c, x + 4, hy + 3, 1, 1, '#1d1d1d'); rect(c, x + 7, hy + 3, 1, 1, '#1d1d1d'); }
-  else { rect(c, x + 4, hy + 3, 2, 1, '#1d1d1d'); rect(c, x + 7, hy + 3, 2, 1, '#1d1d1d'); }
-  // torso
-  const by = hy + 7;
-  px(c, x, by, ['..bbbbbbbb..', '.bbbbddbbbb.', 'bbbbbddbbbbb', 'bbbbbddbbbbb', 'bbbbbbbbbbbb'], pal);
-  if (pose === 'type') { // hands on the keyboard, alternating
-    rect(c, x + 1, by + 5 + (t % 2), 2, 2, pal.s); rect(c, x + 9, by + 5 + ((t + 1) % 2), 2, 2, pal.s);
-  } else if (pose === 'raise') { // one arm up, waving
-    rect(c, x + 11, by - 6 + (t % 2), 2, 8, pal.b); rect(c, x + 11, by - 8 + (t % 2), 2, 2, pal.s);
-    px(c, x, by + 5, ['.llll..llll.', '.llll..llll.', '.llll..llll.', '.llll..llll.', '.kkk...kkk..'], { l: pal.l, k: '#222' });
-  } else if (pose === 'cheer') {
-    const up = t % 4 < 2 ? 0 : 1;
-    rect(c, x - 2, by - 6 + up, 2, 8, pal.b); rect(c, x - 2, by - 8 + up, 2, 2, pal.s);
-    rect(c, x + 12, by - 6 + up, 2, 8, pal.b); rect(c, x + 12, by - 8 + up, 2, 2, pal.s);
-    px(c, x, by + 5, ['.llll..llll.', '.llll..llll.', '.llll..llll.', '.llll..llll.', '.kkk...kkk..'], { l: pal.l, k: '#222' });
-  } else { rect(c, x + 1, by + 5, 2, 2, pal.s); rect(c, x + 9, by + 5, 2, 2, pal.s); }
+  px(c, x, hy, [
+    '.o........o.',
+    'ofo......ofo',
+    'opfoooooofpo',
+    'offffffffffo',
+    blink ? 'ofbbffffbbfo' : 'ofkkffffkkfo',
+    'offffnnffffo',
+    'ofwwwwwwwwfo',
+    '.offffffffo.',
+    '..oooooooo..',
+  ], pal);
+  if (!blink) { rect(c, x + 3, hy + 4, 1, 1, '#111'); rect(c, x + 9, hy + 4, 1, 1, '#111'); } // pupils
+  // whiskers
+  c.globalAlpha = 0.55; rect(c, x - 2, hy + 5, 2, 1, '#555'); rect(c, x - 2, hy + 7, 2, 1, '#555'); rect(c, x + 12, hy + 5, 2, 1, '#555'); rect(c, x + 12, hy + 7, 2, 1, '#555'); c.globalAlpha = 1;
+  // coat markings
+  if (C.mark === 'tabby') { rect(c, x + 4, hy + 3, 1, 1, C.d); rect(c, x + 6, hy + 3, 1, 1, C.d); rect(c, x + 8, hy + 3, 1, 1, C.d); rect(c, x + 5, hy + 2, 2, 1, C.d); }
+  if (C.mark === 'calico') { rect(c, x + 1, hy + 2, 3, 3, C.p2); rect(c, x + 8, hy + 2, 3, 2, C.d); rect(c, x + 2, hy + 1, 1, 1, C.p2); }
+  if (C.mark === 'points') { rect(c, x + 3, hy + 5, 6, 3, C.d); rect(c, x + 5, hy + 5, 2, 1, pal.n); rect(c, x + 1, hy + 1, 1, 1, C.d); rect(c, x + 10, hy + 1, 1, 1, C.d); }
+  // body (chest)
+  const by = hy + 9;
+  px(c, x, by, ['.offffffffo.', 'offfwwwwfffo', 'offfwwwwfffo', 'offffwwffffo', 'offffffffffo'], pal);
+  if (C.mark === 'tuxedo') { rect(c, x + 5, by + 1, 2, 1, '#c0465a'); rect(c, x + 4, by + 1, 1, 1, '#8f2f40'); rect(c, x + 7, by + 1, 1, 1, '#8f2f40'); } // bow tie
+  if (C.mark === 'calico') { rect(c, x + 8, by + 1, 3, 3, C.p2); }
+  if (C.mark === 'tabby') { rect(c, x + 2, by + 2, 1, 1, C.d); rect(c, x + 9, by + 2, 1, 1, C.d); rect(c, x + 2, by + 4, 1, 1, C.d); rect(c, x + 9, by + 4, 1, 1, C.d); }
+  const paw = C.mark === 'points' ? C.d : C.mark === 'tuxedo' ? '#ffffff' : C.w;
+  if (pose === 'type') { // paws on the keyboard, tapping in turn
+    rect(c, x + 2, by + 4 + (t % 2), 3, 2, paw); rect(c, x + 7, by + 4 + ((t + 1) % 2), 3, 2, paw);
+  } else if (pose === 'raise' || pose === 'cheer') {
+    px(c, x, by + 5, ['.offo..offo.', '.offo..offo.', '.offo..offo.', '.oppo..oppo.'].map((r) => r.replace(/p/g, 'w')), pal);
+    const up = t % 2;
+    rect(c, x + 11, by - 7 + up, 2, 8, C.f); rect(c, x + 11, by - 9 + up, 3, 2, paw); // waving paw
+    if (pose === 'cheer') { rect(c, x - 1, by - 7 + up, 2, 8, C.f); rect(c, x - 2, by - 9 + up, 3, 2, paw); }
+  } else { rect(c, x + 2, by + 4, 3, 2, paw); rect(c, x + 7, by + 4, 3, 2, paw); }
 }
-function shade(hex) { const n = parseInt(hex.slice(1), 16); const f = (v) => Math.max(0, Math.round(v * 0.75)); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; }
+export const CAT_NAMES = CATS.map((c) => c.name);
 
 function bubble(c, x, y, col, draw) {
   rect(c, x, y, 13, 11, '#ffffff'); rect(c, x - 1, y + 1, 15, 9, '#ffffff'); rect(c, x + 3, y + 11, 3, 2, '#ffffff');
@@ -169,18 +201,18 @@ function draw(c, model, t, sel) {
     const st = s.state;
     const glow = { turn: '#7fe3c4', done: '#7fd38f', review: '#f3c96b', rerun: '#b9a8f5', blocked: '#ff8a7a', waiting: '', closed: '#7fd38f' }[st];
     const standing = st === 'blocked' || (st === 'closed' && s.id === 'close');
-    if (sel === s.id) { c.globalAlpha = 0.25; rect(c, cx - 30, cy - 34, 60, 50, '#ffd34d'); c.globalAlpha = 1; }
-    if (!standing) person(c, cx - 6, cy - 21, k, st === 'turn' ? 'type' : st === 'waiting' ? 'sleep' : 'sit', t);
+    if (sel === s.id) { c.globalAlpha = 0.25; rect(c, cx - 30, cy - 48, 60, 64, '#ffd34d'); c.globalAlpha = 1; }
+    if (!standing) cat(c, cx - 16, cy - 30, k, st === 'turn' ? 'type' : st === 'waiting' ? 'sleep' : 'sit', t);
     desk(c, cx, cy, glow);
-    if (standing) person(c, cx + 26, cy - 22, k, st === 'blocked' ? 'raise' : 'cheer', t);
+    if (standing) cat(c, cx + 26, cy - 26, k, st === 'blocked' ? 'raise' : 'cheer', t);
     // status bubble
-    const bx = standing ? cx + 36 : cx + 6, by = cy - 36;
+    const bx = standing ? cx + 46 : cx + 8, by = standing ? cy - 48 : cy - 46;
     if (st === 'turn') bubble(c, bx, by, '#1f6f5c', (x, y) => glyph(c, x + 4, y + 5, 'dots', t % 3 === 0 ? '#9fb' : '#1f6f5c'));
     else if (st === 'done' || st === 'closed') bubble(c, bx, by, '#2e7d4f', (x, y) => glyph(c, x + 3, y + 3, 'ok', '#2e7d4f'));
     else if (st === 'review') bubble(c, bx, by, '#9a6412', (x, y) => glyph(c, x + 5, y + 3, 'q', '#9a6412'));
     else if (st === 'rerun') bubble(c, bx, by, '#5b4f9a', (x, y) => glyph(c, x + 4, y + 3, 'hour', t % 6 < 3 ? '#5b4f9a' : '#8e83cf'));
     else if (st === 'blocked' && t % 4 < 3) bubble(c, bx, by, '#b4402f', (x, y) => glyph(c, x + 6, y + 3, 'bang', '#b4402f'));
-    else if (st === 'waiting') { c.font = '7px monospace'; c.fillStyle = '#5b6b73'; const z = t % 9; c.fillText('z', cx + 4 + (z > 3 ? 3 : 0), cy - 26 - z); if (z > 4) c.fillText('Z', cx + 9, cy - 32 - (z - 4)); }
+    else if (st === 'waiting') { c.font = '7px monospace'; c.fillStyle = '#5b6b73'; const z = t % 9; c.fillText('z', cx + 8 + (z > 3 ? 3 : 0), cy - 30 - z); if (z > 4) c.fillText('Z', cx + 13, cy - 36 - (z - 4)); }
     nameTag(c, cx, cy + 18, `${s.no} ${s.name}`, BADGE[st], sel === s.id);
   });
   if (model.stations[0] && model.stations[0].state === 'closed') confetti(c, t);
