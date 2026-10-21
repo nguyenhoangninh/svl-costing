@@ -552,6 +552,7 @@ function renderShell() {
 const STAGE_OF = { step1: 's1', step2: 's2', rework: 's2', opening: 's3', step3: 's3', p3b: 's3', sales: 's4', gl: 's4', step4: 's4', fgprod: 's4', fgopen: 's5', step5: 's5', rwflow: 's5', salesreturn: 's5', provision: 's5', close: 's5' };
 function render() {
   document.body.dataset.stage = STAGE_OF[S.view] || 's0';
+  document.body.dataset.view = S.view; // v1.14.95: the workshop hides the process rail (drawer via ☰)
   // v1.14.35 (audit ENH-05): no local accounting data is shown until a Firebase session is confirmed (no offline bypass)
   if (store.needsSignIn() || (store.cloud.enabled && !store.cloud.user)) {
     document.body.classList.add('auth-screen');
