@@ -711,18 +711,20 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
 .ws-ph { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .ws-prog { width: 220px; height: 10px; border-radius: 99px; background: var(--rule-2); overflow: hidden; margin-bottom: 8px; }
 .ws-prog > div { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #4fb596, #2e9e62); }
-.ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
 .ws-stage { background: var(--panel); border: 1px solid var(--rule); border-radius: 18px; padding: 12px; box-shadow: 0 6px 24px rgba(60, 40, 20, .07); }
-.ws-svg { display: block; width: 100%; height: auto; border-radius: 12px; background: #f1e5d3; font-family: inherit; }
+.ws-svg { display: block; width: 100%; height: auto; aspect-ratio: 10 / 7; border-radius: 12px; background: #f1e5d3; font-family: inherit; margin: 0 auto; }
+/* v1.14.96: on a computer the whole workshop fits the window height (no scrolling to see the last row) */
+@media (min-width: 1000px) { .ws-svg { width: min(100%, calc((100dvh - 236px) * 1.4286)); } .ws .ph { margin-bottom: 10px; } .ws-stage { display: flex; flex-direction: column; } }
 .ws-sta { cursor: pointer; outline: none; }
 .ws-sta .ws-halo { opacity: 0; transition: opacity .2s; }
 .ws-sta:hover .ws-halo { opacity: .08; }
 .ws-sta.sel .ws-halo, .ws-sta:focus-visible .ws-halo { opacity: .16; }
 .ws-sta .ws-cardsel { stroke-width: 0; }
 .ws-sta.sel .ws-cardsel, .ws-sta:focus-visible .ws-cardsel { stroke-width: 3; }
-.ws-ct { font-size: 16px; font-weight: 650; fill: #2b3a42; }
+.ws-ct { font-size: 20px; font-weight: 650; fill: #2b3a42; }
 .ws-cno { font-weight: 800; }
-.ws-bt { font-size: 15px; font-weight: 700; }
+.ws-bt { font-size: 17px; font-weight: 700; }
 .ws-bi { font-size: 15px; font-weight: 800; fill: #fff; }
 .ws-tiny { font-size: 10px; font-weight: 700; letter-spacing: .5px; }
 .ws-zz text { font-size: 22px; font-weight: 800; fill: #8a979d; opacity: 0; }
@@ -779,7 +781,7 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
   .ws-cloud { animation: wsCloud 18s ease-in-out infinite alternate; }
   @keyframes wsCloud { from { transform: translateX(-8px); } to { transform: translateX(10px); } }
   .ws-confetti rect { animation: wsFall linear infinite; }
-  @keyframes wsFall { from { transform: translateY(0) rotate(0); } to { transform: translateY(1040px) rotate(540deg); } }
+  @keyframes wsFall { from { transform: translateY(0) rotate(0); } to { transform: translateY(880px) rotate(540deg); } }
 }
 @media (prefers-reduced-motion: reduce) { .ws-head.sleep { transform: translateY(10px) rotate(-6deg); transform-box: fill-box; transform-origin: center bottom; } .ws-confetti { display: none; } }
 /* v1.14.95: the workshop takes the whole width – the process rail becomes a drawer opened with ☰ */

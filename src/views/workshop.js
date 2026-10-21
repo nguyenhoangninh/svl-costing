@@ -5,8 +5,8 @@
 // Animations are CSS (index.html, .ws-svg) and stop when the device asks for reduced motion.
 import { STATE_LABEL } from '../engine/workshop.js';
 
-const VW = 1200, VH = 1000, SS = 0.82;           // view box · station scale
-const COLS = [235, 600, 965], ROWS = [418, 664, 910]; // station centre x, desk top y
+const VW = 1200, VH = 840, SS = 0.7;             // view box (landscape, fits a laptop screen) · station scale
+const COLS = [230, 600, 970], ROWS = [352, 556, 760]; // station centre x, desk top y
 const CAT_X = -36;                                   // the cat sits left of centre, the monitor stands on the right
 
 // fur f · light (muzzle, chest, paws) w · dark (stripes / points / patches) d · iris k · outline o
@@ -84,17 +84,17 @@ function scene(model, esc) {
     <radialGradient id="wsGlow"><stop offset="0" stop-color="#ffe9a8" stop-opacity=".7"/><stop offset="1" stop-color="#ffe9a8" stop-opacity="0"/></radialGradient>
     <filter id="wsSoft" x="-20%" y="-20%" width="140%" height="170%"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#5a3c1e" flood-opacity=".18"/></filter>
   </defs>
-  <rect width="${VW}" height="250" fill="url(#wsWall)"/>
+  <rect width="${VW}" height="204" fill="url(#wsWall)"/>
   ${[0, 1, 2].map((i) => win(140 + i * 345, night, dusk)).join('')}
-  ${clock(427, 108, hr, mn)}
-  ${board(732, 70)}
-  <rect y="236" width="${VW}" height="16" fill="#e7d5b9"/><rect y="248" width="${VW}" height="4" fill="#d3bb96"/>
-  <rect y="252" width="${VW}" height="${VH - 252}" fill="url(#wsFloor)"/>
+  ${clock(427, 88, hr, mn)}
+  ${board(732, 46)}
+  <rect y="190" width="${VW}" height="16" fill="#e7d5b9"/><rect y="202" width="${VW}" height="4" fill="#d3bb96"/>
+  <rect y="206" width="${VW}" height="${VH - 206}" fill="url(#wsFloor)"/>
   ${planks()}
-  ${night ? '' : [0, 1, 2].map((i) => `<polygon points="${150 + i * 345},252 ${390 + i * 345},252 ${470 + i * 345},${VH} ${70 + i * 345},${VH}" fill="url(#wsLight)" opacity=".45"/>`).join('')}
-  <rect x="70" y="296" width="1060" height="${VH - 324}" rx="40" fill="#cfe3d6" opacity=".45"/>
-  <rect x="86" y="312" width="1028" height="${VH - 356}" rx="30" fill="none" stroke="#b9d3c3" stroke-width="3" stroke-dasharray="2 10" stroke-linecap="round" opacity=".7"/>
-  ${plant(42, 262, 1.15)}${plant(1158, 262, 1.15, true)}${plant(36, VH - 100, 1)}${plant(1164, VH - 100, 1, true)}
+  ${night ? '' : [0, 1, 2].map((i) => `<polygon points="${150 + i * 345},206 ${390 + i * 345},206 ${470 + i * 345},${VH} ${70 + i * 345},${VH}" fill="url(#wsLight)" opacity=".45"/>`).join('')}
+  <rect x="70" y="232" width="1060" height="${VH - 252}" rx="40" fill="#cfe3d6" opacity=".45"/>
+  <rect x="86" y="246" width="1028" height="${VH - 280}" rx="30" fill="none" stroke="#b9d3c3" stroke-width="3" stroke-dasharray="2 10" stroke-linecap="round" opacity=".7"/>
+  ${plant(42, 214, 1.05)}${plant(1158, 214, 1.05, true)}${plant(36, VH - 100, 1)}${plant(1164, VH - 100, 1, true)}
   ${night ? COLS.map((cx) => ROWS.map((y) => `<ellipse cx="${cx}" cy="${y - 50}" rx="150" ry="90" fill="url(#wsGlow)" pointer-events="none"/>`).join('')).join('') : ''}
   ${model.stations.map((s, k) => station(s, k, esc)).join('')}
   ${night ? `<rect width="1200" height="${VH}" fill="#0c1636" opacity=".12" pointer-events="none"/>` : ''}
@@ -103,7 +103,7 @@ function scene(model, esc) {
 }
 
 function win(x, night, dusk) {
-  const y = 34, w = 230, h = 150;
+  const y = 26, w = 230, h = 124;
   const extra = night
     ? `<circle cx="${x + 178}" cy="${y + 38}" r="15" fill="#fdf3c4"/><circle cx="${x + 186}" cy="${y + 32}" r="13" fill="url(#wsSky)"/>${[[30, 30], [70, 60], [120, 24], [150, 90], [44, 100], [200, 110]].map(([a, b]) => `<circle cx="${x + a}" cy="${y + b}" r="1.8" fill="#fff8d0"/>`).join('')}`
     : `<g class="ws-cloud" opacity=".95"><ellipse cx="${x + 70}" cy="${y + 46}" rx="26" ry="11" fill="#fff"/><ellipse cx="${x + 88}" cy="${y + 39}" rx="18" ry="13" fill="#fff"/><ellipse cx="${x + 168}" cy="${y + 92}" rx="22" ry="9" fill="#fff"/><ellipse cx="${x + 182}" cy="${y + 86}" rx="14" ry="10" fill="#fff"/></g>${dusk ? `<circle cx="${x + 150}" cy="${y + 128}" r="20" fill="#ffd27a" opacity=".9"/>` : ''}`;
@@ -129,7 +129,7 @@ function board(x, y) {
 }
 function planks() {
   let s = '';
-  for (let y = 294; y < VH; y += 42) {
+  for (let y = 248; y < VH; y += 42) {
     s += `<line x1="0" y1="${y}" x2="${VW}" y2="${y}" stroke="#d4b78f" stroke-width="2" opacity=".55"/>`;
     const off = ((y / 42) % 2) * 120;
     for (let x = off + 60; x < VW; x += 240) s += `<line x1="${x}" y1="${y - 42}" x2="${x}" y2="${y}" stroke="#d4b78f" stroke-width="2" opacity=".45"/>`;
@@ -157,10 +157,10 @@ function station(s, k, esc) {
     <g transform="translate(${CAT_X} 0)">${paws(C, pose)}</g>
     ${monitor(st)}
     ${mug(st)}
-    ${bubble ? `<g transform="translate(${CAT_X + 30} -204)"><g class="ws-bub"><rect x="0" y="0" width="${bubble[0].length * 9.5 + 44}" height="32" rx="16" fill="#ffffff" stroke="${col}" stroke-width="2.5" filter="url(#wsSoft)"/><circle cx="17" cy="16" r="11" fill="${col}"/><text x="17" y="21" text-anchor="middle" class="ws-bi">${bubble[1]}</text><text x="34" y="21.5" class="ws-bt" fill="${col}">${esc(bubble[0])}</text><path d="M14 30.5 l-6 11 l13 -10 z" fill="#ffffff"/></g></g>` : ''}
+    ${bubble ? `<g transform="translate(${CAT_X + 30} -204)"><g class="ws-bub"><rect x="0" y="0" width="${bubble[0].length * 10.5 + 46}" height="32" rx="16" fill="#ffffff" stroke="${col}" stroke-width="2.5" filter="url(#wsSoft)"/><circle cx="17" cy="16" r="11" fill="${col}"/><text x="17" y="21" text-anchor="middle" class="ws-bi">${bubble[1]}</text><text x="34" y="21.5" class="ws-bt" fill="${col}">${esc(bubble[0])}</text><path d="M14 30.5 l-6 11 l13 -10 z" fill="#ffffff"/></g></g>` : ''}
     ${st === 'waiting' ? `<g class="ws-zz" transform="translate(${CAT_X + 34} -160)"><text class="z1" x="0" y="0">z</text><text class="z2" x="14" y="-16">z</text><text class="z3" x="30" y="-34">Z</text></g>` : ''}
-    <g class="ws-card" transform="translate(-116 68)"><rect width="232" height="36" rx="12" fill="#ffffff" filter="url(#wsSoft)"/><rect class="ws-cardsel" width="232" height="36" rx="12" fill="none" stroke="${col}"/><rect x="0" y="0" width="8" height="36" rx="4" fill="${col}"/>
-      <text x="20" y="23.5" class="ws-ct"><tspan class="ws-cno" fill="${col}">${esc(s.no)}</tspan> ${esc(s.name)}</text><circle cx="214" cy="18" r="6" fill="${col}"/></g>
+    <g class="ws-card" transform="translate(-128 66)"><rect width="256" height="42" rx="13" fill="#ffffff" filter="url(#wsSoft)"/><rect class="ws-cardsel" width="256" height="42" rx="13" fill="none" stroke="${col}"/><rect x="0" y="0" width="9" height="42" rx="4.5" fill="${col}"/>
+      <text x="22" y="28" class="ws-ct"><tspan class="ws-cno" fill="${col}">${esc(s.no)}</tspan> ${esc(s.name)}</text><circle cx="236" cy="21" r="7" fill="${col}"/></g>
   </g>`;
 }
 function chair() {
