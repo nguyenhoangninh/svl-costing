@@ -144,6 +144,12 @@ try {
   const tC = await act('[data-act=s5-close]', /đóng|CLOSE|CLOSED/i, 'close');
   ok('CLOSE MONTH succeeds', /CLOSED|Đã đóng|đã đóng/.test(tC + (await page.textContent('.result'))), tC);
 
+  // ---------- v1.14.93 Xưởng giá thành: the closed period shows every station closed
+  await go('#workshop'); await page.waitForSelector('#ws-canvas');
+  const wsLead = ((await page.textContent('.ws .lead')) || '').replace(/\s+/g, ' ');
+  const wsItems = await page.$$eval('.ws-item small', (e) => e.map((x) => x.textContent.trim()));
+  ok('Xưởng giá thành: 9 stations, all "Đã đóng kỳ" after CLOSE', wsItems.length === 9 && wsItems.every((t) => t === 'Đã đóng kỳ') && /đã đóng/.test(wsLead), `${wsLead} | ${wsItems.join(', ')}`);
+  if (process.env.WS_SHOT) await page.screenshot({ path: process.env.WS_SHOT });
   // ---------- journal by customer (STEP 5 / control centre)
   await go('#cc'); await page.waitForSelector('table.cp');
   const je = await page.$$eval('table.cp tr', (rows) => rows.map((r) => [...r.children].map((c) => c.textContent.trim())).filter((c) => c[0] === 'JE07'));

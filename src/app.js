@@ -39,6 +39,8 @@ import { provisionTrack, provisionJournal } from './engine/provision.js';
 import { customerPL, plSheetRows, PL_HEADERS, productPL, prodSheetRows, PROD_HEADERS } from './engine/custpl.js';
 import { journalWithCustomers, journalCheck, journalRoundCheck } from './engine/journal.js';
 import * as DBV from './views/dashboard.js';
+import * as WSV from './views/workshop.js';
+import { workshopModel } from './engine/workshop.js';
 
 // ======================= state =======================
 const BLOBS = ['importLog', 'importAck', 'step2', 'consumeCfg', 'consFg', 'register', 'opening', 'step3', 'audit', 'pcAdj', ...P2.PHASE2_BLOBS, ...P3.PHASE3_BLOBS, ...FGP.FGP_BLOBS, ...RWV.RWV_BLOBS, ...DBV.DASH_BLOBS];
@@ -480,6 +482,7 @@ const exportTable = (name, columns) => (rows) => exportBook(`${name}_${S.period}
 const NAV = [
   { id: 'cc', no: '', label: 'Tổng quan kỳ', sub: 'Control Center' },
   { id: 'dashboard', no: '', label: 'Dashboard doanh thu & GP', sub: 'Theo khách hàng · GP %' },
+  { id: 'workshop', no: '', label: 'Xưởng giá thành', sub: 'Tiến độ đóng kỳ' },
   { id: 'step1', no: '1', label: 'Import dữ liệu ERP', sub: '21 báo cáo T · S · O', key: 's1' },
   { id: 'step2', no: '2', label: 'Phân bổ Stock Out', sub: 'Stock Out → lô PC', key: 's2' },
   { id: 'rework', no: '2B', label: 'Sổ FG Rework', sub: 'FG xuất đi rework', key: 'rw' },
@@ -603,6 +606,13 @@ VIEWS.step5 = (el) => P3.viewFIFO(el);
 VIEWS.salesreturn = (el) => P3.viewReturns(el);
 VIEWS.provision = (el) => PV.view(el);
 VIEWS.dashboard = (el) => DBV.view(el);
+// v1.14.93: Xưởng giá thành – the close stations as characters, from the same statuses as the process rail
+VIEWS.workshop = (el) => {
+  const st = statusAll(); const rs = railStatus(st);
+  const labels = Object.fromEntries(NAV.filter((n) => n.key).map((n) => [n.key, `${n.no} · ${n.label}`]));
+  const model = workshopModel({ rail: rs, labels, next: { s1: st.s1c.next, s2: st.s2c.next, s3: st.s3c.next, s4: st.s4c.next, s5: st.s5c.next }, audit: S.d.audit, closed: isClosed(), cls: statusClass });
+  WSV.view(el, { model, period: S.period, esc, pill, fmtTs });
+};
 VIEWS.close = (el) => P3.viewClose(el);
 VIEWS.trace = (el) => TRV.viewTrace(el);
 
