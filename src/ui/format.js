@@ -49,6 +49,7 @@ export function statusClass(s) {
   if (u === 'NOT READY' || u === 'BLOCKED') return 's-block';
   if (u === 'HOLD' || u.startsWith('PENDING') || u.startsWith('APPROVED - AWAIT')) return 's-review';
   if (u === 'APPLIED' || u === 'RECORDED' || u.startsWith('OK') || u === 'APPROVE' || u.startsWith('VALIDATED')) return 's-pass';
+  if (u.startsWith('PASS - ')) return /XÁC NHẬN|REVIEW|CONFIRMED/.test(u) ? 's-review' : 's-pass'; // v1.14.97: 'PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG' (STEP 1) was grey
   if (u.startsWith('PASS WITH') || u.startsWith('REVIEW') || u.includes('WARNING') || u === 'PARTIAL' || u.startsWith('PARTIAL') || u === 'NEW MATERIAL' || u === 'MASTER DATA MISSING' || u === 'FALLBACK EQUAL' || u === 'FALLBACK RM COST') return 's-review';
   if (u === 'PASS' || u === 'READY' || u === 'IMPORTED' || u === 'COMPLETE' || u === 'CURRENT' || u === 'OK' || u === 'ALLOCATED') return 's-pass';
   if (u.startsWith('BLOCK') || u.startsWith('CHECK') || u.startsWith('ERROR') || u.includes('MISMATCH') || u.startsWith('NO ELIGIBLE') || u.startsWith('NO TOTAL') || u === 'NOT READY') return 's-block';

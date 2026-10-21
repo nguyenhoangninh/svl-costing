@@ -1217,6 +1217,8 @@ eq('ENH-09 commit confirmed only when the cloud holds this close timestamp', [SP
   const m4 = WS.workshopModel({ rail: { ...all('NOT RUN'), s1: 'PASS', s4: 'BLOCK' }, audit: [], closed: false, cls: statusClass });
   eq('workshop: a BLOCK further down waits while earlier steps are not done', [m4.stations[1].state, m4.stations[4].state], ['turn', 'waiting']);
   const m3 = WS.workshopModel({ rail: all('PASS'), audit: [], closed: true, cls: statusClass });
+  const m5 = WS.workshopModel({ rail: { ...all('PASS'), s1: 'PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG' }, audit: [], closed: false, cls: statusClass });
+  eq('workshop: STEP 1 "PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG" is done with review, not up next', [m5.stations[0].state, m5.summary.done], ['review', 9]);
   eq('workshop: closed period → every station closed', [...new Set(m3.stations.map((s) => s.state))], ['closed']);
 }
 
