@@ -62,10 +62,31 @@ export function view(el, x) {
     el.querySelectorAll('.ws-sta').forEach((g) => g.classList.toggle('sel', g.dataset.ws === selected));
   };
   pick(selected);
+  fitScene(el);
   el.querySelectorAll('[data-ws]').forEach((b) => {
     b.addEventListener('click', () => pick(b.dataset.ws));
     if (b.tagName !== 'BUTTON') b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(b.dataset.ws); } });
   });
+}
+
+// v1.14.97: the whole workshop fits the window height on a computer, whatever the header height or browser zoom
+let onResize = null;
+function fitScene(el) {
+  if (onResize) window.removeEventListener('resize', onResize);
+  const svg = el.querySelector('.ws-svg');
+  const fit = () => {
+    if (!svg.isConnected) { window.removeEventListener('resize', onResize); onResize = null; return; }
+    if (window.innerWidth < 1000) { svg.style.width = ''; return; }
+    const top = svg.getBoundingClientRect().top + window.scrollY;
+    const legend = (svg.parentElement.querySelector('.ws-legend') || { offsetHeight: 0 }).offsetHeight;
+    const avail = window.innerHeight - top - legend - 40;
+    const grid = el.querySelector('.ws-grid'), side = el.querySelector('.ws-side');
+    const room = grid.clientWidth - (side ? side.offsetWidth + 16 : 0) - 26; // stage padding + border
+    svg.style.width = `${Math.round(Math.max(520, Math.min(room, avail * VW / VH)))}px`;
+  };
+  onResize = fit;
+  window.addEventListener('resize', fit);
+  fit();
 }
 
 // ======================= the room =======================
@@ -148,7 +169,7 @@ function station(s, k, esc) {
   const cx = COLS[k % 3], dy = ROWS[Math.floor(k / 3)], st = s.state, col = ST_COL[st];
   const C = COATS[k % COATS.length];
   const pose = st === 'turn' ? 'type' : st === 'waiting' ? 'sleep' : st === 'blocked' ? 'raise' : st === 'closed' ? (s.id === 'close' ? 'cheer' : 'happy') : 'sit';
-  const bubble = { turn: ['Đến lượt', '…'], blocked: ['Cần xử lý', '!'], rerun: ['Chạy lại', '↻'], review: ['Rà soát', '?'] }[st];
+  const bubble = { turn: ['Đến lượt', '…'], blocked: ['Cần xử lý', '!'], rerun: ['Chạy lại', '↻'] }[st]; // review: the magnifier on the screen is enough
   return `<g class="ws-sta st-${st}" data-ws="${s.id}" role="button" tabindex="0" aria-label="${esc(`${s.no} ${s.name}: ${STATE_LABEL[st]}`)}" transform="translate(${cx} ${dy}) scale(${SS})">
     <ellipse class="ws-halo" cx="0" cy="30" rx="160" ry="34" fill="${col}"/>
     <ellipse cx="0" cy="58" rx="128" ry="12" fill="#5a3c1e" opacity=".10"/>
@@ -157,7 +178,7 @@ function station(s, k, esc) {
     <g transform="translate(${CAT_X} 0)">${paws(C, pose)}</g>
     ${monitor(st)}
     ${mug(st)}
-    ${bubble ? `<g transform="translate(${CAT_X + 30} -204)"><g class="ws-bub"><rect x="0" y="0" width="${bubble[0].length * 10.5 + 46}" height="32" rx="16" fill="#ffffff" stroke="${col}" stroke-width="2.5" filter="url(#wsSoft)"/><circle cx="17" cy="16" r="11" fill="${col}"/><text x="17" y="21" text-anchor="middle" class="ws-bi">${bubble[1]}</text><text x="34" y="21.5" class="ws-bt" fill="${col}">${esc(bubble[0])}</text><path d="M14 30.5 l-6 11 l13 -10 z" fill="#ffffff"/></g></g>` : ''}
+    ${bubble ? `<g transform="translate(16 -172)"><g class="ws-bub"><rect x="0" y="0" width="${bubble[0].length * 10.5 + 46}" height="32" rx="16" fill="#ffffff" stroke="${col}" stroke-width="2.5" filter="url(#wsSoft)"/><circle cx="17" cy="16" r="11" fill="${col}"/><text x="17" y="21" text-anchor="middle" class="ws-bi">${bubble[1]}</text><text x="34" y="21.5" class="ws-bt" fill="${col}">${esc(bubble[0])}</text><path d="M14 30.5 l-6 11 l13 -10 z" fill="#ffffff"/></g></g>` : ''}
     ${st === 'waiting' ? `<g class="ws-zz" transform="translate(${CAT_X + 34} -160)"><text class="z1" x="0" y="0">z</text><text class="z2" x="14" y="-16">z</text><text class="z3" x="30" y="-34">Z</text></g>` : ''}
     <g class="ws-card" transform="translate(-128 66)"><rect width="256" height="42" rx="13" fill="#ffffff" filter="url(#wsSoft)"/><rect class="ws-cardsel" width="256" height="42" rx="13" fill="none" stroke="${col}"/><rect x="0" y="0" width="9" height="42" rx="4.5" fill="${col}"/>
       <text x="22" y="28" class="ws-ct"><tspan class="ws-cno" fill="${col}">${esc(s.no)}</tspan> ${esc(s.name)}</text><circle cx="236" cy="21" r="7" fill="${col}"/></g>

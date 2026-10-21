@@ -715,7 +715,8 @@ table.s2-rec th.sys-col, table.s2-rec td.sys-col { border-left: 0; }
 .ws-stage { background: var(--panel); border: 1px solid var(--rule); border-radius: 18px; padding: 12px; box-shadow: 0 6px 24px rgba(60, 40, 20, .07); }
 .ws-svg { display: block; width: 100%; height: auto; aspect-ratio: 10 / 7; border-radius: 12px; background: #f1e5d3; font-family: inherit; margin: 0 auto; }
 /* v1.14.96: on a computer the whole workshop fits the window height (no scrolling to see the last row) */
-@media (min-width: 1000px) { .ws-svg { width: min(100%, calc((100dvh - 236px) * 1.4286)); } .ws .ph { margin-bottom: 10px; } .ws-stage { display: flex; flex-direction: column; } }
+@media (min-width: 1000px) { .ws .ph { margin-bottom: 10px; } .ws-svg { max-width: 100%; } .ws-grid { grid-template-columns: minmax(0, max-content) 300px; justify-content: center; } }
+.ws-st { width: 100%; table-layout: fixed; } .ws-st td { overflow-wrap: anywhere; } .ws-st td:first-child { width: 52%; } .ws-st .pill { white-space: normal; }
 .ws-sta { cursor: pointer; outline: none; }
 .ws-sta .ws-halo { opacity: 0; transition: opacity .2s; }
 .ws-sta:hover .ws-halo { opacity: .08; }
