@@ -1,5 +1,7 @@
 # SVL Costing Web
 
+> **v1.14.98 (03/11/2026):** **Xưởng giá thành dàn trang lại.** Đầu trang: nhãn kỳ, tiêu đề, một câu tình trạng và dải thẻ chỉ số (vòng tiến độ số trạm xong, cần rà soát, cần xử lý, phải chạy lại, trạm đến lượt). Thân trang: thẻ "Sơ đồ xưởng" (chú thích màu ở đầu thẻ, hình co vừa cửa sổ) và cột phải gồm thẻ chi tiết trạm (mèo, trạng thái, bảng trạng thái bước con, việc tiếp theo, thao tác gần nhất, nút mở bước) và danh sách trạm dạng hàng gọn. Sửa lỗi thanh tiêu đề trên cùng bị kéo cao khi nội dung trang ngắn (ảnh của anh Ninh). Bản tiếng Anh: "Xong" và "Dự phòng FG" (trước bị dịch thành "Fallback") dịch đúng.
+>
 > **v1.14.97 (21/10/2026):** **Sửa Xưởng giá thành theo ảnh kỳ thật.** (1) Hình co vừa cửa sổ bằng phép đo thật trong trình duyệt (chiều cao header, mức zoom khác nhau), đã kiểm ở 1900×910 và 1366×680; phòng nằm giữa, danh sách trạm bên phải. (2) Bong bóng trạng thái đặt cạnh đầu mèo nên không đè lên thẻ tên của dãy trên; trạm "rà soát" chỉ hiện kính lúp trên màn hình, bớt rối. (3) STEP 1 trạng thái "PASS - ĐÃ XÁC NHẬN BẤT THƯỜNG" trước đây bị coi là chưa chạy (mèo Nhập liệu báo "Đến lượt", thanh quy trình tô xám); nay là xong – cần rà soát. (4) Bảng chi tiết trạm không còn tràn khung khi trạng thái dài.
 >
 > **v1.14.96 (21/10/2026):** **Xưởng giá thành vừa trọn màn hình.** Phòng chuyển sang khung ngang gọn hơn (tường thấp hơn, các dãy bàn sát nhau hơn) và trên máy tính tự co theo chiều cao cửa sổ, nên thấy hết 9 trạm mà không phải cuộn (đã đo ở 1366×768, 1440×900, 1920×1080). Thẻ tên trạm và bong bóng chữ to hơn để dễ đọc.
