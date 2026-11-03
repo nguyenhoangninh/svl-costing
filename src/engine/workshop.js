@@ -17,7 +17,7 @@ export const STATIONS = [
   { id: 'cost', name: 'Giá thành', role: '622 / 627 theo lô · TP lũy kế', no: '4.3', hash: 'step4', keys: ['s4', 'fgp'], next: 's4', audit: /^STEP 4/ },
   { id: 'fifo', name: 'FIFO', role: 'FG đầu kỳ · giá vốn · rework', no: '5.2', hash: 'step5', keys: ['s5o', 's5', 'rwf'], next: '', audit: /^(STEP 5 - (RUN FIFO|IMPORT OPENING FG|VALIDATE OPENING|ROLL FORWARD)|STEP 5 (CONFIG|OVERRIDE)|REWORK)/ },
   { id: 'returns', name: 'Trả hàng', role: 'Hàng trả lại 5212 · giảm giá 5213', no: '5R', hash: 'salesreturn', keys: ['s5r'], next: '', audit: /^(RETURNS|STEP 5R)/ },
-  { id: 'prov', name: 'Dự phòng', role: 'Dự phòng FG · TK 2294', no: '5P', hash: 'provision', keys: ['prov'], next: '', audit: /^(NRV|STEP 5 - (CARRY|IMPORT) OPENING PROVISION)/ },
+  { id: 'prov', name: 'Dự phòng FG', role: 'Trích lập · hoàn nhập · TK 2294', no: '5P', hash: 'provision', keys: ['prov'], next: '', audit: /^(NRV|STEP 5 - (CARRY|IMPORT) OPENING PROVISION)/ },
   { id: 'close', name: 'Trưởng xưởng', role: 'FG History · FAST · đóng kỳ', no: '5.3', hash: 'close', keys: ['s5c'], next: 's5', audit: /^(STEP 5 - (BUILD FG HISTORY|CLOSE|REOPEN)|FAST TIE)/ },
 ];
 

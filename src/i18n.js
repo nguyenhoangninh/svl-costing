@@ -59,7 +59,7 @@ const RULES = [
 ];
 /** Translate one string; null when there is no translation. */
 // Vietnamese labels written without diacritics (the detector cannot see them)
-const PLAIN = { 'Doanh thu & Price Master': 'Revenue & Price Master', 'Doanh thu VND': 'Revenue VND', 'Doanh thu': 'Revenue', 'WIP ra (PC + MR + Stock Out)': 'WIP out (PC + MR + Stock Out)' };
+const PLAIN = { Xong: 'Done', 'Doanh thu & Price Master': 'Revenue & Price Master', 'Doanh thu VND': 'Revenue VND', 'Doanh thu': 'Revenue', 'WIP ra (PC + MR + Stock Out)': 'WIP out (PC + MR + Stock Out)' };
 const CACHE = new Map();
 // a captured piece keeps its own leading / trailing spaces
 const piece = (v) => { const r = tr(v); return r === null ? v : v.match(/^\s*/)[0] + r + v.match(/\s*$/)[0]; };
@@ -148,7 +148,7 @@ function trViCore(core) {
 export const t = (s) => (lang === 'en' ? (tr(s) ?? s) : (trVi(s) ?? s));
 
 const ATTRS = ['placeholder', 'title', 'aria-label'];
-const PLAIN_RE = /Doanh thu|WIP ra/;
+const PLAIN_RE = /Doanh thu|WIP ra|^\s*Xong\s*$/;
 // the app's own text before it was translated (src) and what was put in its place (out), so switching language
 // restores nodes that are not re-rendered (header, open panels) and a change made by the app is not mistaken for ours
 const origText = new WeakMap(), origAttr = new WeakMap();

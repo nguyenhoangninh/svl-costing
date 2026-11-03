@@ -33,31 +33,49 @@ export function view(el, x) {
   const sm = model.summary;
   if (!model.stations.some((s) => s.id === selected)) selected = (model.stations.find((s) => s.state === 'blocked') || model.stations.find((s) => s.state === 'turn') || model.stations[0]).id;
   const closed = model.stations[0].state === 'closed';
-  const head = closed ? 'đã đóng – cả xưởng nghỉ ngơi.'
-    : `${sm.done} / ${sm.total} trạm xong${sm.blocked ? ` · <b class="ws-red">${sm.blocked} trạm cần xử lý</b>` : ''}${sm.rerun ? ` · ${sm.rerun} trạm phải chạy lại` : ''}${sm.turn ? ` · đến lượt: <b>${esc(sm.turn)}</b>` : ''}`;
-  el.innerHTML = `<section class="page ws">
-    <header class="ph ws-ph"><div><h1>Xưởng giá thành</h1><p class="lead">Kỳ ${esc(period)} · ${head}</p></div>
-      <div class="ws-prog" role="img" aria-label="${sm.done} / ${sm.total} trạm xong"><div style="width:${Math.round(sm.done / sm.total * 100)}%"></div></div></header>
-    <div class="ws-grid">
-      <div class="ws-stage">${scene(model, esc)}
-        <div class="ws-legend">${['turn', 'done', 'review', 'rerun', 'blocked', 'waiting'].map((k) => `<span><i style="background:${ST_COL[k]}"></i>${esc(STATE_LABEL[k])}</span>`).join('')}</div></div>
+  const n = (st) => model.stations.filter((s) => s.state === st).length;
+  const pct = Math.round(sm.done / sm.total * 100);
+  const lead = closed ? 'Kỳ đã đóng – cả xưởng nghỉ ngơi.'
+    : sm.blocked ? 'Có trạm cần xử lý trước khi đi tiếp.'
+      : sm.rerun ? 'Có trạm phải chạy lại vì dữ liệu đầu vào đã đổi.'
+        : sm.turn ? 'Quy trình đang chạy, xem trạm đến lượt bên dưới.'
+          : sm.done === sm.total ? 'Mọi trạm đã xong – sẵn sàng đóng kỳ.' : 'Theo dõi tiến độ đóng kỳ theo từng trạm.';
+  const R = 26, CIRC = 2 * Math.PI * R;
+  const kpi = (cls, val, label, title = '') => `<div class="ws-kpi ${cls}"${title ? ` title="${esc(title)}"` : ''}><span class="ws-kv">${val}</span><span class="ws-kl">${label}</span></div>`;
+  el.innerHTML = `<section class="page ws"><div class="ws-wrap">
+    <header class="ws-head">
+      <div class="ws-title"><span class="ws-eyebrow"><span>Kỳ</span> <b>${esc(period)}</b></span><h1>Xưởng giá thành</h1><p class="lead">${lead}</p></div>
+      <div class="ws-kpis">
+        <div class="ws-ring" role="img" aria-label="${sm.done} / ${sm.total}"><svg viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="${R}" fill="none" stroke="var(--rule-2)" stroke-width="7"/><circle cx="32" cy="32" r="${R}" fill="none" stroke="${closed || sm.done === sm.total ? '#2e9e62' : '#1f7a68'}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${(CIRC * pct / 100).toFixed(1)} ${CIRC.toFixed(1)}" transform="rotate(-90 32 32)"/></svg><span class="ws-rv">${sm.done}<small>/${sm.total}</small></span></div>
+        <div class="ws-kpi-t"><span class="ws-kl">Trạm xong</span><span class="ws-kpct">${pct}%</span></div>
+        ${kpi('k-review', n('review'), 'Cần rà soát')}${kpi('k-block', sm.blocked, 'Cần xử lý')}${kpi('k-rerun', sm.rerun, 'Phải chạy lại')}
+        ${kpi('k-turn', sm.turn ? `<span>${esc(sm.turn)}</span>` : '—', 'Đến lượt')}
+      </div>
+    </header>
+    <div class="ws-body">
+      <div class="ws-stage">
+        <div class="ws-stage-h"><h2>Sơ đồ xưởng</h2><div class="ws-legend">${['turn', 'done', 'review', 'rerun', 'blocked', 'waiting'].map((k) => `<span><i style="background:${ST_COL[k]}"></i>${esc(STATE_LABEL[k])}</span>`).join('')}</div></div>
+        <div class="ws-canvas">${scene(model, esc)}</div>
+      </div>
       <aside class="ws-side">
-        <div class="ws-list" role="list">${model.stations.map((s) => `<button type="button" role="listitem" class="ws-item ${s.id === selected ? 'on' : ''}" data-ws="${s.id}">
-          <span class="ws-dot" style="background:${ST_COL[s.state]}"></span><span class="ws-nm"><b>${esc(s.no)} · ${esc(s.name)}</b><small>${esc(STATE_LABEL[s.state])}</small></span></button>`).join('')}</div>
-        <div class="ws-detail" id="ws-detail"></div>
+        <div class="ws-detail" id="ws-detail" aria-live="polite"></div>
+        <div class="ws-listbox"><h2>Các trạm</h2>
+          <div class="ws-list" role="list">${model.stations.map((s) => `<button type="button" role="listitem" class="ws-item ${s.id === selected ? 'on' : ''}" data-ws="${s.id}">
+            <span class="ws-dot" style="background:${ST_COL[s.state]}"></span><span class="ws-no">${esc(s.no)}</span><span class="ws-nm"><b>${esc(s.name)}</b><small>${esc(STATE_LABEL[s.state])}</small></span><span class="ws-chev" aria-hidden="true">›</span></button>`).join('')}</div></div>
       </aside>
     </div>
-    <p class="muted ws-note">Mỗi chú mèo là một trạm của quy trình đóng kỳ; trạng thái lấy từ dữ liệu thật của kỳ (cùng nguồn với thanh quy trình bên trái). Bấm vào mèo hoặc tên trạm để xem chi tiết. Ý tưởng từ Habblaud (MIT).</p>
-  </section>`;
+    <p class="muted ws-note">Mỗi chú mèo là một trạm của quy trình đóng kỳ; trạng thái lấy từ dữ liệu thật của kỳ (cùng nguồn với thanh quy trình). Bấm vào mèo hoặc tên trạm để xem chi tiết. Ý tưởng từ Habblaud (MIT).</p>
+  </div></section>`;
   const pick = (id) => {
     selected = id;
     const k = model.stations.findIndex((t) => t.id === selected), s = model.stations[k];
-    el.querySelector('#ws-detail').innerHTML = `<div class="ws-dh"><span class="ws-coat" title="Mèo ${esc(COATS[k].name)}">${miniCat(k)}</span><div><h3>${esc(s.no)} · ${esc(s.name)}</h3><span class="ws-badge" style="background:${ST_COL[s.state]}">${esc(STATE_LABEL[s.state])}</span></div></div>
-      <p class="muted">${esc(s.role)}</p>
-      <table class="cp ws-st"><tbody>${s.statuses.map(([l, v]) => `<tr><td>${esc(l)}</td><td>${x.pill(v)}</td></tr>`).join('')}</tbody></table>
-      ${s.next && !['done', 'closed'].includes(s.state) ? `<p><b>Việc tiếp theo:</b> ${esc(s.next)}</p>` : ''}
-      ${s.last ? `<p class="muted">Gần nhất: ${esc(s.last.action)} · ${esc(s.last.by)} · ${x.fmtTs(s.last.at)}</p>` : '<p class="muted">Chưa có thao tác nào trong nhật ký kỳ.</p>'}
-      <a class="btn" href="#${esc(s.hash)}">Mở bước ${esc(s.no)}</a>`;
+    el.querySelector('#ws-detail').innerHTML = `<div class="ws-dh"><span class="ws-coat" title="Mèo ${esc(COATS[k].name)}">${miniCat(k)}</span>
+        <div class="ws-dt"><span class="ws-dno">Trạm ${esc(s.no)}</span><h3>${esc(s.name)}</h3><span class="ws-badge" style="background:${ST_COL[s.state]}">${esc(STATE_LABEL[s.state])}</span></div></div>
+      <p class="ws-role">${esc(s.role)}</p>
+      <div class="ws-st">${s.statuses.map(([l, v]) => `<div class="ws-sr"><span>${esc(l)}</span>${x.pill(v)}</div>`).join('')}</div>
+      ${s.next && !['done', 'closed'].includes(s.state) ? `<div class="ws-next"><b>Việc tiếp theo</b><span>${esc(s.next)}</span></div>` : ''}
+      <div class="ws-last">${s.last ? `<span>Gần nhất</span><b>${esc(s.last.action)}</b><small>${esc(s.last.by)} · ${x.fmtTs(s.last.at)}</small>` : '<span>Chưa có thao tác nào trong nhật ký kỳ.</span>'}</div>
+      <a class="btn ws-go" href="#${esc(s.hash)}">Mở bước ${esc(s.no)} →</a>`;
     el.querySelectorAll('.ws-item').forEach((b) => b.classList.toggle('on', b.dataset.ws === selected));
     el.querySelectorAll('.ws-sta').forEach((g) => g.classList.toggle('sel', g.dataset.ws === selected));
   };
@@ -69,20 +87,17 @@ export function view(el, x) {
   });
 }
 
-// v1.14.97: the whole workshop fits the window height on a computer, whatever the header height or browser zoom
+// The drawing fills its column; on a computer it is also capped so the whole room fits the window height.
 let onResize = null;
 function fitScene(el) {
   if (onResize) window.removeEventListener('resize', onResize);
-  const svg = el.querySelector('.ws-svg');
+  const svg = el.querySelector('.ws-svg'), box = el.querySelector('.ws-canvas');
   const fit = () => {
     if (!svg.isConnected) { window.removeEventListener('resize', onResize); onResize = null; return; }
     if (window.innerWidth < 1000) { svg.style.width = ''; return; }
-    const top = svg.getBoundingClientRect().top + window.scrollY;
-    const legend = (svg.parentElement.querySelector('.ws-legend') || { offsetHeight: 0 }).offsetHeight;
-    const avail = window.innerHeight - top - legend - 40;
-    const grid = el.querySelector('.ws-grid'), side = el.querySelector('.ws-side');
-    const room = grid.clientWidth - (side ? side.offsetWidth + 16 : 0) - 26; // stage padding + border
-    svg.style.width = `${Math.round(Math.max(520, Math.min(room, avail * VW / VH)))}px`;
+    const top = box.getBoundingClientRect().top + window.scrollY;
+    const avail = window.innerHeight - top - 28;
+    svg.style.width = `${Math.round(Math.max(560, Math.min(box.clientWidth, avail * VW / VH)))}px`;
   };
   onResize = fit;
   window.addEventListener('resize', fit);
