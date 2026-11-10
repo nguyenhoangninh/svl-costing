@@ -365,6 +365,30 @@ import { rebuildEngine } from '../src/engine/step3b.js';
   try { runStep4({ period: P2, step2: cS2, step3: { ...cS3, summary: { outAmt: 1500, mrAmt: 0 } }, pm: zPM, gl: zGL, directAdj: [] }); } catch (e) { cBad = e.message; }
   eq('#8b STEP 4 still stops when the bridge is not explained', cBad.startsWith('RM STEP 4 không khớp') && cBad.includes('-500.00'), true);
 
+  // v1.14.99: two PC-P lines with the same ERP + PC No. + Product Code – STEP 1 part F, STEP 4 merges once confirmed
+  {
+    const DQd = await import('../src/engine/dataquality.js');
+    const H = ['PC No.', 'Date', 'MO No.', 'Sub-MO', 'Product Code', 'Product Name', 'Location', 'Current Complete Qty', 'Total Cost'];
+    const pcpT = { header: H, headerRow: 4, rows: [['PC-2610-0063', 46300, 'MO-1', 'MO-1-001', 'SP101', 'Seat', 'FG', 100, 1000000], ['PC-2610-0064', 46300, 'MO-1', 'MO-1-001', 'SP102', 'Base', 'FG', 10, 50000], ['PC-2610-0063', 46301, 'MO-1', 'MO-1-002', 'SP101', 'Seat', 'FG', 50, 500000]] };
+    const dups = DQd.pcDuplicates({ 'PC-P-T': pcpT });
+    eq('PC dup: one group, Excel rows 5 and 7, totals added', [dups.length, dups[0].key, dups[0].rows.map((l) => l.row), dups[0].qty, dups[0].cost], [1, 'T|PC-2610-0063|SP101', [5, 7], 150, 1500000]);
+    eq('PC dup: warning text names both lines', DQd.pcDupText(dups[0]), 'PC-P-T PC-2610-0063 / SP101: 2 dòng trùng – dòng 5 (MO-1-001): SL 100, Total Cost 1000000 · dòng 7 (MO-1-002): SL 50, Total Cost 500000');
+    const an = DQd.erpAnomalies({ 'PC-P-T': pcpT });
+    eq('PC dup: part F blocks STEP 2 until confirmed', [an.parts.F.count, DQd.partStatus(an, null, 'F'), DQd.anomalyStatus(an, null), DQd.blockingSummary(DQd.blockingParts(an, null).filter((x) => x.key === 'F'))], [1, 'NOT CONFIRMED', 'BLOCK - CONFIRM', 'F: 1 nhóm dòng trùng phiếu PC + mã sản phẩm (PC-P) (chưa xác nhận)']);
+    const ackF = { parts: { F: { fp: an.parts.F.fp, count: 1, by: 'a', at: 't', note: 'Nhập kho 2 lần trong tháng' } } };
+    eq('PC dup: confirmed → part F lifted, STEP 4 gets the key', [DQd.partStatus(an, ackF, 'F'), [...DQd.confirmedDupKeys({ 'PC-P-T': pcpT }, ackF)], DQd.confirmedDupKeys({ 'PC-P-T': pcpT }, null).size], ['CONFIRMED', ['T|PC-2610-0063|SP101'], 0]);
+    const pcRow = (i, pc, prod, sub, qty, cost) => ({ erp: 'T', rowIdx: i, pcNo: pc, mo: 'MO-1', prod, name: prod, loc: 'FG', qty, cost, date: 46300 + i, sub, unit: 'PCS', alloc: 0 });
+    const dS2 = { status: 'PASS', period: P2, pc: [pcRow(0, 'PC-2610-0063', 'SP101', 'MO-1-001', 100, 1000000), pcRow(1, 'PC-2610-0064', 'SP102', 'MO-1-001', 10, 50000), pcRow(2, 'PC-2610-0063', 'SP101', 'MO-1-002', 50, 500000)], total: { alloc: 0, cons: 0 } };
+    const dS3 = { period: P2, consExcluded: true, summary: { outAmt: 1550000, mrAmt: 0 }, checks: { soVsStep2: { status: 'PASS' }, pcmVsPcp: { status: 'PASS' }, exceptions: { value: 0 } } };
+    const dPM = { rows: [{ product: 'SP101', finalPrice: 1 }, { product: 'SP102', finalPrice: 1 }] };
+    let dErr = '';
+    try { runStep4({ period: P2, step2: dS2, step3: dS3, pm: dPM, gl: { fx: 25000, gl622: 0, gl627: 0 }, directAdj: [] }); } catch (e) { dErr = e.message; }
+    eq('PC dup: STEP 4 without confirmation stops and names both lines', [dErr.startsWith('Trùng ERP + PC No. + Product Code: T|PC-2610-0063|SP101 – 2 dòng PC-P-T'), dErr.includes('MO-1-001: SL 100, Total Cost 1000000 · MO-1-002: SL 50, Total Cost 500000'), dErr.includes('thẻ F ở STEP 1')], [true, true, true]);
+    const d4 = runStep4({ period: P2, step2: dS2, step3: dS3, pm: dPM, gl: { fx: 25000, gl622: 0, gl627: 0 }, directAdj: [], dupKeys: new Set(['T|PC-2610-0063|SP101']) });
+    const m = d4.rows.find((r) => r.pc === 'PC-2610-0063');
+    eq('PC dup: confirmed → one lot with quantities and cost added', [d4.lots, m.qty, m.pcRM, m.sub, d4.mergedLots], [2, 150, 1500000, 'MO-1-001 + MO-1-002', [{ key: 'T|PC-2610-0063|SP101', rows: 2, qty: 150 }]]);
+  }
+
   // #7 NRV with 1.5 % selling cost: unit cost 100, price 4 USD × 25000 = 100000 → NRV 98500; here cost 100 VND so no provision; force price low
   const nv = F5.runFIFO({ ...ctx({}), pmRows: [{ product: 'A', finalPrice: 0.004 }], sellCostRate: 0.015 }); // price 100 VND, NRV 98.5
   const cl = nv.closing.find((c) => c.prod === 'A');
