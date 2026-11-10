@@ -533,7 +533,7 @@ export function rmBridgeCheck(totalRM, consumedRM, step3Bridge) {
 }
 
 /** STEP4_Run_Cost_Allocation. Throws on fatal errors; returns {blocked:true,...} when inputs are incomplete. */
-export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
+export function runStep4({ period, step2, step3, pm, gl, directAdj, dupKeys }) {
   if (step2.status !== 'PASS') throw new Error('Đối chiếu STEP 2 chưa PASS.');
   if (step3.checks.soVsStep2.status !== 'PASS' || step3.checks.pcmVsPcp.status !== 'PASS') throw new Error('Đối chiếu kế toán STEP 3 chưa PASS.');
   const step3Bridge = step3.summary.outAmt - step3.summary.mrAmt;
@@ -553,7 +553,19 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
       const l = { erp: e, pc, date: p.date ?? null, mo: txt(p.mo), sub: txt(p.sub ?? ''), prod, name: txt(p.name), loc: txt(p.loc), fam: family(e, p.loc), unit: txt(p.unit ?? ''), qty: p.qty, pcRM: p.cost, so: p.alloc };
       totalQty += l.qty; totalPCRm += l.pcRM; totalSO += l.so;
       const key = pcKey(e, pc, prod);
-      if (pcExact.has(key)) throw new Error('Trùng ERP + PC No. + Product Code: ' + key);
+      // v1.14.99: lines of one PC + product confirmed at STEP 1 (part F) are merged into one lot; unconfirmed ones still stop
+      if (pcExact.has(key)) {
+        const m = lots[pcExact.get(key)];
+        if (!(dupKeys && dupKeys.has(key))) {
+          const same = step2.pc.filter((x) => x.erp === e && pcKey(e, ttxt(x.pcNo), ttxt(x.prod)) === key);
+          throw new Error(`Trùng ERP + PC No. + Product Code: ${key} – ${same.length} dòng PC-P-${e} cùng phiếu ${pc} và mã ${prod} (${same.map((x) => `${x.sub || x.mo || 'không Sub-MO'}: SL ${x.qty}, Total Cost ${Math.round(x.cost)}`).join(' · ')}). Xem thẻ F ở STEP 1 (số dòng Excel) và xác nhận nếu đúng thực tế – khi đó các dòng được gộp thành một lô.`);
+        }
+        m.qty += l.qty; m.pcRM += l.pcRM; m.so += l.so; m.mergedRows = (m.mergedRows || 1) + 1;
+        if (l.date && (!m.date || l.date < m.date)) m.date = l.date;
+        if (l.sub && !m.sub.split(' + ').includes(l.sub)) m.sub = m.sub ? `${m.sub} + ${l.sub}` : l.sub;
+        if (l.mo && !m.mo.split(' + ').includes(l.mo)) m.mo = m.mo ? `${m.mo} + ${l.mo}` : l.mo;
+        continue;
+      }
       pcExact.set(key, lots.length);
       const ok = `${e}|${pc.toUpperCase()}`;
       if (pcCount.has(ok)) pcCount.set(ok, pcCount.get(ok) + 1); else { pcCount.set(ok, 1); pcOnlyProd.set(ok, prod); }
@@ -603,7 +615,7 @@ export function runStep4({ period, step2, step3, pm, gl, directAdj }) {
   const common622 = gl622 - dt622, common627 = gl627 - dt627;
   const glSummary = { direct622: dt622, direct627: dt627, common622, common627 };
   const blocked = !inputOK || missingPrice > 0 || directBad > 0 || common622 < -0.01 || common627 < -0.01;
-  const base = { period, runAt: nowISO(), lots: lots.length, totalQty, totalPCRm, totalSO, totalRM, step2SO, step3Bridge, consumedRM, missingPrice, fxOK: fx > 0, inputOK, gl622, gl627, fx, glStatus, glSummary, directOut, directBad, activeDirect: activeCount, reviewCount, zeroProduction };
+  const base = { period, runAt: nowISO(), lots: lots.length, totalQty, totalPCRm, totalSO, totalRM, step2SO, step3Bridge, consumedRM, missingPrice, fxOK: fx > 0, inputOK, gl622, gl627, fx, glStatus, glSummary, directOut, directBad, activeDirect: activeCount, reviewCount, zeroProduction, mergedLots: lots.filter((l) => l.mergedRows > 1).map((l) => ({ key: pcKey(l.erp, l.pc, l.prod), rows: l.mergedRows, qty: l.qty })) };
   if (zeroProduction) {
     const zeroBad = Math.abs(totalRM) > 0.01 || Math.abs(step3Bridge - consumedRM) > 0.01 || Math.abs(gl622) > 0.01 || Math.abs(gl627) > 0.01 || activeCount > 0 || directBad > 0;
     base.blocked = !inputOK || missingPrice > 0 || zeroBad;

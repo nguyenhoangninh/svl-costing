@@ -212,6 +212,10 @@ summary { cursor: pointer; font-weight: 600; }
 .dq-cards { display: grid; gap: 12px; margin: 12px 0; min-width: 0; }
 .dq-cards > * { min-width: 0; max-width: 100%; }
 .dq-card { border: 1px solid; border-left-width: 6px; border-radius: var(--radius); padding: 10px 14px; background: var(--surface, transparent); overflow-x: auto; }
+.dq-dupwarn { margin: 6px 0 8px; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--block) 11%, transparent); color: var(--block); border-left: 4px solid var(--block); }
+.dq-dupwarn b { color: inherit; }
+tr.dq-dupfirst td { border-top: 2px solid var(--rule); }
+tr.dq-duptot td { font-weight: 650; background: var(--panel-2); }
 .dq-card h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dq-card.dq-info { border-color: var(--info); border-left-color: var(--info); background: var(--info-bg); }
 .dq-card.dq-info h3 { color: var(--info); }

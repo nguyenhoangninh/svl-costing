@@ -4,6 +4,7 @@ import * as F from '../engine/step4.js';
 import { step2Controls, step3Controls, step3bControls, step4Controls } from '../engine/controls.js';
 import { num, ttxt, txt, utxt, serialToISO, nowISO, isoToSerial, fpRows } from '../engine/util.js';
 import { RW_FIELDS } from '../engine/step2.js';
+import { confirmedDupKeys } from '../engine/dataquality.js';
 import { CALC_REV, calcRevReason } from '../engine/calcrev.js';
 import { splitBooks } from '../engine/revenue.js';
 import { revenueBooks } from '../engine/step5.js';
@@ -492,6 +493,7 @@ export function view4(el) {
   el.innerHTML = `<section class="page">
     <header class="ph"><div><h1>STEP 4.3 · Phân bổ giá thành</h1><p class="lead">Giá thành lô = RM (PC RM + Stock Out) + 622 + 627 + điều chỉnh WIP 3B + rework chuyển vào. 622/627 chung phân bổ theo đóng góp dương (doanh thu − RM); lô cuối cùng nhận phần làm tròn còn lại.</p></div>
       <div class="result"><span>Kết quả</span>${A.pill(c.status)}<small>${esc(c.okText)}</small></div></header>
+    ${s4 && s4.mergedLots && s4.mergedLots.length ? `<div class="alert review"><b>Lô gộp từ dòng trùng phiếu PC + mã sản phẩm (đã xác nhận ở STEP 1, thẻ F):</b> ${s4.mergedLots.map((m) => `${A.esc(m.key)} – ${m.rows} dòng gộp thành 1 lô, SL ${A.fmtNum(m.qty)}`).join(' · ')}</div>` : ''}
     <div class="row"><button class="btn" data-act="run-step4" type="button">Chạy STEP 4</button><span class="muted">${s4 ? `Engine ${A.fmtTs(s4.runAt)}${s4.syncAt ? ` · đồng bộ 3B ${A.fmtTs(s4.syncAt)}` : ''} · ${A.pill(D4.freshness)}` : ''}</span></div>
     ${gate ? `<div class="alert block"><b>Chưa chạy được:</b> ${esc(gate)}</div>` : ''}
     ${s4 && s4.blocked ? `<div class="alert block"><b>STEP 4 bị BLOCK.</b> Thiếu giá: ${s4.missingPrice} · Phân bổ trực tiếp lỗi: ${s4.directBad} · FX/GL đủ: ${s4.inputOK ? 'Có' : 'Không'}</div>` : ''}
@@ -568,15 +570,15 @@ export function doStep4() {
   const g = gateMsg(S) || threeBBlock(S, derive(S).d3b);
   if (g) { A.toast('STEP 4 bị chặn: ' + g, 'block'); return; }
   try {
-    const s4 = F.runStep4({ period: S.period, step2: d.step2, step3: d.step3, pm: d.pm, gl: d.gl, directAdj: d.directAdj });
+    const s4 = F.runStep4({ period: S.period, step2: d.step2, step3: d.step3, pm: d.pm, gl: d.gl, directAdj: d.directAdj, dupKeys: confirmedDupKeys(d.datasets, d.importAck) });
     d.directAdj = s4.directOut; delete s4.directOut;
     const D = derive(S).d3b;
     s4.snap = currentSnap(S, D);
     d.step4 = s4;
     if (!s4.blocked) runLotCheck();
-    A.audit('STEP 4 - COST ALLOCATION', s4.blocked ? `BLOCKED · thiếu giá ${s4.missingPrice}; direct lỗi ${s4.directBad}` : `${s4.recon.engineStatus} · Lots=${s4.lots}; RM=${A.fmtNum(s4.totalRM)}; 622=${A.fmtNum(s4.alloc622)}; 627=${A.fmtNum(s4.alloc627)}; Total=${A.fmtNum(s4.sumCost)}`);
+    A.audit('STEP 4 - COST ALLOCATION', s4.blocked ? `BLOCKED · thiếu giá ${s4.missingPrice}; direct lỗi ${s4.directBad}` : `${s4.recon.engineStatus} · Lots=${s4.lots}; RM=${A.fmtNum(s4.totalRM)}; 622=${A.fmtNum(s4.alloc622)}; 627=${A.fmtNum(s4.alloc627)}; Total=${A.fmtNum(s4.sumCost)}${s4.mergedLots && s4.mergedLots.length ? `; gộp dòng trùng PC + mã SP: ${s4.mergedLots.map((m) => `${m.key} ×${m.rows}`).join(', ')}` : ''}`);
     A.markDirty('step4', 'directAdj', 'lotCheck', 'audit');
-    A.toast(s4.blocked ? 'STEP 4 BLOCKED – bổ sung giá / FX / GL / phân bổ trực tiếp.' : `STEP 4 xong: ${s4.lots} lô, giá thành ${A.fmtNum(s4.sumCost)} VND.`, s4.blocked ? 'block' : 'pass');
+    A.toast(s4.blocked ? 'STEP 4 BLOCKED – bổ sung giá / FX / GL / phân bổ trực tiếp.' : `STEP 4 xong: ${s4.lots} lô, giá thành ${A.fmtNum(s4.sumCost)} VND.${s4.mergedLots && s4.mergedLots.length ? ` Đã gộp ${s4.mergedLots.length} lô có dòng trùng phiếu PC + mã sản phẩm (đã xác nhận ở STEP 1, thẻ F): ${s4.mergedLots.map((m) => `${m.key} (${m.rows} dòng)`).join(', ')}.` : ''}`, s4.blocked ? 'block' : 'pass');
   } catch (e) { A.toast('STEP 4 dừng: ' + e.message, 'block'); }
 }
 
@@ -670,7 +672,7 @@ export function migratePhase2(g, S, period) {
 }
 function doStep4Silent(S) {
   const d = S.d;
-  const s4 = F.runStep4({ period: S.period, step2: d.step2, step3: d.step3, pm: d.pm, gl: d.gl, directAdj: d.directAdj });
+  const s4 = F.runStep4({ period: S.period, step2: d.step2, step3: d.step3, pm: d.pm, gl: d.gl, directAdj: d.directAdj, dupKeys: confirmedDupKeys(d.datasets, d.importAck) });
   d.directAdj = s4.directOut; delete s4.directOut;
   s4.snap = currentSnap(S, derive(S).d3b);
   d.step4 = s4;

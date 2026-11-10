@@ -7,7 +7,7 @@
 //   ZERO COST  – quantity ≠ 0 but Total Cost = 0 / blank  (3B cannot value the material; e.g. customer-supplied items)
 //   NEGATIVE   – negative quantity or Total Cost
 //   TEXT       – quantity / Total Cost is text, not a number
-import { ttxt, headerCol, headerColAny, fpRows, num, parseUserNumber } from './util.js';
+import { ttxt, utxt, headerCol, headerColAny, fpRows, num, parseUserNumber, lastDataEnd, cellDateSerial, serialToISO } from './util.js';
 import { pcBasisScan, PCB_TOL } from './pcbasis.js';
 import { materialIssueCosts } from './matcost.js';
 import { pcUnitCosts } from './pccost.js';
@@ -83,7 +83,53 @@ export function pcpPcmRecon(datasets) {
  *  v1.14.48: the MI-M unit-cost lines (đơn giá xuất NVL bất thường trong kỳ) are part of C, confirmed with the same button.
  *  Their threshold is the DEFAULT one (30 % / 1.000.000 VND), not the screen option, so the list is the same on every device.
  *  Each part is confirmed separately. */
-export const DQ_PARTS = { A: 'Chênh lệch PC-P và PC-M', B: 'Vật tư SL ≠ 0 nhưng Total Cost = 0', C: 'Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường', D: 'Đơn giá thành phẩm theo lô PC bất thường (PC-P)' };
+export const DQ_PARTS = { A: 'Chênh lệch PC-P và PC-M', B: 'Vật tư SL ≠ 0 nhưng Total Cost = 0', C: 'Vật tư số âm, sai kiểu dữ liệu hoặc đơn giá xuất NVL bất thường', D: 'Đơn giá thành phẩm theo lô PC bất thường (PC-P)', F: 'Trùng phiếu PC + mã sản phẩm (PC-P)' };
+
+/**
+ * v1.14.99 — F: two or more PC-P lines with the same ERP + PC No. + Product Code. STEP 4 costs one lot per that key, so
+ * such lines used to stop STEP 4 ("Trùng ERP + PC No. + Product Code"). A PC can legitimately receive the same product
+ * twice in a month, so the lines are listed here and, once CONFIRMED, STEP 4 merges them into one lot (quantities,
+ * Total Cost and allocated Stock Out added up). Same lines as STEP 4 reads: PC No. starting with "PC-", Product Code set.
+ * → [{ erp, pc, prod, name, key, qty, cost, rows: [{ row (Excel row), date, mo, sub, loc, qty, cost }] }]
+ */
+export function pcDuplicates(datasets) {
+  const out = [];
+  for (const erp of ['T', 'S', 'O']) {
+    const ds = datasets && datasets[`PC-P-${erp}`];
+    if (!ds || !ds.header || !ds.rows) continue;
+    const h = ds.header;
+    const cPC = headerCol(h, 'PC No.'), cProd = headerCol(h, 'Product Code');
+    if (cPC < 0 || cProd < 0) continue;
+    const cName = headerCol(h, 'Product Name'), cQty = headerCol(h, 'Current Complete Qty'), cCost = headerCol(h, 'Total Cost');
+    const cDate = headerCol(h, 'Date'), cMO = headerCol(h, 'MO No.'), cSub = headerCol(h, 'Sub-MO'), cLoc = headerCol(h, 'Location');
+    const groups = new Map();
+    const end = lastDataEnd(ds.rows, cPC);
+    for (let i = 0; i < end; i++) {
+      const r = ds.rows[i];
+      const pc = ttxt(r[cPC]), prod = ttxt(r[cProd]);
+      if (pc.slice(0, 3).toUpperCase() !== 'PC-' || !prod) continue;
+      const key = `${erp}|${utxt(pc)}|${utxt(prod)}`;
+      const d = cDate >= 0 ? (typeof r[cDate] === 'number' ? r[cDate] : cellDateSerial(r[cDate])) : null;
+      const line = { row: (ds.headerRow || 1) + i + 1, date: d ? serialToISO(d) : '', mo: cMO >= 0 ? ttxt(r[cMO]) : '', sub: cSub >= 0 ? ttxt(r[cSub]) : '', loc: cLoc >= 0 ? ttxt(r[cLoc]) : '', qty: cQty >= 0 ? num(r[cQty]) : 0, cost: cCost >= 0 ? num(r[cCost]) : 0 };
+      if (!groups.has(key)) groups.set(key, { erp, pc, prod, name: cName >= 0 ? ttxt(r[cName]) : '', key, rows: [] });
+      groups.get(key).rows.push(line);
+    }
+    for (const g of groups.values()) if (g.rows.length > 1) out.push({ ...g, qty: g.rows.reduce((a, l) => a + l.qty, 0), cost: g.rows.reduce((a, l) => a + l.cost, 0) });
+  }
+  return out;
+}
+/** "PC-P-T PC-2610-0063 / SP101-10-033-003: 2 dòng trùng – dòng 45 (SL 100, 12.345.678) · dòng 46 (SL 50, 6.172.839)" */
+export function pcDupText(g, fmt = (v) => String(v)) {
+  return `PC-P-${g.erp} ${g.pc} / ${g.prod}: ${g.rows.length} dòng trùng – ${g.rows.map((l) => `dòng ${l.row}${l.sub ? ` (${l.sub})` : ''}: SL ${fmt(l.qty)}, Total Cost ${fmt(l.cost)}`).join(' · ')}`;
+}
+const dupFp = (g) => [g.key, g.rows.map((l) => [l.row, l.qty, l.cost, l.sub, l.date].join('/')).join(';')].join('|');
+/** Keys (ERP|PC|PRODUCT) of the duplicate PC-P lines confirmed at STEP 1 (part F, same list) – STEP 4 merges only these. */
+export function confirmedDupKeys(datasets, ack) {
+  const dups = pcDuplicates(datasets || {});
+  if (!dups.length) return new Set();
+  const c = ack && ack.parts && ack.parts.F;
+  return c && c.fp === fpRows(dups, dupFp) ? new Set(dups.map((g) => g.key)) : new Set();
+}
 const lineFp = (l) => [l.report, l.type, l.row, l.mat, l.qty, l.amt].join('|');
 const mcFp = (l) => [l.erp, l.mi, l.mo, l.code, l.lot, l.qty, l.cost].join('|');
 const pcFp = (l) => [l.erp, l.pc, l.prod, l.qty, l.cost, l.kind].join('|');
@@ -108,14 +154,16 @@ export function erpAnomalies(datasets, period = '') {
   const mcLines = mc.lines, mcAll = mc.allLines;
   // D: finished-goods unit cost per PC lot (PC-P) outside the reference – v1.14.63, confirmed like C
   const pc = period ? pcUnitCosts(datasets || {}, period) : { lots: [], flagged: [] };
+  const pcDup = pcDuplicates(datasets || {});
   const parts = {
     A: { count: recon.issues.length, fp: recon.fp },
     B: { count: zero.length, fp: zero.length ? fpRows(zero, lineFp) : '' },
     C: { count: neg.length + mcLines.length, fp: neg.length + mcLines.length ? [neg.length ? fpRows(neg, lineFp) : '', mcLines.length ? fpRows(mcLines, mcFp) : ''].join('@') : '' },
     D: { count: pc.flagged.length, fp: pc.flagged.length ? fpRows(pc.flagged, pcFp) : '' },
+    F: { count: pcDup.length, fp: pcDup.length ? fpRows(pcDup, dupFp) : '' },
   };
   return { lines, summary, materials: new Set(lines.map((l) => `${l.report.slice(-1)}|${l.mat}`)).size, recon, issues: lines.length + recon.issues.length,
-    unreadable, mcLines, mcAll, pcLots: pc.lots, pcFlagged: pc.flagged, fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
+    unreadable, mcLines, mcAll, pcLots: pc.lots, pcFlagged: pc.flagged, pcDup, fp: lines.length || recon.issues.length ? `${fpLines}#${recon.fp}` : '', parts };
 }
 
 /**
@@ -145,7 +193,7 @@ export function partStatus(an, ack, key) {
 /** PASS (no abnormal line and PC-P = PC-M) · CONFIRMED (the same list was confirmed) · BLOCK - CONFIRM (not yet / list changed since)
  *  · BLOCK - FIX DATA (v1.14.91: a number cell the engine cannot read reliably – no confirmation lifts it, the file must be fixed). */
 export function anomalyStatus(an, ack) {
-  if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length) && !(an.mcLines && an.mcLines.length) && !(an.pcFlagged && an.pcFlagged.length))) return 'PASS';
+  if (!an || (!an.lines.length && !(an.recon && an.recon.issues.length) && !(an.mcLines && an.mcLines.length) && !(an.pcFlagged && an.pcFlagged.length) && !(an.pcDup && an.pcDup.length))) return 'PASS';
   if (an.unreadable && an.unreadable.length) return 'BLOCK - FIX DATA';
   return Object.keys(DQ_PARTS).every((k) => ['NONE', 'CONFIRMED'].includes(partStatus(an, ack, k))) ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM';
 }
@@ -157,6 +205,7 @@ export const DQ_PART_UNIT = {
   C: 'dòng vật tư số âm, sai kiểu hoặc đơn giá xuất NVL bất thường',
   D: 'lô PC bất thường (PC-P)',
   E: 'dòng vật tư có ô số không đọc được – sửa file ERP rồi import lại',
+  F: 'nhóm dòng trùng phiếu PC + mã sản phẩm (PC-P)',
 };
 /** Parts that still block STEP 2: not confirmed, or changed since the last confirmation. */
 export function blockingParts(an, ack) {

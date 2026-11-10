@@ -12,7 +12,7 @@ const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
 const phase3 = fs.readFileSync(new URL('../src/views/phase3.js', import.meta.url), 'utf8');
 
 const v = pkg.version;
-ok('package version = 1.14.98', v === '1.14.98');
+ok('package version = 1.14.99', v === '1.14.99');
 ok('APP_VERSION matches package version', cfg.includes(`web ${v}`));
 ok('PWA cache version matches package version', sw.includes(`const VERSION = 'v${v}'`));
 ok('README release header matches package version', readme.includes(`v${v} `));
@@ -81,5 +81,8 @@ ok('own in-flight save is not taken for a remote change (false conflict)', app.i
 // v1.14.93 Xưởng giá thành
 ok('Xưởng giá thành has its navigation item, route, modules precached and a browser check', app.includes("{ id: 'workshop'") && app.includes('VIEWS.workshop = (el) =>') && ["'./src/views/workshop.js'", "'./src/engine/workshop.js'"].every((f) => sw.includes(f)) && fs.readFileSync(new URL('./e2e-synthetic.mjs', import.meta.url), 'utf8').includes('.ws-svg'));
 ok('Xưởng giá thành staff are the cats', fs.readFileSync(new URL('../src/views/workshop.js', import.meta.url), 'utf8').includes('function catBody(') && html.includes('body[data-view="workshop"] #rail'));
+// v1.14.99 duplicate PC + product lines: confirm at STEP 1 (part F), STEP 4 merges
+const dqSrc2 = fs.readFileSync(new URL('../src/engine/dataquality.js', import.meta.url), 'utf8');
+ok('PC-P lines with the same PC + product are part F (confirm) and STEP 4 merges only confirmed keys', dqSrc2.includes('export function pcDuplicates(') && dqSrc2.includes("F: 'Trùng phiếu PC + mã sản phẩm (PC-P)'") && fs.readFileSync(new URL('../src/engine/step4.js', import.meta.url), 'utf8').includes('dupKeys && dupKeys.has(key)') && app.includes('id="dq-pcdup"'));
 console.log(`\n${total - fail}/${total} v${v} release contracts passed${fail ? `, ${fail} FAILED` : ''}`);
 process.exit(fail ? 1 : 0);

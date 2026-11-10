@@ -725,7 +725,8 @@ function dqSection(dq) {
   if (!dq) return '';
   const rc = dq.recon || { bySys: [], issues: [] };
   const nL = dq.lines.length, nR = rc.issues.length;
-  if (!nL && !nR && !(dq.mcAll || []).length && !(dq.pcLots || []).length) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
+  const pcDup = dq.pcDup || [];
+  if (!nL && !nR && !(dq.mcAll || []).length && !(dq.pcLots || []).length && !pcDup.length) return rc.bySys.length || S.d.datasets['PC-M-T'] || S.d.datasets['PC-M-O'] ? `<div class="alert pass">Kiểm tra dữ liệu ERP: PC-P = PC-M ở mọi hệ (${rc.bySys.map((x) => `${x.erp} ${fmtNum(x.pcsP)} PC`).join(' · ')}); không có dòng vật tư bất thường ở PC-M / MI-M / MR-M.</div>` : '';
   const zeroLines = dq.lines.filter((l) => l.type === 'ZERO COST'), negLines = dq.lines.filter((l) => l.type !== 'ZERO COST' && l.type !== 'UNREADABLE');
   const unr = dq.unreadable || [];
   const mcLines = dq.mcLines || [], mcAll = dq.mcAll || [];
@@ -734,7 +735,7 @@ function dqSection(dq) {
   const ack = S.d.importAck; const ok = DQ.anomalyStatus(dq, ack) === 'REVIEW - CONFIRMED';
   const parts = DQ.ackParts(ack, dq);
   const st = (k) => DQ.partStatus(dq, ack, k);
-  const head = [unr.length ? `${fmtNum(unr.length)} dòng ô số không đọc được` : '', nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', mcLines.length ? `${fmtNum(mcLines.length)} dòng xuất NVL đơn giá bất thường` : '', pcFlagged.length ? `${fmtNum(pcFlagged.length)} lô PC bất thường (PC-P)` : ''].filter(Boolean).join(' · ') || 'không có dòng cần xác nhận';
+  const head = [unr.length ? `${fmtNum(unr.length)} dòng ô số không đọc được` : '', nR ? `${fmtNum(nR)} PC lệch PC-P / PC-M` : '', zeroLines.length ? `${fmtNum(zeroLines.length)} dòng SL ≠ 0 nhưng Total Cost = 0` : '', negLines.length ? `${fmtNum(negLines.length)} dòng số âm / sai kiểu` : '', mcLines.length ? `${fmtNum(mcLines.length)} dòng xuất NVL đơn giá bất thường` : '', pcFlagged.length ? `${fmtNum(pcFlagged.length)} lô PC bất thường (PC-P)` : '', pcDup.length ? `${fmtNum(pcDup.length)} nhóm dòng trùng phiếu PC + mã SP` : ''].filter(Boolean).join(' · ') || 'không có dòng cần xác nhận';
   // confirmation bar of one part: status, who confirmed / what changed, confirm and clear buttons
   const bar = (k) => {
     const s = st(k);
@@ -747,7 +748,7 @@ function dqSection(dq) {
     const btnClear = pc ? `<button class="btn danger ghost" type="button" data-act="dq-unconfirm" data-part="${k}">Xóa xác nhận</button>` : '';
     return `<div class="dq-bar"><div class="dq-info-line">${pill(s === 'CONFIRMED' ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')} ${info}</div><div class="row">${btnOk}${btnClear}</div></div>`;
   };
-  const summaryLine = ['A', 'B', 'C', 'D'].filter((k) => st(k) !== 'NONE').map((k) => `<span class="dq-chip ${DQ_PART_CLS[st(k)]}">${k} · ${esc(DQ_PART_LBL[st(k)])}</span>`).join(' ');
+  const summaryLine = ['A', 'B', 'C', 'D', 'F'].filter((k) => st(k) !== 'NONE').map((k) => `<span class="dq-chip ${DQ_PART_CLS[st(k)]}">${k} · ${esc(DQ_PART_LBL[st(k)])}</span>`).join(' ');
   const cardA = rc.bySys.length ? `<section class="dq-card dq-info">
     <h3>A · Chênh lệch PC-P và PC-M ${pill(nR ? 'CHECK' : 'PASS')}</h3>
     <p class="muted">Total Cost của lô trên PC-P phải bằng tổng Total Cost vật tư của lô trên PC-M (theo PC No. và Product Code). Lệch nghĩa là hai báo cáo không được xuất cùng thời điểm hoặc có chứng từ chưa đủ.</p>
@@ -800,12 +801,24 @@ function dqSection(dq) {
     <h4 class="dq-sub">Đơn giá lô PC (PC-P) · ${fmtNum(pcAll.length)} lô · ${fmtNum(pcFlagged.length)} bất thường</h4>
     <div id="t-dq-pc"></div>
   </section>` : '';
+  // v1.14.99 F: hai (hoặc nhiều) dòng PC-P cùng ERP + PC No. + Product Code – xác nhận thì STEP 4 gộp thành một lô
+  const dupRows = pcDup.reduce((a, g) => a + g.rows.length, 0);
+  const cardF = pcDup.length ? `<section class="dq-card dq-block" id="dq-pcdup">
+    <h3>F · Trùng phiếu PC + mã sản phẩm (PC-P) ${pill(st('F') === 'CONFIRMED' ? 'REVIEW - CONFIRMED' : 'BLOCK - CONFIRM')}</h3>
+    <p class="dq-dupwarn"><b>⚠ Cảnh báo: ${fmtNum(pcDup.length)} nhóm – ${fmtNum(dupRows)} dòng PC-P có cùng hệ, cùng số phiếu PC và cùng mã sản phẩm.</b> ${pcDup.length === 1 && pcDup[0].rows.length === 2 ? `Phiếu <b>${esc(pcDup[0].pc)}</b> – mã <b>${esc(pcDup[0].prod)}</b> xuất hiện ở <b>2 dòng</b> (dòng Excel ${pcDup[0].rows.map((l) => l.row).join(' và ')}).` : ''}</p>
+    <p class="muted">STEP 4 tính giá thành theo lô = hệ + PC No. + Product Code. Kiểm tra trên ERP: nếu là dòng lặp do xuất báo cáo, xóa bớt rồi import lại; nếu đúng thực tế (một phiếu PC nhập kho cùng mã nhiều lần trong tháng), bấm xác nhận – STEP 4 sẽ <b>gộp các dòng thành một lô</b> (cộng SL, Total Cost và Stock Out phân bổ). Chưa xác nhận thì STEP 2 và STEP 4 bị chặn.</p>
+    ${bar('F')}
+    <table class="cp"><thead><tr><th>Hệ</th><th>PC No.</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th class="r">Dòng Excel</th><th>Ngày</th><th>MO / Sub-MO</th><th>Kho</th><th class="r">SL hoàn thành</th><th class="r">Total Cost</th></tr></thead><tbody>
+      ${pcDup.map((g) => g.rows.map((l, i) => `<tr${i === 0 ? ' class="dq-dupfirst"' : ''}><td>${i === 0 ? `<span class="erp erp-${g.erp}">${g.erp}</span>` : ''}</td><td>${i === 0 ? `<b>${esc(g.pc)}</b>` : ''}</td><td>${i === 0 ? `<b>${esc(g.prod)}</b>` : ''}</td><td>${i === 0 ? esc(g.name) : ''}</td><td class="r">${fmtNum(l.row)}</td><td>${esc(l.date)}</td><td>${esc([l.mo, l.sub].filter(Boolean).join(' / '))}</td><td>${esc(l.loc)}</td><td class="r">${fmtNum(l.qty)}</td><td class="r">${fmtNum(l.cost)}</td></tr>`).join('')
+        + `<tr class="dq-duptot"><td colspan="8">Cộng ${esc(g.pc)} / ${esc(g.prod)} – ${g.rows.length} dòng sẽ gộp thành 1 lô khi xác nhận</td><td class="r">${fmtNum(g.qty)}</td><td class="r">${fmtNum(g.cost)}</td></tr>`).join('')}
+    </tbody></table>
+  </section>` : '';
   return `<div class="alert ${ok ? 'review' : 'block'}"><h2 style="margin:0 0 6px">Kiểm tra dữ liệu ERP: ${head} ${pill(ok ? 'REVIEW - CONFIRMED' : unr.length ? 'BLOCK - FIX DATA' : 'BLOCK - CONFIRM')}</h2>
     <p><b>STEP 2 chỉ chạy được khi mọi phần có bất thường đã được xác nhận.</b> Xác nhận từng phần trong thẻ bên dưới; có thể xóa xác nhận của từng phần để làm lại.</p>
     ${unr.length ? `<p><b>Có ${fmtNum(unr.length)} dòng ô số không đọc được: phải sửa file ERP rồi import lại, xác nhận không bỏ qua được.</b></p>` : ''}
     ${summaryLine ? `<div class="dq-chips">${summaryLine}</div>` : ''}
   </div>
-  <div class="dq-cards">${cardE}${cardA}${cardB}${cardC}${cardD}</div>`;
+  <div class="dq-cards">${cardE}${cardF}${cardA}${cardB}${cardC}${cardD}</div>`;
 }
 VIEWS.step1 = (el) => {
   const st = statusAll(); const c = st.s1c;
@@ -1890,6 +1903,8 @@ document.addEventListener('click', async (e) => {
           ? [...dq.summary.filter((g) => g.type !== 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`), ...mcTxt]
         : key === 'D'
           ? ['T', 'S', 'O'].filter((e) => dq.pcFlagged.some((l) => l.erp === e)).map((e) => { const L = dq.pcFlagged.filter((l) => l.erp === e); return `• PC-P hệ ${e}: ${L.length} lô bất thường, ${new Set(L.map((l) => l.prod)).size} mã SP`; })
+        : key === 'F'
+          ? [...(dq.pcDup || []).slice(0, 20).map((g) => `• ${DQ.pcDupText(g, (v) => fmtNum(v))}`), '', 'Xác nhận: STEP 4 gộp các dòng trùng thành một lô (cộng SL và giá trị).']
           : dq.summary.filter((g) => g.type === 'ZERO COST').map((g) => `• ${g.report}: ${g.label} – ${g.lines} dòng, ${g.materials} vật tư`);
       const prev = DQ.ackParts(S.d.importAck, dq)[key];
       const note = (prompt(`Xác nhận phần ${key} – ${DQ.DQ_PARTS[key]}?\n${listTxt.join('\n')}\n\nGhi chú / kết luận (bắt buộc, ≥ 5 ký tự), ví dụ: "Hàng khách cấp – ERP giá trị 0 là đúng":`, prev ? prev.note : '') || '').trim();

@@ -5,8 +5,8 @@
 import path from 'node:path';
 import { writeSynthErp, writeSynthInputs } from './synth-files.mjs';
 
-export async function prepareClosablePeriod(page, { root, dir, ok, period = '2026-08' }) {
-  const erpFiles = writeSynthErp(path.join(dir, 'erp'), { rework: false, negative: false });
+export async function prepareClosablePeriod(page, { root, dir, ok, period = '2026-08', erpFiles: given = null }) {
+  const erpFiles = given || writeSynthErp(path.join(dir, 'erp'), { rework: false, negative: false });
   const inp = await writeSynthInputs(path.join(dir, 'inputs'));
   const sleep = (ms) => page.waitForTimeout(ms);
   const go = async (hash) => { await page.goto(root + hash); await sleep(600); };
